@@ -4,7 +4,7 @@ import { useI18n } from '../i18n/index.js';
 
 // ─── Mini Canvas Bar Chart ──────────────────────────────────────────────────
 
-function BarChart({ data, colors, height = 160 }: { data: { label: string; value: number }[]; colors: string[]; height?: number }) {
+function BarChart({ data, colors, height = 220 }: { data: { label: string; value: number }[]; colors: string[]; height?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ function BarChart({ data, colors, height = 160 }: { data: { label: string; value
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
-      const y = 20 + (H - 50) * (1 - i / 4);
+      const y = 20 + (H - 90) * (1 - i / 4);
       ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(W - 10, y); ctx.stroke();
       ctx.fillStyle = '#71717a';
       ctx.font = '10px system-ui';
@@ -33,11 +33,11 @@ function BarChart({ data, colors, height = 160 }: { data: { label: string; value
 
     data.forEach((d, i) => {
       const x = startX + i * (barW + 10);
-      const barH = (d.value / max) * (H - 50);
-      const y = H - 30 - barH;
+      const barH = (d.value / max) * (H - 90);
+      const y = H - 70 - barH;
 
       // Bar with gradient
-      const grad = ctx.createLinearGradient(x, y, x, H - 30);
+      const grad = ctx.createLinearGradient(x, y, x, H - 70);
       grad.addColorStop(0, colors[i % colors.length]!);
       grad.addColorStop(1, colors[i % colors.length]! + '44');
       ctx.fillStyle = grad;
@@ -51,10 +51,15 @@ function BarChart({ data, colors, height = 160 }: { data: { label: string; value
       ctx.textAlign = 'center';
       ctx.fillText(String(d.value), x + barW / 2, y - 6);
 
-      // Label
+      // Label (rotated 45°)
       ctx.fillStyle = '#71717a';
-      ctx.font = '11px system-ui';
-      ctx.fillText(d.label, x + barW / 2, H - 10);
+      ctx.font = '10px system-ui';
+      ctx.save();
+      ctx.translate(x + barW / 2, H - 18);
+      ctx.rotate(-Math.PI / 4);
+      ctx.textAlign = 'right';
+      ctx.fillText(d.label, 0, 0);
+      ctx.restore();
     });
   }, [data, colors, height]);
 
@@ -188,7 +193,7 @@ export default function Stats() {
   ];
 
   const catData = Object.entries(categories).map(([cat, cnt]) => ({
-    label: cat.length > 10 ? cat.slice(0, 9) + '.' : cat,
+    label: cat,
     value: cnt as number,
   }));
 
