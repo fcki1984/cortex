@@ -80,7 +80,7 @@ export default function ExtractionLogs() {
       <div className="toolbar" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('extractionLogs.agent')}</label>
-          <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }}>
+          <select value={agentId} onChange={e => { setAgentId(e.target.value); setLogs([]); setTotalCount(0); }} style={{ fontSize: 13, padding: '4px 8px' }}>
             <option value="">{t('extractionLogs.allAgents') || '全部 Agent'}</option>
             {agents.map((a: any) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
           </select>

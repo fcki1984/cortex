@@ -247,7 +247,7 @@ export default function LifecycleMonitor() {
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 13, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Agent</label>
-          <select value={agentId} onChange={e => { setAgentId(e.target.value); setPreview(null); setRunResult(null); }} style={{ fontSize: 13, padding: '4px 8px' }}>
+          <select value={agentId} onChange={e => { setAgentId(e.target.value); setPreview(null); setRunResult(null); setLogs([]); setLayerStats({ working: 0, core: 0, archive: 0 }); setShowAffected(false); }} style={{ fontSize: 13, padding: '4px 8px' }}>
             <option value="">{t('lifecycle.allAgents') || '全部 Agent'}</option>
             {agents.map((a: any) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
           </select>
