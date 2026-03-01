@@ -220,11 +220,11 @@ export default function RelationGraph() {
     }
 
     const nodeArr = Array.from(nodes.values());
-    const REPULSION = 2000;
-    const ATTRACTION = 0.008;
+    const REPULSION = 5000;
+    const ATTRACTION = 0.005;
     const DAMPING = 0.55;
-    const CENTER_GRAVITY = 0.02;
-    const IDEAL_DIST = 140;
+    const CENTER_GRAVITY = 0.01;
+    const IDEAL_DIST = 200;
     const MAX_VELOCITY = 5;
     const ALPHA_DECAY = 0.995;
     const ALPHA_MIN = 0.001;
@@ -552,6 +552,101 @@ export default function RelationGraph() {
     return () => canvas.removeEventListener('wheel', handler);
   }, [filteredRelations]);
 
+  // ── Touch interaction (pinch zoom + drag) ──
+
+  const touchRef = useRef<{ startDist: number; startScale: number; startX: number; startY: number; startTx: number; startTy: number; fingers: number }>({ startDist: 0, startScale: 1, startX: 0, startY: 0, startTx: 0, startTy: 0, fingers: 0 });
+
+  const getTouchDist = (touches: React.TouchList) => {
+    if (touches.length < 2) return 0;
+    const dx = touches[1]!.clientX - touches[0]!.clientX;
+    const dy = touches[1]!.clientY - touches[0]!.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const getTouchCenter = (touches: React.TouchList) => {
+    if (touches.length < 2) {
+      const canvas = canvasRef.current!;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        cx: (touches[0]!.clientX - rect.left) * (canvas.width / rect.width),
+        cy: (touches[0]!.clientY - rect.top) * (canvas.height / rect.height),
+      };
+    }
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      cx: ((touches[0]!.clientX + touches[1]!.clientX) / 2 - rect.left) * (canvas.width / rect.width),
+      cy: ((touches[0]!.clientY + touches[1]!.clientY) / 2 - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const onTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const t = transformRef.current;
+    const { cx, cy } = getTouchCenter(e.touches);
+    touchRef.current = {
+      startDist: getTouchDist(e.touches),
+      startScale: t.scale,
+      startX: cx, startY: cy,
+      startTx: t.offsetX, startTy: t.offsetY,
+      fingers: e.touches.length,
+    };
+
+    // Single finger: check node drag
+    if (e.touches.length === 1) {
+      const { wx, wy } = canvasToWorld(cx, cy);
+      const nodeId = getNodeAt(wx, wy);
+      if (nodeId) {
+        const n = nodesRef.current.get(nodeId)!;
+        dragRef.current = { nodeId, offsetX: n.x - wx, offsetY: n.y - wy, isPanning: false, startX: 0, startY: 0, startTx: 0, startTy: 0 };
+      }
+    }
+  };
+
+  const onTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const tr = touchRef.current;
+    const { cx, cy } = getTouchCenter(e.touches);
+
+    if (e.touches.length >= 2) {
+      // Pinch zoom
+      const dist = getTouchDist(e.touches);
+      if (tr.startDist > 0) {
+        const ratio = dist / tr.startDist;
+        const newScale = Math.min(Math.max(tr.startScale * ratio, 0.1), 8);
+        const wx = (tr.startX - tr.startTx) / tr.startScale;
+        const wy = (tr.startY - tr.startTy) / tr.startScale;
+        transformRef.current = {
+          scale: newScale,
+          offsetX: cx - wx * newScale + (cx - tr.startX),
+          offsetY: cy - wy * newScale + (cy - tr.startY),
+        };
+      }
+    } else if (e.touches.length === 1) {
+      if (dragRef.current.nodeId) {
+        // Drag node
+        const { wx, wy } = canvasToWorld(cx, cy);
+        const n = nodesRef.current.get(dragRef.current.nodeId);
+        if (n) { n.x = wx + dragRef.current.offsetX; n.y = wy + dragRef.current.offsetY; n.vx = 0; n.vy = 0; }
+      } else {
+        // Pan
+        transformRef.current = {
+          ...transformRef.current,
+          offsetX: tr.startTx + (cx - tr.startX),
+          offsetY: tr.startTy + (cy - tr.startY),
+        };
+      }
+    }
+  };
+
+  const onTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (dragRef.current.nodeId) {
+      alphaRef.current = Math.max(alphaRef.current, 0.3);
+    }
+    dragRef.current = { nodeId: null, offsetX: 0, offsetY: 0, isPanning: false, startX: 0, startY: 0, startTx: 0, startTy: 0 };
+  };
+
   // Node stats
   const nodeSet = new Set<string>();
   filteredRelations.forEach(r => { nodeSet.add(r.subject); nodeSet.add(r.object); });
@@ -563,57 +658,61 @@ export default function RelationGraph() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 className="page-title" style={{ marginBottom: 0 }}>{t('relations.title')}</h1>
-        <button className="btn primary" onClick={() => setCreating(true)}>{t('relations.newRelation')}</button>
-      </div>
+      <h1 className="page-title">{t('relations.title')}</h1>
 
-      {/* Filters */}
-      {predicates.length > 0 && (
-        <div className="toolbar">
-          <select value={predicateFilter} onChange={e => setPredicateFilter(e.target.value)} style={{ width: 'auto' }}>
+      {/* Toolbar */}
+      <div className="toolbar">
+        {predicates.length > 0 && (
+          <select value={predicateFilter} onChange={e => setPredicateFilter(e.target.value)}>
             <option value="">{t('relations.allPredicates', { count: predicates.length })}</option>
             {predicates.map(p => (
               <option key={p} value={p}>{p} ({relations.filter(r => r.predicate === p).length})</option>
             ))}
           </select>
-          {selectedNode && (
-            <button className="btn" onClick={() => { setSelectedNode(null); setNodeMemories([]); }} style={{ fontSize: 12 }}>
-              {t('relations.deselect', { node: selectedNode })}
-            </button>
-          )}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <button className="btn" onClick={fitToView} style={{ fontSize: 12, padding: '4px 10px' }}>
-              {t('relations.fit')}
-            </button>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
-              {t('relations.autoRefresh')}
-            </label>
-            <span style={{ color: 'var(--text-muted)', fontSize: 13, whiteSpace: 'nowrap' }}>
-              {t('relations.nodeEdgeCount', { nodes: nodeSet.size, edges: filteredRelations.length })}
-            </span>
-          </div>
-        </div>
-      )}
+        )}
+        {selectedNode && (
+          <button className="btn" onClick={() => { setSelectedNode(null); setNodeMemories([]); }} style={{ fontSize: 12 }}>
+            ✕ {selectedNode}
+          </button>
+        )}
+        <button className="btn" onClick={() => setAutoRefresh(!autoRefresh)} style={{ fontSize: 11, padding: '2px 8px' }}>
+          {autoRefresh ? '⏸' : '▶'} {t('relations.autoRefresh')}
+        </button>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {t('relations.nodeEdgeCount', { nodes: nodeSet.size, edges: filteredRelations.length })}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button className="btn primary" onClick={() => setCreating(true)}>{t('relations.newRelation')}</button>
+      </div>
 
       {/* Force-directed graph */}
       {filteredRelations.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card" style={{ marginBottom: 16, position: 'relative' }}>
           <canvas
             ref={canvasRef}
             width={900}
             height={500}
-            style={{ width: '100%', height: 'auto', background: '#0f0f1a', borderRadius: 8, cursor: dragRef.current.nodeId ? 'grabbing' : dragRef.current.isPanning ? 'grabbing' : 'grab' }}
+            style={{ width: '100%', height: 'auto', background: '#0f0f1a', borderRadius: 8, cursor: dragRef.current.nodeId ? 'grabbing' : dragRef.current.isPanning ? 'grabbing' : 'grab', touchAction: 'none' }}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}
             onMouseUp={onMouseUp}
             onMouseLeave={onMouseLeave}
+            onDoubleClick={() => { fitToView(); alphaRef.current = Math.max(alphaRef.current, 0.3); }}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
           />
+          {/* Zoom controls - bottom right */}
+          <div style={{ position: 'absolute', bottom: 40, right: 16, display: 'flex', gap: 4, background: 'rgba(15,15,26,0.8)', borderRadius: 6, padding: 4 }}>
+            <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2; const cy = canvasRef.current!.height / 2; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.min(t.scale * 1.3, 8); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>+</button>
+            <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2; const cy = canvasRef.current!.height / 2; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.max(t.scale / 1.3, 0.1); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>−</button>
+            <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => { fitToView(); alphaRef.current = Math.max(alphaRef.current, 0.3); }}>Fit</button>
+          </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-            {t('relations.graphHint')}
-            {' '}{t('relations.lineThickness')}
-            {' '}{t('relations.zoomHint')}
+            {t('relations.graphHint')} {t('relations.zoomHint')}
           </p>
           {tooMany && (
             <p style={{ fontSize: 12, color: '#f59e0b', marginTop: 4 }}>

@@ -197,7 +197,7 @@ export class LifecycleEngine {
         }
       })();
       await this.vectorBackend.delete(ids);
-      insertLifecycleLog('expire_working', ids);
+      insertLifecycleLog('expire_working', ids, { agent_id: agentId || 'all' });
     }
 
     return expired.length;
@@ -244,7 +244,7 @@ export class LifecycleEngine {
             if (emb.length > 0) await this.vectorBackend.upsert(newId, emb);
             await this.vectorBackend.delete([entry.id]);
           } catch { /* best effort */ }
-          insertLifecycleLog('promote', [entry.id, newId], { score: 1.0, from: 'working', to: 'core', reason: 'high_importance_auto' });
+          insertLifecycleLog('promote', [entry.id, newId], { score: 1.0, from: 'working', to: 'core', reason: 'high_importance_auto', agent_id: agentId || 'all' });
         }
         promoted++;
         continue;
@@ -276,7 +276,7 @@ export class LifecycleEngine {
             await this.vectorBackend.delete([entry.id]);
           } catch { /* best effort */ }
 
-          insertLifecycleLog('promote', [entry.id, newId], { score, from: 'working', to: 'core' });
+          insertLifecycleLog('promote', [entry.id, newId], { score, from: 'working', to: 'core', agent_id: agentId || 'all' });
         }
         promoted++;
       }
@@ -335,6 +335,7 @@ export class LifecycleEngine {
               kept: entry.id,
               removed: existing.id,
               distance: hit.distance,
+              agent_id: agentId || 'all',
             });
           }
           superseded.add(existing.id);
@@ -384,7 +385,7 @@ export class LifecycleEngine {
             layer: 'archive',
             expires_at: new Date(Date.now() + archiveTtlMs).toISOString(),
           });
-          insertLifecycleLog('archive', [entry.id], { decay_score: entry.decay_score });
+          insertLifecycleLog('archive', [entry.id], { decay_score: entry.decay_score, agent_id: agentId || 'all' });
         }
         archived++;
       }
@@ -489,6 +490,7 @@ export class LifecycleEngine {
       insertLifecycleLog('compress', allOriginalIds, {
         compressed_count: expired.length,
         groups: groups.size,
+        agent_id: 'all',
       });
     }
 

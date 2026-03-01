@@ -23,22 +23,14 @@ export function registerLifecycleRoutes(app: FastifyInstance, cortex: CortexApp)
     const limit = q.limit ? parseInt(q.limit) : 50;
     const logs = getLifecycleLogs(limit);
 
-    // Filter by agent_id if provided (check memory_ids and details)
+    // Filter by agent_id if provided
     if (q.agent_id) {
-      // For lifecycle_run logs, filter by checking if the run was for a specific agent
-      // For promote/archive/expire logs, check if memory_ids relate to agent
       return logs.filter((l: any) => {
         try {
           const details = l.details ? JSON.parse(l.details) : {};
-          if (details.agent_id === q.agent_id) return true;
-          // lifecycle_run with agent_id in details
-          if (l.action === 'lifecycle_run' && details.agent_id === q.agent_id) return true;
-          // For promote/expire, we need to check — but memory_ids don't carry agent info
-          // So for non-lifecycle_run entries, include all (they're per-memory ops)
-          if (l.action !== 'lifecycle_run') return true;
-          // lifecycle_run without agent filter = global run, include if no agent filter on run
-          if (!details.agent_id && !q.agent_id) return true;
-          return false;
+          const logAgent = details.agent_id;
+          // Match: exact agent or global runs ('all'); legacy logs without agent_id only show in unfiltered view
+          return logAgent === q.agent_id || logAgent === 'all';
         } catch { return true; }
       });
     }

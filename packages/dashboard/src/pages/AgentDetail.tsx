@@ -827,7 +827,8 @@ def ingest(user_msg: str, assistant_msg: str):
             ) : (
               <table>
                 <tbody>
-                  <tr><td style={{ width: '30%' }}>{t('agentDetail.name')}</td><td>{agent.name}</td></tr>
+                  <tr><td style={{ width: '30%' }}>Agent ID</td><td><code style={{ fontSize: 13, padding: '2px 8px', background: 'var(--bg)', borderRadius: 4 }}>{agent.id}</code></td></tr>
+                  <tr><td>{t('agentDetail.name')}</td><td>{agent.name}</td></tr>
                   <tr><td>{t('agentDetail.description')}</td><td>{agent.description || <span style={{ color: 'var(--text-muted)' }}>{t('agentDetail.noDescription')}</span>}</td></tr>
                   <tr><td>{t('agentDetail.created')}</td><td>{new Date(agent.created_at).toLocaleString()}</td></tr>
                   <tr><td>{t('agentDetail.updated')}</td><td>{new Date(agent.updated_at).toLocaleString()}</td></tr>
