@@ -96,6 +96,64 @@ export default function LifecycleMonitor() {
     actionCounts[action] = (actionCounts[action] || 0) + 1;
   });
 
+  // ─── Display helpers ─────────────────────────────────────────────────────
+  const actionLabel = (action: string) => {
+    const map: Record<string, string> = {
+      'lifecycle_run': t('lifecycle.runLabel') || '🔄 运行',
+      'promote': t('lifecycle.promoteLabel') || '⬆️ 升级',
+      'expire_working': t('lifecycle.expireLabel') || '🗑️ 过期清理',
+      'archive': t('lifecycle.archiveLabel') || '📦 归档',
+      'merge': t('lifecycle.mergeLabel') || '🔗 合并',
+      'compress': t('lifecycle.compressLabel') || '📐 压缩',
+    };
+    return map[action] || action;
+  };
+
+  const actionColor = (action: string) => {
+    const map: Record<string, string> = {
+      'lifecycle_run': 'rgba(99,102,241,0.7)',
+      'promote': 'rgba(74,222,128,0.7)',
+      'expire_working': 'rgba(239,68,68,0.6)',
+      'archive': 'rgba(251,191,36,0.7)',
+      'merge': 'rgba(56,189,248,0.7)',
+      'compress': 'rgba(168,85,247,0.7)',
+    };
+    return map[action] || 'rgba(99,102,241,0.3)';
+  };
+
+  const formatMemoryIds = (raw: string) => {
+    if (!raw || raw === '[]') return '\u2014';
+    try {
+      const ids = JSON.parse(raw);
+      if (Array.isArray(ids) && ids.length === 0) return '\u2014';
+      if (Array.isArray(ids)) return `${ids.length} 条`;
+      return raw;
+    } catch { return raw; }
+  };
+
+  const formatDetails = (action: string, raw: string) => {
+    if (!raw) return '\u2014';
+    try {
+      const d = JSON.parse(raw);
+      if (action === 'lifecycle_run') {
+        const parts: string[] = [];
+        if (d.promoted) parts.push(`升级 ${d.promoted}`);
+        if (d.merged) parts.push(`合并 ${d.merged}`);
+        if (d.archived) parts.push(`归档 ${d.archived}`);
+        if (d.expiredWorking) parts.push(`清理 ${d.expiredWorking}`);
+        if (d.compressedToCore) parts.push(`压缩 ${d.compressedToCore}`);
+        if (parts.length === 0) {
+          if (d.errors?.length > 0) return `❌ ${d.errors[0]}`;
+          return '无变更';
+        }
+        return parts.join(' · ');
+      }
+      if (d.score) return `分数 ${Number(d.score).toFixed(2)}`;
+      if (d.reason) return d.reason;
+      return raw.length > 60 ? raw.slice(0, 60) + '…' : raw;
+    } catch { return raw.length > 60 ? raw.slice(0, 60) + '…' : raw; }
+  };
+
   const totalOps = preview
     ? (preview.promoted + preview.merged + preview.archived + preview.compressedToCore + preview.expiredWorking)
     : 0;
@@ -283,9 +341,9 @@ export default function LifecycleMonitor() {
             <tbody>
               {logs.map((log: any) => (
                 <tr key={log.id}>
-                  <td><span className="badge" style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', whiteSpace: 'nowrap' }}>{log.action}</span></td>
-                  <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.memory_ids}</td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '\u2014'}</td>
+                  <td><span className="badge" style={{ background: actionColor(log.action), color: '#fff', whiteSpace: 'nowrap', fontSize: 11 }}>{actionLabel(log.action)}</span></td>
+                  <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{formatMemoryIds(log.memory_ids)}</td>
+                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{formatDetails(log.action, log.details)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{toLocal(log.executed_at)}</td>
                 </tr>
               ))}
