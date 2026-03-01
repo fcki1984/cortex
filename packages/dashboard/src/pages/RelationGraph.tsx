@@ -138,8 +138,8 @@ export default function RelationGraph() {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     return {
-      cx: (e.clientX - rect.left) * (canvas.width / rect.width),
-      cy: (e.clientY - rect.top) * (canvas.height / rect.height),
+      cx: (e.clientX - rect.left) * (canvas.width / rect.width) / dprRef.current,
+      cy: (e.clientY - rect.top) * (canvas.height / rect.height) / dprRef.current,
     };
   };
 
@@ -180,14 +180,17 @@ export default function RelationGraph() {
     const graphW = maxX - minX + padding * 2;
     const graphH = maxY - minY + padding * 2;
 
-    const scale = Math.min(canvas.width / graphW, canvas.height / graphH, 2.5);
+    const dpr = dprRef.current;
+    const cw = canvas.width / dpr;
+    const ch = canvas.height / dpr;
+    const scale = Math.min(cw / graphW, ch / graphH, 2.5);
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 
     transformRef.current = {
       scale,
-      offsetX: canvas.width / 2 - centerX * scale,
-      offsetY: canvas.height / 2 - centerY * scale,
+      offsetX: cw / 2 - centerX * scale,
+      offsetY: ch / 2 - centerY * scale,
     };
   }, []);
 
@@ -200,8 +203,9 @@ export default function RelationGraph() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const W = canvas.width;
-    const H = canvas.height;
+    const dpr = dprRef.current;
+    const W = canvas.width / dpr;
+    const H = canvas.height / dpr;
     const nodes = nodesRef.current;
     const sel = selectedRef.current;
     const cam = transformRef.current;
@@ -375,6 +379,24 @@ export default function RelationGraph() {
   // Keep selectedRef in sync
   useEffect(() => { selectedRef.current = selectedNode; }, [selectedNode]);
 
+  // Set up HiDPI canvas
+  const dprRef = useRef(1);
+  const canvasInitRef = useRef(false);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || canvasInitRef.current) return;
+    canvasInitRef.current = true;
+    const dpr = window.devicePixelRatio || 1;
+    dprRef.current = dpr;
+    const w = 900, h = 500;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.scale(dpr, dpr);
+  }, []);
+
   useEffect(() => {
     if (filteredRelations.length > 0) {
       alphaRef.current = 1.0; // reheat on data change
@@ -507,8 +529,8 @@ export default function RelationGraph() {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const cx = (e.clientX - rect.left) * (canvas.width / rect.width) / dprRef.current;
+    const cy = (e.clientY - rect.top) * (canvas.height / rect.height) / dprRef.current;
 
     const t = transformRef.current;
     const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
@@ -532,8 +554,8 @@ export default function RelationGraph() {
     const handler = (e: WheelEvent) => {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
-      const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const cx = (e.clientX - rect.left) * (canvas.width / rect.width) / (window.devicePixelRatio || 1);
+      const cy = (e.clientY - rect.top) * (canvas.height / rect.height) / (window.devicePixelRatio || 1);
 
       const t = transformRef.current;
       const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
@@ -564,19 +586,18 @@ export default function RelationGraph() {
   };
 
   const getTouchCenter = (touches: React.TouchList) => {
-    if (touches.length < 2) {
-      const canvas = canvasRef.current!;
-      const rect = canvas.getBoundingClientRect();
-      return {
-        cx: (touches[0]!.clientX - rect.left) * (canvas.width / rect.width),
-        cy: (touches[0]!.clientY - rect.top) * (canvas.height / rect.height),
-      };
-    }
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
+    const dpr = dprRef.current;
+    if (touches.length < 2) {
+      return {
+        cx: (touches[0]!.clientX - rect.left) * (canvas.width / rect.width) / dpr,
+        cy: (touches[0]!.clientY - rect.top) * (canvas.height / rect.height) / dpr,
+      };
+    }
     return {
-      cx: ((touches[0]!.clientX + touches[1]!.clientX) / 2 - rect.left) * (canvas.width / rect.width),
-      cy: ((touches[0]!.clientY + touches[1]!.clientY) / 2 - rect.top) * (canvas.height / rect.height),
+      cx: ((touches[0]!.clientX + touches[1]!.clientX) / 2 - rect.left) * (canvas.width / rect.width) / dpr,
+      cy: ((touches[0]!.clientY + touches[1]!.clientY) / 2 - rect.top) * (canvas.height / rect.height) / dpr,
     };
   };
 
@@ -692,7 +713,7 @@ export default function RelationGraph() {
             ref={canvasRef}
             width={900}
             height={500}
-            style={{ width: '100%', height: 'auto', background: '#0f0f1a', borderRadius: 8, cursor: dragRef.current.nodeId ? 'grabbing' : dragRef.current.isPanning ? 'grabbing' : 'grab', touchAction: 'none' }}
+            style={{ width: '100%', height: 'auto', background: '#0f0f1a', borderRadius: 8, cursor: dragRef.current.nodeId ? 'grabbing' : dragRef.current.isPanning ? 'grabbing' : 'grab', touchAction: 'none', imageRendering: 'auto' }}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}
             onMouseUp={onMouseUp}
@@ -705,9 +726,9 @@ export default function RelationGraph() {
           {/* Zoom controls - bottom right */}
           <div style={{ position: 'absolute', bottom: 40, right: 16, display: 'flex', gap: 4, background: 'rgba(15,15,26,0.8)', borderRadius: 6, padding: 4 }}>
             <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2; const cy = canvasRef.current!.height / 2; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.min(t.scale * 1.3, 8); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>+</button>
+              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2 / dprRef.current; const cy = canvasRef.current!.height / 2 / dprRef.current; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.min(t.scale * 1.3, 8); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>+</button>
             <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2; const cy = canvasRef.current!.height / 2; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.max(t.scale / 1.3, 0.1); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>−</button>
+              onClick={() => { const t = transformRef.current; const cx = canvasRef.current!.width / 2 / dprRef.current; const cy = canvasRef.current!.height / 2 / dprRef.current; const wx = (cx - t.offsetX) / t.scale; const wy = (cy - t.offsetY) / t.scale; const ns = Math.max(t.scale / 1.3, 0.1); transformRef.current = { scale: ns, offsetX: cx - wx * ns, offsetY: cy - wy * ns }; }}>−</button>
             <button style={{ width: 28, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: '#ccc', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               onClick={() => { fitToView(); alphaRef.current = Math.max(alphaRef.current, 0.3); }}>Fit</button>
           </div>

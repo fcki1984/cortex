@@ -10,9 +10,14 @@ function BarChart({ data, colors, height = 220 }: { data: { label: string; value
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
     const ctx = canvas.getContext('2d')!;
-    const W = canvas.width;
-    const H = canvas.height;
+    ctx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
     const max = Math.max(...data.map(d => d.value), 1);
     const barW = Math.min(60, (W - 40) / data.length - 10);
     const startX = (W - data.length * (barW + 10) + 10) / 2;
@@ -63,7 +68,7 @@ function BarChart({ data, colors, height = 220 }: { data: { label: string; value
     });
   }, [data, colors, height]);
 
-  return <canvas ref={canvasRef} width={500} height={height} style={{ width: '100%', height: 'auto' }} />;
+  return <canvas ref={canvasRef} style={{ width: '100%', height: height }} />;
 }
 
 // ─── Horizontal Distribution Bar ────────────────────────────────────────────
@@ -113,9 +118,14 @@ function Histogram({ values, label, color }: { values: number[]; label: string; 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || values.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
     const ctx = canvas.getContext('2d')!;
-    const W = canvas.width;
-    const H = canvas.height;
+    ctx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
 
     // Build 10 buckets [0,0.1), [0.1,0.2), ... [0.9,1.0]
     const buckets = new Array(10).fill(0);
@@ -157,7 +167,7 @@ function Histogram({ values, label, color }: { values: number[]; label: string; 
     ctx.fillText(label, W / 2, H - 0);
   }, [values, label, color]);
 
-  return <canvas ref={canvasRef} width={300} height={140} style={{ width: '100%', height: 'auto' }} />;
+  return <canvas ref={canvasRef} style={{ width: '100%', height: 140 }} />;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
