@@ -49,7 +49,6 @@ export default function ExtractionLogs() {
   }, []);
 
   useEffect(() => {
-    if (!agentId) return;
     fetchLogs();
   }, [agentId, channel]);
 

@@ -46,7 +46,6 @@ export default function LifecycleMonitor() {
   const { t } = useI18n();
 
   useEffect(() => {
-    getLifecycleLogs(30).then(setLogs);
     getConfig().then(setConfig).catch(() => {});
     listAgents().then((res: any) => setAgents(res.agents || res || [])).catch(() => {});
     // Get layer stats
@@ -58,6 +57,11 @@ export default function LifecycleMonitor() {
       setLayerStats({ working: w.total, core: c.total, archive: a.total });
     }).catch(() => {});
   }, []);
+
+  // Reload logs when agent changes
+  useEffect(() => {
+    getLifecycleLogs(30, agentId || undefined).then(setLogs);
+  }, [agentId]);
 
   const [previewing, setPreviewing] = useState(false);
 
@@ -79,7 +83,7 @@ export default function LifecycleMonitor() {
     try {
       const result = await runLifecycle(false, agentId || undefined);
       setRunResult(result);
-      getLifecycleLogs(30).then(setLogs);
+      getLifecycleLogs(30, agentId || undefined).then(setLogs);
       // Refresh layer stats
       Promise.all([
         listMemories({ layer: 'working', limit: '1', offset: '0' }),
