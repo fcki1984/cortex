@@ -76,7 +76,7 @@ export class LifecycleEngine {
     private config: CortexConfig,
   ) {}
 
-  async run(dryRun = false): Promise<LifecycleReport> {
+  async run(dryRun = false, trigger: 'manual' | 'scheduled' | 'preview' = 'manual'): Promise<LifecycleReport> {
     if (this.running) {
       log.warn('Lifecycle already running, skipping');
       return {
@@ -155,7 +155,7 @@ export class LifecycleEngine {
     report.durationMs = Date.now() - start;
 
     if (!dryRun) {
-      insertLifecycleLog('lifecycle_run', [], report as any);
+      insertLifecycleLog('lifecycle_run', [], { ...report, trigger } as any);
     }
 
     log.info(report, 'Lifecycle run completed');
@@ -164,7 +164,7 @@ export class LifecycleEngine {
 
   /** Preview what the next lifecycle run would do */
   async preview(): Promise<LifecycleReport> {
-    return this.run(true);
+    return this.run(true, 'preview');
   }
 
   private async cleanExpiredWorking(dryRun: boolean, affected?: AffectedMemory[]): Promise<number> {

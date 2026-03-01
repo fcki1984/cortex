@@ -139,15 +139,17 @@ export default function LifecycleMonitor() {
     try {
       const d = JSON.parse(raw);
       if (action === 'lifecycle_run') {
+        const triggerLabel = d.trigger === 'scheduled' ? '⏰' : d.trigger === 'manual' ? '👆' : '';
         const parts: string[] = [];
+        if (triggerLabel) parts.push(triggerLabel);
         if (d.promoted) parts.push(`升级 ${d.promoted}`);
         if (d.merged) parts.push(`合并 ${d.merged}`);
         if (d.archived) parts.push(`归档 ${d.archived}`);
         if (d.expiredWorking) parts.push(`清理 ${d.expiredWorking}`);
         if (d.compressedToCore) parts.push(`压缩 ${d.compressedToCore}`);
-        if (parts.length === 0) {
-          if (d.errors?.length > 0) return `❌ ${d.errors[0]}`;
-          return '无变更';
+        if (parts.length <= 1) {
+          if (d.errors?.length > 0) return `${triggerLabel} ❌ ${d.errors[0]}`;
+          return `${triggerLabel} 无变更`;
         }
         return parts.join(' · ');
       }

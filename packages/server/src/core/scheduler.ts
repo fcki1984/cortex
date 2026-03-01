@@ -33,7 +33,7 @@ export function startLifecycleScheduler(cortex: CortexApp): void {
     lifecycleCron = new Cron(schedule, { timezone: tz }, async () => {
       log.info({ schedule }, 'Lifecycle cron triggered');
       try {
-        const report = await cortex.lifecycle.run();
+        const report = await cortex.lifecycle.run(false, 'scheduled');
         log.info(
           {
             promoted: report.promoted,
