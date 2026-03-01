@@ -1,7 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { getLifecycleLogs, runLifecycle, previewLifecycle, getConfig, listMemories } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+
+/** Live elapsed timer shown during preview/run */
+function ElapsedTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  const start = useRef(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - start.current), 100);
+    return () => clearInterval(id);
+  }, []);
+  const secs = (elapsed / 1000).toFixed(1);
+  return (
+    <div style={{
+      padding: '8px 16px', marginTop: 8, borderRadius: 6,
+      background: 'var(--bg-secondary, rgba(99,102,241,0.1))',
+      display: 'inline-flex', alignItems: 'center', gap: 8,
+      fontSize: 13, color: 'var(--text-muted)', animation: 'pulse 1.5s ease-in-out infinite',
+    }}>
+      <span className="spinner" /> 运行中... {secs}s
+    </div>
+  );
+}
 
 interface PreviewDetail {
   promoted: number;
@@ -222,12 +243,13 @@ export default function LifecycleMonitor() {
       {/* Actions */}
       <div className="toolbar">
         <button className="btn" onClick={handlePreview} disabled={previewing || running}>
-          {previewing ? `${t('lifecycle.preview')}...` : t('lifecycle.preview')}
+          {previewing ? <><span className="spinner" /> {t('lifecycle.preview')}...</> : t('lifecycle.preview')}
         </button>
         <button className="btn primary" onClick={handleRun} disabled={running || previewing}>
-          {running ? t('common.running') : t('lifecycle.runNow')}
+          {running ? <><span className="spinner" /> {t('common.running')}...</> : t('lifecycle.runNow')}
         </button>
       </div>
+      {(previewing || running) && <ElapsedTimer />}
 
       {/* Preview result */}
       {preview && (
