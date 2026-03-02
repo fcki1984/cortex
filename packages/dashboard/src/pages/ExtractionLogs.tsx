@@ -22,6 +22,7 @@ interface LogEntry {
   memories_written: number;
   memories_deduped: number;
   latency_ms: number;
+  error?: string;
   created_at: string;
 }
 
