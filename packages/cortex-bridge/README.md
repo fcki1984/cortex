@@ -1,4 +1,4 @@
-# @cortexmem/cortex-bridge
+# @cortexmem/openclaw
 
 Bridge plugin that connects [OpenClaw](https://github.com/openclaw) agents to [Cortex](https://github.com/rikouu/cortex) memory service.
 
@@ -7,7 +7,7 @@ Uses OpenClaw's standard `register(api)` plugin interface.
 ## Install
 
 ```bash
-openclaw plugins install @cortexmem/cortex-bridge
+openclaw plugins install @cortexmem/openclaw
 ```
 
 ## Configure

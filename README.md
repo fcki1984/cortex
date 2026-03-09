@@ -115,7 +115,7 @@ pnpm dev    # http://localhost:21100
 
 ```bash
 # 1. Install the bridge plugin
-openclaw plugins install @cortexmem/cortex-bridge
+openclaw plugins install @cortexmem/openclaw
 
 # 2. Set Cortex URL (pick one)
 echo 'CORTEX_URL=http://localhost:21100' >> .env
@@ -145,7 +145,7 @@ Open **Settings** → **Developer** → **Edit Config**, paste and restart:
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp", "--server-url", "http://localhost:21100"]
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"]
     }
   }
 }
@@ -163,7 +163,7 @@ Open **Settings** → **Developer** → **Edit Config**, paste and restart:
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp"],
+      "args": ["@cortexmem/mcp"],
       "env": { "CORTEX_URL": "http://localhost:21100" }
     }
   }
@@ -176,7 +176,7 @@ Open **Settings** → **Developer** → **Edit Config**, paste and restart:
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add cortex -- npx cortex-mcp --server-url http://localhost:21100
+claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
 ```
 
 </details>
@@ -191,7 +191,7 @@ Add to your client's MCP config:
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
       "env": { "CORTEX_AGENT_ID": "default" }
     }
   }
@@ -256,7 +256,7 @@ curl http://localhost:21100/api/v1/health
 ### Step 2: Install the Plugin
 
 ```bash
-openclaw plugins install @cortexmem/cortex-bridge
+openclaw plugins install @cortexmem/openclaw
 ```
 
 That's it — no config files, no manual setup.
@@ -332,7 +332,7 @@ echo 'CORTEX_URL=http://your-server-ip:21100' >> .env
 | Problem | Solution |
 |---------|----------|
 | Agent doesn't recall memories | Check `curl http://localhost:21100/api/v1/health` returns OK |
-| Plugin not loading | Run `openclaw plugins list` to verify `@cortexmem/cortex-bridge` is installed |
+| Plugin not loading | Run `openclaw plugins list` to verify `@cortexmem/openclaw` is installed |
 | Memories not saving after responses | Known upstream issue in streaming mode — see [Known Issues](#known-issues) |
 | Connection refused | Make sure `CORTEX_URL` is set and Cortex is running |
 
@@ -502,8 +502,8 @@ See `DESIGN.md` for full configuration options and `cortex-provider-reference.md
 cortex/
 ├── packages/
 │   ├── server/          # Core service (Fastify + SQLite)
-│   ├── mcp-client/      # MCP stdio adapter (npm: @cortex/mcp-client)
-│   ├── cortex-bridge/   # OpenClaw plugin (npm: @cortexmem/cortex-bridge)
+│   ├── mcp-client/      # MCP stdio adapter (npm: @cortexmem/mcp)
+│   ├── cortex-bridge/   # OpenClaw plugin (npm: @cortexmem/openclaw)
 │   └── dashboard/       # React management SPA
 ├── docker-compose.yml
 ├── DESIGN.md            # Full technical design document

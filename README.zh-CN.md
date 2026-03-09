@@ -115,7 +115,7 @@ pnpm dev    # http://localhost:21100
 
 ```bash
 # 1. 安装桥接插件
-openclaw plugins install @cortexmem/cortex-bridge
+openclaw plugins install @cortexmem/openclaw
 
 # 2. 设置 Cortex URL
 echo 'CORTEX_URL=http://localhost:21100' >> .env
@@ -144,7 +144,7 @@ echo 'CORTEX_URL=http://localhost:21100' >> .env
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp", "--server-url", "http://localhost:21100"]
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"]
     }
   }
 }
@@ -162,7 +162,7 @@ echo 'CORTEX_URL=http://localhost:21100' >> .env
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp"],
+      "args": ["@cortexmem/mcp"],
       "env": { "CORTEX_URL": "http://localhost:21100" }
     }
   }
@@ -175,7 +175,7 @@ echo 'CORTEX_URL=http://localhost:21100' >> .env
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add cortex -- npx cortex-mcp --server-url http://localhost:21100
+claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
 ```
 
 </details>
@@ -190,7 +190,7 @@ claude mcp add cortex -- npx cortex-mcp --server-url http://localhost:21100
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["cortex-mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
       "env": { "CORTEX_AGENT_ID": "default" }
     }
   }
@@ -253,7 +253,7 @@ curl http://localhost:21100/api/v1/health
 ### 第 2 步：安装插件
 
 ```bash
-openclaw plugins install @cortexmem/cortex-bridge
+openclaw plugins install @cortexmem/openclaw
 ```
 
 就这样，不需要配置文件，不需要手动设置。
@@ -329,7 +329,7 @@ echo 'CORTEX_URL=http://your-server-ip:21100' >> .env
 | 问题 | 解决方案 |
 |------|---------|
 | 智能体不召回记忆 | 检查 `curl http://localhost:21100/api/v1/health` 是否返回 OK |
-| 插件没有加载 | 运行 `openclaw plugins list` 确认 `@cortexmem/cortex-bridge` 已安装 |
+| 插件没有加载 | 运行 `openclaw plugins list` 确认 `@cortexmem/openclaw` 已安装 |
 | 回复后不保存记忆 | streaming 模式下的已知上游问题 — 见[已知问题](#已知问题) |
 | 连接被拒绝 | 确认 `CORTEX_URL` 已设置且 Cortex 正在运行 |
 
@@ -499,8 +499,8 @@ Cortex 只需一个 `OPENAI_API_KEY` 即可开箱即用。进阶配置：
 cortex/
 ├── packages/
 │   ├── server/          # 核心服务（Fastify + SQLite）
-│   ├── mcp-client/      # MCP stdio 适配器（npm: @cortex/mcp-client）
-│   ├── cortex-bridge/   # OpenClaw 插件（npm: @cortexmem/cortex-bridge）
+│   ├── mcp-client/      # MCP stdio 适配器（npm: @cortexmem/mcp）
+│   ├── cortex-bridge/   # OpenClaw 插件（npm: @cortexmem/openclaw）
 │   └── dashboard/       # React 管理面板
 ├── docker-compose.yml
 ├── DESIGN.md            # 完整技术设计文档

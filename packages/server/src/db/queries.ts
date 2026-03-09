@@ -172,6 +172,12 @@ export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' |
 
 export function deleteMemory(id: string): boolean {
   const db = getDb();
+  // Clean up FK references before deleting the memory
+  db.prepare('DELETE FROM access_log WHERE memory_id = ?').run(id);
+  db.prepare('DELETE FROM relation_evidence WHERE memory_id = ?').run(id);
+  db.prepare('UPDATE relations SET source_memory_id = NULL WHERE source_memory_id = ?').run(id);
+  // Clear superseded_by references pointing to this memory
+  db.prepare('UPDATE memories SET superseded_by = NULL WHERE superseded_by = ?').run(id);
   const result = db.prepare('DELETE FROM memories WHERE id = ?').run(id);
   return result.changes > 0;
 }
