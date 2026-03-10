@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">Cortex</h1>
-<p align="center"><strong>Long-term memory for AI agents</strong></p>
+<p align="center"><strong>Your AI forgets. Cortex doesn't.</strong></p>
 
 <p align="center">
   <a href="https://github.com/rikouu/cortex/releases"><img src="https://img.shields.io/github/v/release/rikouu/cortex?style=flat-square&color=6366f1" alt="Release" /></a>
@@ -180,6 +180,41 @@ Working Memory (48h) ──promote──→ Core Memory ──decay──→ Arc
                                         ↑
                                read refreshes decay counter
                                (nothing is ever truly lost)
+```
+
+---
+
+## Architecture
+
+```
+┌─ Clients ──────────────────────────────────────────────────────────┐
+│  OpenClaw (Bridge)  │  Claude Desktop (MCP)  │  Cursor  │  REST   │
+└─────────────────────┴────────────────────────┴──────────┴─────────┘
+                              │
+                              ▼
+┌─ Cortex Server (:21100) ───────────────────────────────────────────┐
+│                                                                     │
+│  ┌─ Memory Gate ─────────┐    ┌─ Memory Sieve ──────────────────┐  │
+│  │ Query Expansion       │    │ Fast Channel (regex)             │  │
+│  │ BM25 + Vector Search  │    │ Deep Channel (LLM)              │  │
+│  │ RRF Fusion            │    │ 4-tier Dedup                    │  │
+│  │ LLM Reranker          │    │ Entity Relation Extraction      │  │
+│  │ Neo4j Graph Traversal │    │ Category Classification (×20)   │  │
+│  │ Priority Injection    │    │ Smart Update Detection          │  │
+│  └───────────────────────┘    └─────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Lifecycle Engine ────┐    ┌─ Storage ───────────────────────┐  │
+│  │ Promote / Decay       │    │ SQLite + FTS5 (memories)        │  │
+│  │ Archive / Compress    │    │ sqlite-vec (embeddings)         │  │
+│  │ Read Refresh          │    │ Neo4j 5 (knowledge graph)       │  │
+│  │ Cron Scheduler        │    │                                 │  │
+│  └───────────────────────┘    └─────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Dashboard (React SPA) ──────────────────────────────────────┐  │
+│  │ Memory Browser │ Search Debug │ Extraction Logs │ Graph View  │  │
+│  │ Lifecycle Preview │ Agent Config │ One-click Update           │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -384,54 +419,6 @@ curl -X POST http://localhost:21100/api/v1/recall \
 | `GET` | `/api/v1/health` | Health check |
 | `GET` | `/api/v1/stats` | Statistics |
 | `GET/PATCH` | `/api/v1/config` | Global config |
-
----
-
-## Architecture
-
-```
-┌─ Clients ──────────────────────────────────────────────────────────┐
-│  OpenClaw (Bridge)  │  Claude Desktop (MCP)  │  Cursor  │  REST   │
-└─────────────────────┴────────────────────────┴──────────┴─────────┘
-                              │
-                              ▼
-┌─ Cortex Server (:21100) ───────────────────────────────────────────┐
-│                                                                     │
-│  ┌─ Memory Gate ─────────┐    ┌─ Memory Sieve ──────────────────┐  │
-│  │ Query Expansion       │    │ Fast Channel (regex)             │  │
-│  │ BM25 + Vector Search  │    │ Deep Channel (LLM)              │  │
-│  │ RRF Fusion            │    │ 4-tier Dedup                    │  │
-│  │ LLM Reranker          │    │ Entity Relation Extraction      │  │
-│  │ Neo4j Graph Traversal │    │ Category Classification (×20)   │  │
-│  │ Priority Injection    │    │ Smart Update Detection          │  │
-│  └───────────────────────┘    └─────────────────────────────────┘  │
-│                                                                     │
-│  ┌─ Lifecycle Engine ────┐    ┌─ Storage ───────────────────────┐  │
-│  │ Promote / Decay       │    │ SQLite + FTS5 (memories)        │  │
-│  │ Archive / Compress    │    │ sqlite-vec (embeddings)         │  │
-│  │ Read Refresh          │    │ Neo4j 5 (knowledge graph)       │  │
-│  │ Cron Scheduler        │    │                                 │  │
-│  └───────────────────────┘    └─────────────────────────────────┘  │
-│                                                                     │
-│  ┌─ Dashboard (React SPA) ──────────────────────────────────────┐  │
-│  │ Memory Browser │ Search Debug │ Extraction Logs │ Graph View  │  │
-│  │ Lifecycle Preview │ Agent Config │ One-click Update           │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-## Project Structure
-
-```
-cortex/
-├── packages/
-│   ├── server/          # Core service (Fastify + SQLite + Neo4j)
-│   ├── mcp-client/      # MCP adapter (@cortexmem/mcp)
-│   ├── cortex-bridge/   # OpenClaw plugin (@cortexmem/openclaw)
-│   └── dashboard/       # React management UI
-├── docker-compose.yml
-└── DESIGN.md            # Full technical design
-```
 
 ## Cost
 
