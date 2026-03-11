@@ -330,18 +330,20 @@ export class LifecycleEngine {
     const agentFilter = agentId ? ' AND agent_id = ?' : '';
     const params = agentId ? [agentId] : [];
 
-    // Only dedup recently created/promoted core memories (last 48h) to avoid
-    // O(N) embedding calls on the full corpus. Older entries were already deduped
-    // on ingest or in previous lifecycle runs.
+    // Only dedup core memories that were recently promoted or created.
+    // Ingest-time dedup already handles most duplicates; lifecycle dedup catches
+    // cross-session duplicates that slipped through (e.g. promoted from working).
+    // Use source LIKE 'lifecycle:%' to find recently promoted entries, plus
+    // any core entries created in the last 4 hours (new direct inserts).
     const coreEntries = db.prepare(
       `SELECT * FROM memories WHERE layer = 'core' AND superseded_by IS NULL
-        AND created_at > datetime('now', '-48 hours')${agentFilter}
+        AND (source LIKE 'lifecycle:%' OR created_at > datetime('now', '-4 hours'))${agentFilter}
         ORDER BY created_at DESC`
     ).all(...params) as Memory[];
 
     if (coreEntries.length < 1) return 0;
 
-    log.info({ candidates: coreEntries.length }, 'deduplicateCore: scanning recent entries');
+    log.info({ candidates: coreEntries.length }, 'deduplicateCore: scanning recent/promoted entries');
 
     let merged = 0;
     const superseded = new Set<string>();
