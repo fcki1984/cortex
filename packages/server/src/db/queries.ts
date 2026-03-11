@@ -185,7 +185,7 @@ export function listMemories(opts: {
   return { items, total };
 }
 
-export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' | 'category' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned'>>): Memory | null {
+export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' | 'category' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned' | 'source'>>): Memory | null {
   const db = getDb();
   const sets: string[] = [];
   const params: any[] = [];

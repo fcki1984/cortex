@@ -267,9 +267,11 @@ export class LifecycleEngine {
             insertLifecycleLog('promote', [entry.id, newId], { score: 1.0, from: 'working', to: 'core', reason: 'high_importance_auto', agent_id: agentId || 'all' });
           } else {
             // Same content, same category → in-place layer update (preserves ID, access_count)
+            // Update source to 'lifecycle:*' so deduplicateCore can find promoted entries
             updateMemory(entry.id, {
               layer: 'core' as MemoryLayer,
               importance: Math.max(entry.importance, threshold),
+              source: 'lifecycle:auto-promotion',
             });
             insertLifecycleLog('promote', [entry.id], { score: 1.0, from: 'working', to: 'core', reason: 'high_importance_auto_inplace', agent_id: agentId || 'all' });
           }
@@ -303,9 +305,11 @@ export class LifecycleEngine {
             insertLifecycleLog('promote', [entry.id, newId], { score, from: 'working', to: 'core', agent_id: agentId || 'all' });
           } else {
             // In-place promotion: just update the layer
+            // Update source to 'lifecycle:*' so deduplicateCore can find promoted entries
             updateMemory(entry.id, {
               layer: 'core' as MemoryLayer,
               importance: Math.max(entry.importance, threshold),
+              source: 'lifecycle:promotion',
             });
             insertLifecycleLog('promote', [entry.id], { score, from: 'working', to: 'core', reason: 'inplace', agent_id: agentId || 'all' });
           }
