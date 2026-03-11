@@ -306,7 +306,8 @@ export function searchFTS(query: string, opts?: { layer?: MemoryLayer; limit?: n
   // agent_id filter: null/empty agent_id memories are shared (match any agent)
   if (opts?.agent_id) { conditions.push('(m.agent_id = ? OR m.agent_id IS NULL OR m.agent_id = \'\')'); params.push(opts.agent_id); }
 
-  conditions.push('(m.expires_at IS NULL OR m.expires_at > datetime(\'now\'))');
+  conditions.push('(m.expires_at IS NULL OR m.expires_at > ?)');
+  params.push(new Date().toISOString());
   conditions.push('m.superseded_by IS NULL');
 
   const limit = opts?.limit || 20;
@@ -606,9 +607,9 @@ export function getCategoryFeedbackStats(agentId: string): Record<string, { tota
            SUM(CASE WHEN feedback = 'bad' THEN 1 ELSE 0 END) as bad_count
     FROM extraction_feedback
     WHERE agent_id = ? AND category IS NOT NULL
-      AND created_at > datetime('now', '-30 days')
+      AND created_at > ?
     GROUP BY category
-  `).all(agentId) as { category: string; total: number; bad_count: number }[];
+  `).all(agentId, new Date(Date.now() - 30 * 86400_000).toISOString()) as { category: string; total: number; bad_count: number }[];
 
   const stats: Record<string, { total: number; badRate: number }> = {};
   for (const row of rows) {

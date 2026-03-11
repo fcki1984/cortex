@@ -139,10 +139,10 @@ export class LifecycleEngine {
       log.info('Phase 6b: updateRelationDecay');
       await this.updateRelationDecay();
 
-      // Phase 7: Synthesize user profiles for all agents (skip in dry-run)
+      // Phase 7: Synthesize user profiles (skip in dry-run)
       if (!dryRun) {
         try {
-          await this.synthesizeAllProfiles();
+          await this.synthesizeProfiles(agentId);
         } catch (e: any) {
           log.warn({ error: e.message }, 'Profile synthesis failed during lifecycle run');
         }
@@ -191,9 +191,10 @@ export class LifecycleEngine {
     const db = getDb();
     const agentFilter = agentId ? ' AND agent_id = ?' : '';
     const params = agentId ? [agentId] : [];
+    const now = new Date().toISOString();
     const expired = db.prepare(
-      `SELECT id, content, category, importance FROM memories WHERE layer = 'working' AND expires_at IS NOT NULL AND expires_at < datetime('now')${agentFilter}`
-    ).all(...params) as { id: string; content: string; category: string; importance: number }[];
+      `SELECT id, content, category, importance FROM memories WHERE layer = 'working' AND expires_at IS NOT NULL AND expires_at < ?${agentFilter}`
+    ).all(now, ...params) as { id: string; content: string; category: string; importance: number }[];
 
     if (dryRun && affected) {
       for (const e of expired) {
@@ -230,13 +231,16 @@ export class LifecycleEngine {
     const params = agentId ? [agentId] : [];
 
     // Get Working memories older than 24h that haven't expired
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 3600_000).toISOString();
     const candidates = db.prepare(`
       SELECT * FROM memories
       WHERE layer = 'working'
-        AND created_at < datetime('now', '-24 hours')
-        AND (expires_at IS NULL OR expires_at > datetime('now'))
+        AND created_at < ?
+        AND (expires_at IS NULL OR expires_at > ?)
         AND superseded_by IS NULL${agentFilter}
-    `).all(...params) as Memory[];
+    `).all(twentyFourHoursAgo, nowIso, ...params) as Memory[];
 
     let promoted = 0;
     for (const entry of candidates) {
@@ -337,13 +341,15 @@ export class LifecycleEngine {
     // Only dedup core memories that were recently promoted or created.
     // Ingest-time dedup already handles most duplicates; lifecycle dedup catches
     // cross-session duplicates that slipped through (e.g. promoted from working).
-    // Use source LIKE 'lifecycle:%' to find recently promoted entries, plus
-    // any core entries created in the last 4 hours (new direct inserts).
+    // source LIKE 'lifecycle:%' finds newly promoted entries (cleared after dedup).
+    // 4h window catches new direct inserts. Use ISO format for created_at comparison
+    // since created_at is stored as ISO strings (with T separator).
+    const fourHoursAgo = new Date(Date.now() - 4 * 3600_000).toISOString();
     const coreEntries = db.prepare(
       `SELECT * FROM memories WHERE layer = 'core' AND superseded_by IS NULL
-        AND (source LIKE 'lifecycle:%' OR created_at > datetime('now', '-4 hours'))${agentFilter}
+        AND (source LIKE 'lifecycle:%' OR created_at > ?)${agentFilter}
         ORDER BY created_at DESC`
-    ).all(...params) as Memory[];
+    ).all(fourHoursAgo, ...params) as Memory[];
 
     if (coreEntries.length < 1) return 0;
 
@@ -354,15 +360,6 @@ export class LifecycleEngine {
     const { exactDupThreshold } = this.config.sieve;
     // Use a slightly wider threshold for lifecycle dedup (1.5x exact dup)
     const lifecycleDupThreshold = exactDupThreshold * 1.5;
-
-    // First pass: text similarity pre-filter to avoid unnecessary embedding calls
-    // Group by agent_id for isolation
-    const byAgent = new Map<string, Memory[]>();
-    for (const e of coreEntries) {
-      const list = byAgent.get(e.agent_id) || [];
-      list.push(e);
-      byAgent.set(e.agent_id, list);
-    }
 
     for (const entry of coreEntries) {
       if (entry.is_pinned) continue;
@@ -401,23 +398,22 @@ export class LifecycleEngine {
       } catch { /* best effort — skip this entry */ }
     }
 
-    return merged;
-  }
-
-  private textSimilarity(a: string, b: string): number {
-    // Jaccard similarity on character trigrams
-    const trigramsA = new Set<string>();
-    const trigramsB = new Set<string>();
-    for (let i = 0; i <= a.length - 3; i++) trigramsA.add(a.slice(i, i + 3));
-    for (let i = 0; i <= b.length - 3; i++) trigramsB.add(b.slice(i, i + 3));
-
-    if (trigramsA.size === 0 || trigramsB.size === 0) return 0;
-
-    let intersection = 0;
-    for (const t of trigramsA) {
-      if (trigramsB.has(t)) intersection++;
+    // Clear lifecycle: source marker on checked entries so they're not rescanned
+    // in subsequent lifecycle runs. Only clear non-superseded ones.
+    if (!dryRun) {
+      const clearStmt = db.prepare(
+        "UPDATE memories SET source = 'core:deduped' WHERE id = ? AND superseded_by IS NULL"
+      );
+      db.transaction(() => {
+        for (const entry of coreEntries) {
+          if (!superseded.has(entry.id) && entry.source?.startsWith('lifecycle:')) {
+            clearStmt.run(entry.id);
+          }
+        }
+      })();
     }
-    return intersection / (trigramsA.size + trigramsB.size - intersection);
+
+    return merged;
   }
 
   private async archiveStale(dryRun: boolean, affected?: AffectedMemory[], agentId?: string): Promise<number> {
@@ -427,7 +423,7 @@ export class LifecycleEngine {
     const params = agentId ? [agentId] : [];
 
     const coreEntries = db.prepare(
-      `SELECT * FROM memories WHERE layer = 'core' AND superseded_by IS NULL${agentFilter}`
+      `SELECT * FROM memories WHERE layer = 'core' AND superseded_by IS NULL AND is_pinned = 0${agentFilter}`
     ).all(...params) as Memory[];
 
     let archived = 0;
@@ -457,28 +453,33 @@ export class LifecycleEngine {
     const db = getDb();
     const agentFilter = agentId ? ' AND agent_id = ?' : '';
     const params = agentId ? [agentId] : [];
+    const nowIso = new Date().toISOString();
     const expired = db.prepare(`
       SELECT * FROM memories
       WHERE layer = 'archive'
         AND expires_at IS NOT NULL
-        AND expires_at < datetime('now')
+        AND expires_at < ?
         AND superseded_by IS NULL${agentFilter}
-    `).all(...params) as Memory[];
+    `).all(nowIso, ...params) as Memory[];
 
     if (expired.length === 0) return 0;
 
     if (!dryRun) {
-      // Group by category for better compression (preserve category semantics)
+      // Group by agent_id + category to prevent cross-agent memory mixing
       const groups = new Map<string, Memory[]>();
       for (const e of expired) {
-        const list = groups.get(e.category) || [];
+        const key = `${e.agent_id}::${e.category}`;
+        const list = groups.get(key) || [];
         list.push(e);
-        groups.set(e.category, list);
+        groups.set(key, list);
       }
 
       const allOriginalIds: string[] = [];
 
-      for (const [category, items] of groups) {
+      for (const [groupKey, items] of groups) {
+        const category = items[0]!.category;
+        const groupAgentId = items[0]!.agent_id;
+
         // Single item: just move back to core without LLM compression
         if (items.length === 1) {
           const item = items[0]!;
@@ -490,7 +491,7 @@ export class LifecycleEngine {
             content: item.content,
             importance: Math.max(item.importance, BASE_IMPORTANCE[category] || 0.5),
             confidence: item.confidence,
-            agent_id: item.agent_id,
+            agent_id: groupAgentId,
             source: 'lifecycle:compression',
             metadata: JSON.stringify({ compressed_from: 1, original_ids: [item.id] }),
           });
@@ -504,7 +505,7 @@ export class LifecycleEngine {
           continue;
         }
 
-        // Multiple items: LLM compress per category
+        // Multiple items: LLM compress per agent+category group
         const contents = items.map(e => `- ${e.content}`).join('\n');
         let compressed: string;
         try {
@@ -520,11 +521,11 @@ export class LifecycleEngine {
         insertMemory({
           id: newId,
           layer: 'core',
-          category: category as any, // preserve original category
+          category: category as any,
           content: compressed.trim(),
           importance: BASE_IMPORTANCE[category] || 0.6,
           confidence: 0.7,
-          agent_id: items[0]?.agent_id || 'default',
+          agent_id: groupAgentId,
           source: 'lifecycle:compression',
           metadata: JSON.stringify({ compressed_from: items.length, original_ids: items.map(e => e.id) }),
         });
@@ -706,11 +707,15 @@ export class LifecycleEngine {
   }
 
   /**
-   * Synthesize profiles for all agents after lifecycle run.
+   * Synthesize profiles after lifecycle run.
+   * If agentId is provided, only synthesize for that agent.
+   * Otherwise, synthesize for all agents.
    */
-  async synthesizeAllProfiles(): Promise<void> {
+  async synthesizeProfiles(agentId?: string): Promise<void> {
     const db = getDb();
-    const agents = db.prepare('SELECT DISTINCT id FROM agents').all() as { id: string }[];
+    const agents = agentId
+      ? [{ id: agentId }]
+      : (db.prepare('SELECT DISTINCT id FROM agents').all() as { id: string }[]);
 
     for (const agent of agents) {
       try {
