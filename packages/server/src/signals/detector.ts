@@ -64,6 +64,8 @@ const HIGH_SIGNAL_PATTERNS: {
   patterns: RegExp[];
   importance: number;
   name: string;
+  /** If true, skip this rule when the user message looks like a question */
+  skipOnQuestion?: boolean;
 }[] = [
   {
     category: 'correction',
@@ -99,16 +101,24 @@ const HIGH_SIGNAL_PATTERNS: {
       /please (always|never|don'?t)/i,
       /以后(都|总是|不要|别)/,
       /记住我(喜欢|不喜欢|偏好)/,
-      // Indirect preference patterns
+      /can'?t stand/i,
+    ],
+    importance: 0.85,
+    name: 'preference',
+  },
+  {
+    category: 'preference',
+    patterns: [
+      // Indirect preference patterns — easily confused with questions
       /觉得.{1,20}(比较好|更好|最好|不错)/,
       /还是.{1,15}(好|吧|比较)/,
       /用.{1,10}(习惯了|顺手)/,
       /i(?:'d| would) (?:rather|prefer)/i,
       /(?:fan|fond) of/i,
-      /can'?t stand/i,
     ],
-    importance: 0.85,
-    name: 'preference',
+    importance: 0.75,
+    name: 'preference_indirect',
+    skipOnQuestion: true,
   },
   {
     category: 'identity',
@@ -152,7 +162,14 @@ const HIGH_SIGNAL_PATTERNS: {
       /に決め[たる]/,
       /にし[よまた]/,
       /を選[んぶび]/,
-      // Implicit decisions
+    ],
+    importance: 0.8,
+    name: 'decision',
+  },
+  {
+    category: 'decision',
+    patterns: [
+      // Implicit decisions — can be confused with questions about choices
       /那就.{1,20}(吧|了)/,
       /行[，,]就/,
       /好[，,]用/,
@@ -164,8 +181,9 @@ const HIGH_SIGNAL_PATTERNS: {
       /moving to/i,
       /going with/i,
     ],
-    importance: 0.8,
-    name: 'decision',
+    importance: 0.75,
+    name: 'decision_implicit',
+    skipOnQuestion: true,
   },
   {
     category: 'todo',
@@ -313,10 +331,17 @@ export function detectHighSignals(exchange: { user: string; assistant: string })
   const cleanUser = exchange.user.replace(INJECTED_TAG_RE, '').replace(SYSTEM_TAG_RE, '');
   const cleanAssistant = exchange.assistant.replace(INJECTED_TAG_RE, '').replace(SYSTEM_TAG_RE, '');
 
+  // Question detection: skip indirect preference/decision patterns when user is asking a question
+  const isQuestion = /[？?]\s*$/.test(cleanUser.trim()) ||
+    /^(你觉得|你认为|你说|你看|怎么样|哪个|选哪|好不好|是不是|do you think|which|what do you|should i|is it better)/i.test(cleanUser.trim());
+
   for (const rule of HIGH_SIGNAL_PATTERNS) {
     // Agent categories match assistant text; all other categories match user text only
     const text = rule.category.startsWith('agent_') ? cleanAssistant : cleanUser;
     if (!text || text.length < 3) continue;
+
+    // Skip indirect patterns when user is asking a question
+    if (rule.skipOnQuestion && isQuestion) continue;
 
     for (const pattern of rule.patterns) {
       const match = text.match(pattern);
