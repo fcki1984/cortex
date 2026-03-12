@@ -65,6 +65,11 @@ export function createEmbeddingProvider(config: {
       return new GoogleEmbeddingProvider(config);
     case 'voyage':
       return new VoyageEmbeddingProvider(config);
+    case 'dashscope':
+      return new OpenAIEmbeddingProvider({
+        ...config,
+        baseUrl: config.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      });
     case 'ollama':
       return new OllamaEmbeddingProvider(config);
     case 'none':

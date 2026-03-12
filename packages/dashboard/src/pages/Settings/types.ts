@@ -38,6 +38,15 @@ export const LLM_PROVIDERS: Record<string, ProviderPreset> = {
     models: ['deepseek-chat', 'deepseek-reasoner'],
     envKey: 'DEEPSEEK_API_KEY',
   },
+  dashscope: {
+    label: 'DashScope (通义千问)',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: [
+      'qwen-plus', 'qwen-turbo', 'qwen-max',
+      'qwen-long', 'qwen3-235b-a22b',
+    ],
+    envKey: 'DASHSCOPE_API_KEY',
+  },
   openrouter: {
     label: 'OpenRouter',
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
@@ -103,6 +112,15 @@ export const EMBEDDING_PROVIDERS: Record<string, ProviderPreset> = {
     ],
     envKey: 'VOYAGE_API_KEY',
   },
+  dashscope: {
+    label: 'DashScope (通义千问)',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: [
+      'text-embedding-v3',
+      'text-embedding-v2',
+    ],
+    envKey: 'DASHSCOPE_API_KEY',
+  },
   ollama: {
     label: 'Ollama (Local)',
     defaultBaseUrl: 'http://localhost:11434',
@@ -133,6 +151,9 @@ export const EMBEDDING_DIMENSIONS: Record<string, number> = {
   'voyage-3': 1024,
   'voyage-3-lite': 512,
   'voyage-code-3': 1024,
+  // DashScope
+  'text-embedding-v3': 1024,
+  'text-embedding-v2': 1536,
   // Ollama
   'bge-m3': 1024,
   'nomic-embed-text': 768,

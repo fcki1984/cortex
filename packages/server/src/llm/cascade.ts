@@ -56,6 +56,11 @@ export function createLLMProvider(config: { provider: string; model?: string; ap
       return new GoogleLLMProvider(config);
     case 'deepseek':
       return new DeepSeekLLMProvider(config);
+    case 'dashscope':
+      return new OpenAILLMProvider({
+        ...config,
+        baseUrl: config.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      });
     case 'openrouter':
       return new OpenRouterLLMProvider(config);
     case 'ollama':
