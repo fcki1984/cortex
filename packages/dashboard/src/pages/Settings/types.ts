@@ -13,7 +13,7 @@ export const LLM_PROVIDERS: Record<string, ProviderPreset> = {
   openai: {
     label: 'OpenAI',
     defaultBaseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-4o-mini', 'gpt-4.1-nano', 'gpt-4.1-mini', 'gpt-4o', 'o4-mini', 'o3-mini'],
+    models: ['gpt-4o-mini', 'gpt-5.2', 'gpt-5.3-chat-latest', 'gpt-5.4'],
     envKey: 'OPENAI_API_KEY',
   },
   anthropic: {
@@ -22,20 +22,22 @@ export const LLM_PROVIDERS: Record<string, ProviderPreset> = {
     models: [
       'claude-haiku-4-5-20251001',
       'claude-sonnet-4-5-20250929',
+      'claude-sonnet-4-6-20260217',
       'claude-opus-4-5-20251022',
+      'claude-opus-4-6-20260205',
     ],
     envKey: 'ANTHROPIC_API_KEY',
   },
   google: {
     label: 'Google Gemini',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
-    models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+    models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-3-pro-preview'],
     envKey: 'GOOGLE_API_KEY',
   },
   deepseek: {
     label: 'DeepSeek',
     defaultBaseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
+    models: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4'],
     envKey: 'DEEPSEEK_API_KEY',
   },
   dashscope: {
@@ -51,13 +53,15 @@ export const LLM_PROVIDERS: Record<string, ProviderPreset> = {
     label: 'OpenRouter',
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
     models: [
+      'anthropic/claude-sonnet-4-6',
+      'anthropic/claude-opus-4-6',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-sonnet-4-5',
       'google/gemini-2.5-flash',
       'google/gemini-2.5-pro',
+      'openai/gpt-5.2',
       'openai/gpt-4o-mini',
+      'deepseek/deepseek-v4',
       'deepseek/deepseek-chat-v3',
-      'deepseek/deepseek-r1',
       'meta-llama/llama-4-maverick',
       'qwen/qwen3-235b-a22b',
     ],
@@ -98,6 +102,7 @@ export const EMBEDDING_PROVIDERS: Record<string, ProviderPreset> = {
     label: 'Google Gemini',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
     models: [
+      'gemini-embedding-2',
       'gemini-embedding-001',
       'text-embedding-004',
     ],
@@ -107,7 +112,8 @@ export const EMBEDDING_PROVIDERS: Record<string, ProviderPreset> = {
     label: 'Voyage AI',
     defaultBaseUrl: 'https://api.voyageai.com/v1',
     models: [
-      'voyage-3', 'voyage-3-lite',
+      'voyage-4-large', 'voyage-4-lite', 'voyage-4-nano',
+      'voyage-3-large', 'voyage-3.5', 'voyage-3.5-lite',
       'voyage-code-3',
     ],
     envKey: 'VOYAGE_API_KEY',
@@ -145,11 +151,16 @@ export const EMBEDDING_DIMENSIONS: Record<string, number> = {
   'text-embedding-3-large': 3072,
   'text-embedding-ada-002': 1536,
   // Google
+  'gemini-embedding-2': 3072,
   'gemini-embedding-001': 768,
   'text-embedding-004': 768,
   // Voyage
-  'voyage-3': 1024,
-  'voyage-3-lite': 512,
+  'voyage-4-large': 2048,
+  'voyage-4-lite': 1024,
+  'voyage-4-nano': 512,
+  'voyage-3-large': 1024,
+  'voyage-3.5': 1024,
+  'voyage-3.5-lite': 1024,
   'voyage-code-3': 1024,
   // DashScope
   'text-embedding-v3': 1024,

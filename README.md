@@ -489,10 +489,11 @@ curl -X POST http://localhost:21100/api/v1/ingest \
 
 | Provider | Recommended Models | Notes |
 |---|---|---|
-| **OpenAI** | gpt-4o-mini, gpt-4.1-nano | Default. Best cost/quality |
-| **Anthropic** | claude-haiku-4-5, claude-sonnet-4-5 | Highest extraction quality |
+| **OpenAI** | gpt-4o-mini, gpt-5.2 | Default. Best cost/quality |
+| **Anthropic** | claude-haiku-4-5, claude-sonnet-4-6 | Highest extraction quality |
 | **Google Gemini** | gemini-2.5-flash | Free tier on AI Studio |
-| **DeepSeek** | deepseek-chat | Cheapest option |
+| **DeepSeek** | deepseek-chat, deepseek-v4 | Cheapest option |
+| **DashScope** | qwen-plus, qwen-turbo | 通义千问, OpenAI-compatible |
 | **Ollama** | qwen2.5, llama3.2 | Fully local, zero cost |
 | **OpenRouter** | Any of 100+ models | Unified gateway |
 
@@ -501,8 +502,9 @@ curl -X POST http://localhost:21100/api/v1/ingest \
 | Provider | Recommended Models | Notes |
 |---|---|---|
 | **OpenAI** | text-embedding-3-small/large | Default. Most reliable |
-| **Google Gemini** | gemini-embedding-001 | Free on AI Studio |
-| **Voyage AI** | voyage-3, voyage-3-lite | High quality |
+| **Google Gemini** | gemini-embedding-2, gemini-embedding-001 | Free on AI Studio |
+| **Voyage AI** | voyage-4-large, voyage-4-lite | High quality (shared embedding space) |
+| **DashScope** | text-embedding-v3 | 通义千问, good for Chinese |
 | **Ollama** | bge-m3, nomic-embed-text | Local, zero cost |
 
 > ⚠️ **Changing embedding models** requires reindexing all vectors. Use Dashboard → Settings → Reindex Vectors.
