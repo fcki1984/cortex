@@ -27,6 +27,8 @@ export default function SieveSection({
           {renderSlider(t('settings.similarityThreshold'), t('settings.similarityThresholdDesc'), 'similarityThreshold', 0.1, 0.8, 0.01)}
           {renderSlider(t('settings.exactDupThreshold'), t('settings.exactDupThresholdDesc'), 'exactDupThreshold', 0.01, 0.2, 0.01)}
           {renderToggleField(t('settings.relationExtraction'), t('settings.relationExtractionDesc'), 'relationExtraction')}
+          {renderNumberField(t('settings.logPreviewPerMsg'), t('settings.logPreviewPerMsgDesc'), 'extractionLogPreviewCharsPerMessage', 0, 2000)}
+          {renderNumberField(t('settings.logPreviewMax'), t('settings.logPreviewMaxDesc'), 'extractionLogPreviewMaxChars', 0, 10000)}
         </div>
       ) : (
         <table>
@@ -38,6 +40,8 @@ export default function SieveSection({
             {displayRow(t('settings.similarityThreshold'), (config.sieve?.similarityThreshold ?? 0.35).toFixed(2), t('settings.similarityThresholdDesc'))}
             {displayRow(t('settings.exactDupThreshold'), (config.sieve?.exactDupThreshold ?? 0.08).toFixed(2), t('settings.exactDupThresholdDesc'))}
             {displayRow(t('settings.relationExtraction'), (config.sieve?.relationExtraction ?? true) ? t('common.on') : t('common.off'), t('settings.relationExtractionDesc'))}
+            {displayRow(t('settings.logPreviewPerMsg'), config.sieve?.extractionLogPreviewCharsPerMessage ?? 60, t('settings.logPreviewPerMsgDesc'))}
+            {displayRow(t('settings.logPreviewMax'), config.sieve?.extractionLogPreviewMaxChars ?? 300, t('settings.logPreviewMaxDesc'))}
           </tbody>
         </table>
       )}

@@ -96,6 +96,8 @@ const CortexConfigSchema = z.object({
     parallelChannels: z.boolean().default(true),
     profileInjection: z.boolean().default(true),
     extractionLogging: z.boolean().default(true),
+    extractionLogPreviewCharsPerMessage: z.number().min(0).max(2000).default(60),
+    extractionLogPreviewMaxChars: z.number().min(0).max(10000).default(300),
     maxExtractionTokens: z.number().default(1000),
     maxConversationChars: z.number().min(2000).max(16000).default(6000),
     contextMessages: z.number().min(2).max(20).default(4),

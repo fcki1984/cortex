@@ -238,9 +238,12 @@ export class MemorySieve {
       }
     }
 
+    const previewPerMsg = this.config.sieve.extractionLogPreviewCharsPerMessage;
+    const previewMax = this.config.sieve.extractionLogPreviewMaxChars;
     const fastPreview = exchange.messages && exchange.messages.length > 0
-      ? exchange.messages.map((m: any) => `[${m.role}] ${m.content.slice(0, 60)}`).join(' → ').slice(0, 300)
-      : exchange.user.slice(0, 200);
+      ? (previewPerMsg === 0 ? exchange.messages.map((m: any) => `[${m.role}] ${m.content}`).join('\n\n')
+        : exchange.messages.map((m: any) => `[${m.role}] ${m.content.slice(0, previewPerMsg)}`).join(' → ').slice(0, previewMax))
+      : (previewPerMsg === 0 ? exchange.user : exchange.user.slice(0, Math.max(200, previewMax)));
     const extractionLog: ExtractionLogData | undefined = signals.length > 0 ? {
       channel: 'fast',
       exchange_preview: fastPreview,
@@ -362,9 +365,12 @@ export class MemorySieve {
     }
 
     const latency = Date.now() - start;
+    const dpPerMsg = this.config.sieve.extractionLogPreviewCharsPerMessage;
+    const dpMax = this.config.sieve.extractionLogPreviewMaxChars;
     const preview = exchange.messages && exchange.messages.length > 0
-      ? exchange.messages.map((m: any) => `[${m.role}] ${m.content.slice(0, 60)}`).join(' → ').slice(0, 300)
-      : exchange.user.slice(0, 200);
+      ? (dpPerMsg === 0 ? exchange.messages.map((m: any) => `[${m.role}] ${m.content}`).join('\n\n')
+        : exchange.messages.map((m: any) => `[${m.role}] ${m.content.slice(0, dpPerMsg)}`).join(' → ').slice(0, dpMax))
+      : (dpPerMsg === 0 ? exchange.user : exchange.user.slice(0, Math.max(200, dpMax)));
 
     return {
       extracted,
