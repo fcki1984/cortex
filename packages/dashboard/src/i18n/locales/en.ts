@@ -679,7 +679,7 @@ export default {
     maxConversationChars: 'Max Conversation Chars',
     maxConversationCharsDesc: 'Maximum total characters of conversation text sent to LLM for extraction. Increase for longer conversations. Default: 4000, Range: 2000-16000.',
     logPreviewPerMsg: 'Log Preview Per Message',
-    logPreviewPerMsgDesc: 'Max characters per message in extraction log preview. Set to 0 for full content (no truncation). Default: 60.',
+    logPreviewPerMsgDesc: 'Max characters shown per conversation message (user/assistant turn) in extraction log preview. Set to 0 to show full conversation without truncation. Default: 60.',
     logPreviewMax: 'Log Preview Max Chars',
     logPreviewMaxDesc: 'Max total characters for extraction log preview. Set to 0 for unlimited. Only applies when per-message limit > 0. Default: 300.',
     smartUpdate: 'Smart Update (Dedup)',
