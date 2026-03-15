@@ -504,7 +504,11 @@ export function closeDatabase(): void {
 export function backupDb(): string | null {
   const db = getDb();
   const config = getConfig();
-  const dbPath = path.resolve(config.dataDir, 'brain.db');
+  const configuredPath = config.storage?.dbPath;
+  if (!configuredPath || configuredPath === ':memory:') {
+    return null;
+  }
+  const dbPath = path.resolve(configuredPath);
   const dir = path.dirname(dbPath);
   const baseName = path.basename(dbPath);
   const backupPath = `${dbPath}.daily-${new Date().toISOString().slice(0, 10)}`;

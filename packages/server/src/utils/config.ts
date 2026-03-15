@@ -3,8 +3,11 @@ import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const LLM_PROVIDERS = ['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'dashscope', 'openrouter', 'ollama', 'none'] as const;
+const EMBEDDING_PROVIDERS = ['openai', 'google', 'gemini', 'voyage', 'dashscope', 'ollama', 'none'] as const;
+
 const LLMProviderSchema = z.object({
-  provider: z.enum(['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'openrouter', 'ollama', 'none']),
+  provider: z.enum(LLM_PROVIDERS),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
@@ -12,7 +15,7 @@ const LLMProviderSchema = z.object({
 });
 
 const EmbeddingProviderSchema = z.object({
-  provider: z.enum(['openai', 'google', 'gemini', 'voyage', 'ollama', 'none']),
+  provider: z.enum(EMBEDDING_PROVIDERS),
   model: z.string().optional(),
   dimensions: z.number().optional(),
   apiKey: z.string().optional(),
@@ -146,6 +149,69 @@ export type CortexConfig = z.infer<typeof CortexConfigSchema>;
 let _config: CortexConfig | null = null;
 let _configFilePath: string | null = null;
 
+const PROVIDER_API_KEY_ENVS: Record<string, string[]> = {
+  openai: ['OPENAI_API_KEY'],
+  anthropic: ['ANTHROPIC_API_KEY'],
+  google: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'],
+  gemini: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'],
+  deepseek: ['DEEPSEEK_API_KEY'],
+  dashscope: ['DASHSCOPE_API_KEY'],
+  openrouter: ['OPENROUTER_API_KEY'],
+  voyage: ['VOYAGE_API_KEY'],
+};
+
+const PROVIDER_BASE_URL_ENVS: Record<string, string[]> = {
+  ollama: ['OLLAMA_BASE_URL'],
+};
+
+function getStringEnv(name: string): string | undefined {
+  const value = process.env[name];
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function getNumberEnv(name: string): number | undefined {
+  const value = getStringEnv(name);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function getFirstEnv(names: string[] | undefined): string | undefined {
+  if (!names) return undefined;
+  for (const name of names) {
+    const value = getStringEnv(name);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function buildProviderEnvOverride(
+  prefix: string,
+  provider: string | undefined,
+  kind: 'llm' | 'embedding'
+): Record<string, unknown> | undefined {
+  const effectiveProvider = provider || (kind === 'llm' ? 'openai' : 'openai');
+  const override: Record<string, unknown> = {};
+  const explicitProvider = getStringEnv(`${prefix}_PROVIDER`);
+  const model = getStringEnv(`${prefix}_MODEL`);
+  const apiKey = getStringEnv(`${prefix}_API_KEY`) || getFirstEnv(PROVIDER_API_KEY_ENVS[effectiveProvider]);
+  const baseUrl = getStringEnv(`${prefix}_BASE_URL`) || getFirstEnv(PROVIDER_BASE_URL_ENVS[effectiveProvider]);
+
+  if (explicitProvider) override.provider = explicitProvider;
+  if (model) override.model = model;
+  if (apiKey) override.apiKey = apiKey;
+  if (baseUrl) override.baseUrl = baseUrl;
+
+  if (kind === 'embedding') {
+    const dimensions = getNumberEnv(`${prefix}_DIMENSIONS`);
+    if (dimensions !== undefined) override.dimensions = dimensions;
+  }
+
+  return Object.keys(override).length > 0 ? override : undefined;
+}
+
 export function loadConfig(overrides?: Partial<CortexConfig>): CortexConfig {
   // 1. Try loading from config file
   let fileConfig: Record<string, unknown> = {};
@@ -178,20 +244,35 @@ export function loadConfig(overrides?: Partial<CortexConfig>): CortexConfig {
 
   // 2. Env overrides
   const envOverrides: Record<string, unknown> = {};
-  if (process.env.CORTEX_PORT) envOverrides.port = parseInt(process.env.CORTEX_PORT);
-  if (process.env.CORTEX_HOST) envOverrides.host = process.env.CORTEX_HOST;
-  if (process.env.CORTEX_DB_PATH) envOverrides.storage = { dbPath: process.env.CORTEX_DB_PATH };
-  if (process.env.CORTEX_AUTH_TOKEN) {
-    // Preserve existing auth.agents from file config when applying env override
-    const existingAuth = (fileConfig as any)?.auth;
-    envOverrides.auth = {
-      token: process.env.CORTEX_AUTH_TOKEN,
-      ...(existingAuth?.agents ? { agents: existingAuth.agents } : {}),
+  const port = getNumberEnv('CORTEX_PORT');
+  const host = getStringEnv('CORTEX_HOST');
+  const dbPath = getStringEnv('CORTEX_DB_PATH');
+  const authToken = getStringEnv('CORTEX_AUTH_TOKEN');
+  const fileConfigTyped = fileConfig as Partial<CortexConfig>;
+  const extractionProvider = getStringEnv('CORTEX_LLM_EXTRACTION_PROVIDER') || fileConfigTyped.llm?.extraction?.provider || 'openai';
+  const lifecycleProvider = getStringEnv('CORTEX_LLM_LIFECYCLE_PROVIDER') || fileConfigTyped.llm?.lifecycle?.provider || 'openai';
+  const embeddingProvider = getStringEnv('CORTEX_EMBEDDING_PROVIDER') || fileConfigTyped.embedding?.provider || 'openai';
+  const extractionOverride = buildProviderEnvOverride('CORTEX_LLM_EXTRACTION', extractionProvider, 'llm');
+  const lifecycleOverride = buildProviderEnvOverride('CORTEX_LLM_LIFECYCLE', lifecycleProvider, 'llm');
+  const embeddingOverride = buildProviderEnvOverride('CORTEX_EMBEDDING', embeddingProvider, 'embedding');
+
+  if (port !== undefined) envOverrides.port = port;
+  if (host) envOverrides.host = host;
+  if (dbPath) envOverrides.storage = { dbPath };
+  if (authToken) envOverrides.auth = { token: authToken };
+  if (extractionOverride || lifecycleOverride) {
+    envOverrides.llm = {
+      ...(extractionOverride ? { extraction: extractionOverride } : {}),
+      ...(lifecycleOverride ? { lifecycle: lifecycleOverride } : {}),
     };
   }
+  if (embeddingOverride) envOverrides.embedding = embeddingOverride;
 
   // 3. Merge and validate
-  const merged = { ...fileConfig, ...envOverrides, ...overrides };
+  let merged = deepMerge(fileConfig, envOverrides);
+  if (overrides) {
+    merged = deepMerge(merged, overrides);
+  }
   _config = CortexConfigSchema.parse(merged);
   return _config;
 }

@@ -279,16 +279,30 @@ Create a `.env` file in the project root (or set in `docker-compose.yml` → `en
 | `CORTEX_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` for LAN) |
 | `CORTEX_AUTH_TOKEN` | *(empty)* | **Auth token** — protects Dashboard + API |
 | `CORTEX_DB_PATH` | `cortex/brain.db` | SQLite database path |
-| `OPENAI_API_KEY` | — | OpenAI API key (LLM + embedding) |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-| `OLLAMA_BASE_URL` | — | Ollama URL for local models |
+| `CORTEX_LLM_EXTRACTION_PROVIDER` | `openai` | Extraction LLM provider. Keep `openai` and set a custom base URL for OpenAI-compatible gateways. |
+| `CORTEX_LLM_EXTRACTION_MODEL` | `gpt-4o` | Extraction LLM model name |
+| `CORTEX_LLM_EXTRACTION_API_KEY` | — | Extraction LLM API key |
+| `CORTEX_LLM_EXTRACTION_BASE_URL` | — | Extraction LLM base URL for OpenAI-compatible endpoints |
+| `CORTEX_LLM_LIFECYCLE_PROVIDER` | `openai` | Lifecycle LLM provider |
+| `CORTEX_LLM_LIFECYCLE_MODEL` | `gpt-4o-mini` | Lifecycle LLM model name |
+| `CORTEX_LLM_LIFECYCLE_API_KEY` | — | Lifecycle LLM API key |
+| `CORTEX_LLM_LIFECYCLE_BASE_URL` | — | Lifecycle LLM base URL |
+| `CORTEX_EMBEDDING_PROVIDER` | `openai` | Embedding provider |
+| `CORTEX_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model name |
+| `CORTEX_EMBEDDING_API_KEY` | — | Embedding API key |
+| `CORTEX_EMBEDDING_BASE_URL` | — | Embedding base URL for OpenAI-compatible endpoints |
+| `CORTEX_EMBEDDING_DIMENSIONS` | `1536` | Embedding vector dimensions |
+| `OPENAI_API_KEY` | — | Legacy fallback key for the default OpenAI provider |
+| `OLLAMA_BASE_URL` | — | Legacy fallback base URL for Ollama providers |
 | `TZ` | `UTC` | Timezone (e.g. `Asia/Tokyo`) |
 | `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `NEO4J_URI` | — | Neo4j connection (optional) |
 | `NEO4J_USER` | — | Neo4j user |
 | `NEO4J_PASSWORD` | — | Neo4j password |
 
-> 💡 **LLM and embedding settings** can also be configured in Dashboard → Settings, which is often easier. Env vars are mainly needed for `CORTEX_AUTH_TOKEN`, `CORTEX_HOST`, and `TZ`.
+> 💡 Dashboard → Settings still works for all model settings. These env vars are useful when you want Docker/bootstrap-time defaults or need to wire an OpenAI-compatible endpoint before first login.
+>
+> If extraction and lifecycle should use the same model, set both `CORTEX_LLM_*` groups to the same values. Changing `CORTEX_EMBEDDING_MODEL` or `CORTEX_EMBEDDING_DIMENSIONS` requires a full vector reindex.
 
 ### Auth Token — How It Works
 

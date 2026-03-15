@@ -282,16 +282,30 @@ cd packages/dashboard && pnpm dev  # → http://localhost:5173
 | `CORTEX_HOST` | `127.0.0.1` | 绑定地址（`0.0.0.0` 开放局域网） |
 | `CORTEX_AUTH_TOKEN` | *(空)* | **访问令牌** — 保护面板和 API |
 | `CORTEX_DB_PATH` | `cortex/brain.db` | SQLite 数据库路径 |
-| `OPENAI_API_KEY` | — | OpenAI API Key（LLM + 向量） |
-| `ANTHROPIC_API_KEY` | — | Anthropic API Key |
-| `OLLAMA_BASE_URL` | — | Ollama 地址（本地模型） |
+| `CORTEX_LLM_EXTRACTION_PROVIDER` | `openai` | 提取 LLM 提供商。接 OpenAI 兼容网关时保持 `openai`，再设置自定义 base URL。 |
+| `CORTEX_LLM_EXTRACTION_MODEL` | `gpt-4o` | 提取 LLM 模型名 |
+| `CORTEX_LLM_EXTRACTION_API_KEY` | — | 提取 LLM 的 API Key |
+| `CORTEX_LLM_EXTRACTION_BASE_URL` | — | 提取 LLM 的 OpenAI-compatible 接口地址 |
+| `CORTEX_LLM_LIFECYCLE_PROVIDER` | `openai` | 生命周期 LLM 提供商 |
+| `CORTEX_LLM_LIFECYCLE_MODEL` | `gpt-4o-mini` | 生命周期 LLM 模型名 |
+| `CORTEX_LLM_LIFECYCLE_API_KEY` | — | 生命周期 LLM 的 API Key |
+| `CORTEX_LLM_LIFECYCLE_BASE_URL` | — | 生命周期 LLM 接口地址 |
+| `CORTEX_EMBEDDING_PROVIDER` | `openai` | Embedding 提供商 |
+| `CORTEX_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding 模型名 |
+| `CORTEX_EMBEDDING_API_KEY` | — | Embedding API Key |
+| `CORTEX_EMBEDDING_BASE_URL` | — | Embedding 的 OpenAI-compatible 接口地址 |
+| `CORTEX_EMBEDDING_DIMENSIONS` | `1536` | Embedding 向量维度 |
+| `OPENAI_API_KEY` | — | 默认 OpenAI Provider 的兼容旧变量 |
+| `OLLAMA_BASE_URL` | — | Ollama Provider 的兼容旧变量 |
 | `TZ` | `UTC` | 时区（如 `Asia/Tokyo`、`Asia/Shanghai`） |
 | `LOG_LEVEL` | `info` | 日志级别（`debug`/`info`/`warn`/`error`） |
 | `NEO4J_URI` | — | Neo4j 连接地址（可选） |
 | `NEO4J_USER` | — | Neo4j 用户名 |
 | `NEO4J_PASSWORD` | — | Neo4j 密码 |
 
-> 💡 **LLM 和向量模型**也可以在面板 → 设置中配置，通常更方便。环境变量主要用于 `CORTEX_AUTH_TOKEN`、`CORTEX_HOST` 和 `TZ`。
+> 💡 面板 → 设置仍然可以配置所有模型参数；这些环境变量适合 Docker 首次启动时直接注入默认值，或在首次登录前就接好 OpenAI-compatible 接口。
+>
+> 如果提取和生命周期想共用同一个模型，把两组 `CORTEX_LLM_*` 填成相同值即可。修改 `CORTEX_EMBEDDING_MODEL` 或 `CORTEX_EMBEDDING_DIMENSIONS` 后，需要执行一次全量向量重建。
 
 ### 访问令牌说明
 

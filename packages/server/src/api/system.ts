@@ -6,6 +6,7 @@ import { createLogger, getLogLevel as _getLogLevel, setLogLevel as _setLogLevel,
 import { metrics } from '../utils/metrics.js';
 import type { CortexApp } from '../app.js';
 import type { Memory } from '../db/queries.js';
+import type { SearchResult } from '../search/hybrid.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +47,12 @@ const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
 // Cache latest release info (check at most every 30 min)
 let latestReleaseCache: { tag: string; url: string; publishedAt: string; checkedAt: number } | null = null;
 const RELEASE_CHECK_INTERVAL = 30 * 60 * 1000;
+
+function isProviderConfigured(config?: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }): boolean {
+  if (!config || !config.provider || config.provider === 'none') return false;
+  if (config.provider === 'ollama') return true;
+  return !!(config.apiKey || (config.baseUrl && config.model));
+}
 
 async function getLatestRelease(forceRefresh = false): Promise<typeof latestReleaseCache> {
   if (!forceRefresh && latestReleaseCache && Date.now() - latestReleaseCache.checkedAt < RELEASE_CHECK_INTERVAL) {
@@ -257,13 +264,17 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
       if (last?.created_at && !last.created_at.endsWith('Z')) last.created_at = last.created_at + 'Z';
       const errorCount = (db.prepare(`SELECT COUNT(*) as c FROM extraction_logs WHERE error IS NOT NULL AND created_at > datetime('now', '-24 hours')`).get() as any)?.c || 0;
       const totalLast24h = (db.prepare(`SELECT COUNT(*) as c FROM extraction_logs WHERE created_at > datetime('now', '-24 hours')`).get() as any)?.c || 0;
+      const hasExtractionLLM = isProviderConfigured(config.llm?.extraction);
       components.push({
         id: 'extraction_llm',
         name: 'Extraction LLM',
-        status: last ? 'ok' : 'unknown',
+        status: hasExtractionLLM ? (last ? 'ok' : 'unknown') : 'not_configured',
         lastRun: last?.created_at || null,
         latencyMs: last?.latency_ms || null,
         details: {
+          configured: hasExtractionLLM,
+          provider: config.llm?.extraction?.provider,
+          model: config.llm?.extraction?.model,
           channel: last?.channel,
           memoriesWritten: last?.memories_written,
           last24h: totalLast24h,
@@ -297,8 +308,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
 
     // 3. Embedding Service
     try {
-      // Check if embedding is configured
-      const hasEmbedding = !!(config.embedding?.baseUrl || config.embedding?.apiKey || process.env.OPENAI_API_KEY);
+      const hasEmbedding = isProviderConfigured(config.embedding);
       const lastAccess = db.prepare(`SELECT accessed_at FROM access_log ORDER BY accessed_at DESC LIMIT 1`).get() as any;
       if (lastAccess?.accessed_at && !lastAccess.accessed_at.endsWith('Z')) lastAccess.accessed_at = lastAccess.accessed_at + 'Z';
       components.push({
@@ -476,10 +486,65 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     const start = Date.now();
     try {
       // Create a minimal test: rerank 3 simple documents
-      const testResults = [
-        { id: '1', content: 'The weather is nice today', layer: 'core' as any, category: 'fact', agent_id: 'test', importance: 0.5, decay_score: 1, access_count: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_accessed: new Date().toISOString(), score: 0.5 },
-        { id: '2', content: 'Cortex is a memory system for AI', layer: 'core' as any, category: 'fact', agent_id: 'test', importance: 0.5, decay_score: 1, access_count: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_accessed: new Date().toISOString(), score: 0.5 },
-        { id: '3', content: 'Docker containers need regular cleanup', layer: 'core' as any, category: 'fact', agent_id: 'test', importance: 0.5, decay_score: 1, access_count: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_accessed: new Date().toISOString(), score: 0.5 },
+      const now = new Date().toISOString();
+      const testResults: SearchResult[] = [
+        {
+          id: '1',
+          content: 'The weather is nice today',
+          layer: 'core',
+          category: 'fact',
+          agent_id: 'test',
+          importance: 0.5,
+          decay_score: 1,
+          access_count: 1,
+          created_at: now,
+          textScore: 0.2,
+          vectorScore: 0.1,
+          rawVectorSim: 0.1,
+          fusedScore: 0.2,
+          layerWeight: 1,
+          recencyBoost: 1,
+          accessBoost: 1,
+          finalScore: 0.2,
+        },
+        {
+          id: '2',
+          content: 'Cortex is a memory system for AI',
+          layer: 'core',
+          category: 'fact',
+          agent_id: 'test',
+          importance: 0.5,
+          decay_score: 1,
+          access_count: 1,
+          created_at: now,
+          textScore: 0.8,
+          vectorScore: 0.7,
+          rawVectorSim: 0.7,
+          fusedScore: 0.8,
+          layerWeight: 1,
+          recencyBoost: 1,
+          accessBoost: 1,
+          finalScore: 0.8,
+        },
+        {
+          id: '3',
+          content: 'Docker containers need regular cleanup',
+          layer: 'core',
+          category: 'fact',
+          agent_id: 'test',
+          importance: 0.5,
+          decay_score: 1,
+          access_count: 1,
+          created_at: now,
+          textScore: 0.1,
+          vectorScore: 0.1,
+          rawVectorSim: 0.1,
+          fusedScore: 0.1,
+          layerWeight: 1,
+          recencyBoost: 1,
+          accessBoost: 1,
+          finalScore: 0.1,
+        },
       ];
       const { createReranker } = await import('../search/reranker.js');
       const reranker = createReranker(rerankerConfig, cortex.llmExtraction);

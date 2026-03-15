@@ -251,6 +251,7 @@ export class MemoryGate {
       existingIds.add(pm.id);
       fixedResults.push({
         id: pm.id, content: pm.content, layer: pm.layer, category: pm.category,
+        agent_id: pm.agent_id,
         importance: pm.importance, decay_score: pm.decay_score,
         access_count: pm.access_count, created_at: pm.created_at,
         textScore: 0, vectorScore: 0, rawVectorSim: 0, fusedScore: 0,
