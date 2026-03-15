@@ -51,7 +51,8 @@ export function startLifecycleScheduler(cortex: CortexApp): void {
             promoted: report.promoted,
             archived: report.archived,
             merged: report.merged,
-            decayUpdated: report.decayUpdated,
+            compressedToCore: report.compressedToCore,
+            expiredWorking: report.expiredWorking,
           },
           'Lifecycle cron completed',
         );

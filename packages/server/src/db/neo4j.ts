@@ -67,6 +67,11 @@ export interface GraphRelation {
   updated_at: string;
 }
 
+export interface GraphPathSegment {
+  entity?: string;
+  predicate?: string;
+}
+
 export async function upsertRelation(rel: Omit<GraphRelation, 'created_at' | 'updated_at'>): Promise<void> {
   if (!driver) return;
   const session = driver.session();
@@ -222,7 +227,7 @@ export async function traverseRelations(entityName: string, opts: {
 export async function findShortestPath(from: string, to: string, opts: {
   maxHops?: number;
   agentId?: string;
-}): Promise<{ path: { entity: string; predicate?: string }[]; hops: number }> {
+}): Promise<{ path: GraphPathSegment[]; hops: number }> {
   if (!driver) return { path: [], hops: 0 };
   const session = driver.session();
   const maxHops = opts.maxHops || 5;
@@ -242,7 +247,7 @@ export async function findShortestPath(from: string, to: string, opts: {
     const hops = typeof result.records[0]!.get('hops')?.toNumber === 'function'
       ? result.records[0]!.get('hops').toNumber() : result.records[0]!.get('hops');
 
-    const path: { entity: string; predicate?: string }[] = [];
+    const path: GraphPathSegment[] = [];
     for (let i = 0; i < entities.length; i++) {
       path.push({ entity: entities[i]! });
       if (i < predicates.length) {
