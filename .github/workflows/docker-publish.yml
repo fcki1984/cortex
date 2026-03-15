@@ -3,6 +3,17 @@ name: Build & Publish Docker Image
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Optional image tag to publish (defaults to sha-<short_sha>)'
+        required: false
+        type: string
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
@@ -27,14 +38,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Extract image tags
         id: meta
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            PUBLISH_LATEST=true
+          else
+            VERSION="${{ github.event.inputs.image_tag || '' }}"
+            VERSION="${VERSION#v}"
+            if [[ -z "$VERSION" ]]; then
+              VERSION="sha-${GITHUB_SHA::7}"
+            fi
+            PUBLISH_LATEST="${{ github.event.inputs.publish_latest || 'false' }}"
+          fi
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tags<<EOF" >> $GITHUB_OUTPUT
           echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION" >> $GITHUB_OUTPUT
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          if [[ "$PUBLISH_LATEST" == "true" ]]; then
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          fi
           echo "EOF" >> $GITHUB_OUTPUT
 
       - uses: docker/build-push-action@v6
