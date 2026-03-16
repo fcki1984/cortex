@@ -1,7 +1,9 @@
 import type { EmbeddingProvider } from './interface.js';
 import { createLogger } from '../utils/logger.js';
+import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('embed-openai');
+const DEFAULT_TIMEOUT_MS = 15000;
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'openai';
@@ -9,12 +11,14 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; dimensions?: number; baseUrl?: string }) {
+  constructor(opts: { apiKey?: string; model?: string; dimensions?: number; baseUrl?: string; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.OPENAI_API_KEY || '';
     this.model = opts.model || 'text-embedding-3-small';
     this.dimensions = opts.dimensions || 1536;
     this.baseUrl = opts.baseUrl || 'https://api.openai.com/v1';
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async embed(text: string): Promise<number[]> {
@@ -36,7 +40,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         input: texts,
         dimensions: this.dimensions,
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
     });
 
     if (!res.ok) {

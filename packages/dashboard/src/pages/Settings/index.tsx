@@ -85,6 +85,7 @@ export default function Settings() {
           useCustomModel: false,
           apiKey: '',
           baseUrl: config.llm?.extraction?.baseUrl ?? '',
+          timeoutMs: config.llm?.extraction?.timeoutMs ?? '',
           hasApiKey: config.llm?.extraction?.hasApiKey ?? false,
         },
         lifecycle: {
@@ -94,6 +95,7 @@ export default function Settings() {
           useCustomModel: false,
           apiKey: '',
           baseUrl: config.llm?.lifecycle?.baseUrl ?? '',
+          timeoutMs: config.llm?.lifecycle?.timeoutMs ?? '',
           hasApiKey: config.llm?.lifecycle?.hasApiKey ?? false,
         },
         embedding: {
@@ -104,6 +106,7 @@ export default function Settings() {
           dimensions: config.embedding?.dimensions ?? 1536,
           apiKey: '',
           baseUrl: config.embedding?.baseUrl ?? '',
+          timeoutMs: config.embedding?.timeoutMs ?? '',
           hasApiKey: config.embedding?.hasApiKey ?? false,
         },
         reranker: {
@@ -113,6 +116,7 @@ export default function Settings() {
           useCustomModel: false,
           apiKey: '',
           baseUrl: config.search?.reranker?.baseUrl ?? '',
+          timeoutMs: config.search?.reranker?.timeoutMs ?? '',
           hasApiKey: config.search?.reranker?.hasApiKey ?? false,
         },
       }),
@@ -151,7 +155,11 @@ export default function Settings() {
       gate: () => ({
         fixedInjectionTokens: config.gate?.fixedInjectionTokens ?? 500,
         maxInjectionTokens: config.gate?.maxInjectionTokens ?? 1000,
+        relationInjection: config.gate?.relationInjection ?? true,
         relationBudget: config.gate?.relationBudget ?? 100,
+        queryExpansionTimeoutMs: config.gate?.queryExpansionTimeoutMs ?? 5000,
+        rerankerTimeoutMs: config.gate?.rerankerTimeoutMs ?? 8000,
+        relationTimeoutMs: config.gate?.relationTimeoutMs ?? 5000,
         skipSmallTalk: config.gate?.skipSmallTalk ?? false,
         searchLimit: config.gate?.searchLimit ?? 30,
         cliffAbsolute: config.gate?.cliffAbsolute ?? 0.4,
@@ -256,12 +264,30 @@ export default function Settings() {
       if (isNaN(mit) || mit < 100) errors.push(t('settings.validationMemoryBudgetRange'));
       const rb = Number(draft.relationBudget);
       if (isNaN(rb) || rb < 0) errors.push(t('settings.validationRelationBudgetRange'));
+      for (const value of [draft.queryExpansionTimeoutMs, draft.rerankerTimeoutMs, draft.relationTimeoutMs]) {
+        const parsed = Number(value);
+        if (isNaN(parsed) || parsed < 500 || parsed > 30000) {
+          errors.push(t('settings.validationTimeoutRange', { min: 500, max: 30000 }));
+          break;
+        }
+      }
       const ca = Number(draft.cliffAbsolute);
       if (isNaN(ca) || ca < 0.1 || ca > 0.9) errors.push(t('settings.validationCliffRange'));
       const cg = Number(draft.cliffGap);
       if (isNaN(cg) || cg < 0.1 || cg > 0.9) errors.push(t('settings.validationCliffRange'));
       const cf = Number(draft.cliffFloor);
       if (isNaN(cf) || cf < 0 || cf > 0.5) errors.push(t('settings.validationCliffRange'));
+    }
+
+    if (section === 'llm') {
+      for (const value of [draft.extraction?.timeoutMs, draft.lifecycle?.timeoutMs, draft.embedding?.timeoutMs, draft.reranker?.timeoutMs]) {
+        if (value === '' || value === null || value === undefined) continue;
+        const parsed = Number(value);
+        if (isNaN(parsed) || parsed < 500 || parsed > 120000) {
+          errors.push(t('settings.validationTimeoutRange', { min: 500, max: 120000 }));
+          break;
+        }
+      }
     }
 
     if (section === 'sieve') {
@@ -288,6 +314,7 @@ export default function Settings() {
             provider: d.provider,
             model: d.useCustomModel ? d.customModel : d.model,
             baseUrl: d.baseUrl || '',
+            timeoutMs: parseOptionalNumber(d.timeoutMs),
           };
           if (d.apiKey) out.apiKey = d.apiKey;
           return out;
@@ -303,6 +330,7 @@ export default function Settings() {
           model: draft.embedding.useCustomModel ? draft.embedding.customModel : draft.embedding.model,
           dimensions: Number(draft.embedding.dimensions),
           baseUrl: draft.embedding.baseUrl || '',
+          timeoutMs: parseOptionalNumber(draft.embedding.timeoutMs),
         };
         if (draft.embedding.apiKey) embOut.apiKey = draft.embedding.apiKey;
         payload.embedding = embOut;
@@ -318,6 +346,7 @@ export default function Settings() {
             ...(rrModel ? { model: rrModel } : {}),
             ...(draft.reranker.apiKey ? { apiKey: draft.reranker.apiKey } : {}),
             ...(draft.reranker.baseUrl ? { baseUrl: draft.reranker.baseUrl } : {}),
+            timeoutMs: parseOptionalNumber(draft.reranker.timeoutMs),
           };
         }
       } else if (section === 'search') {
@@ -354,7 +383,11 @@ export default function Settings() {
         payload.gate = {
           fixedInjectionTokens: Number(draft.fixedInjectionTokens),
           maxInjectionTokens: Number(draft.maxInjectionTokens),
+          relationInjection: draft.relationInjection,
           relationBudget: Number(draft.relationBudget),
+          queryExpansionTimeoutMs: Number(draft.queryExpansionTimeoutMs),
+          rerankerTimeoutMs: Number(draft.rerankerTimeoutMs),
+          relationTimeoutMs: Number(draft.relationTimeoutMs),
           skipSmallTalk: draft.skipSmallTalk,
           searchLimit: Number(draft.searchLimit),
           cliffAbsolute: Number(draft.cliffAbsolute),
@@ -417,6 +450,12 @@ export default function Settings() {
   };
 
   const isEditing = (section: SectionKey) => editingSection === section;
+
+  const parseOptionalNumber = (value: any): number | undefined => {
+    if (value === '' || value === null || value === undefined) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
 
   // ─── Shared UI helpers ─────────────────────────────────────────────────────
 
@@ -687,6 +726,9 @@ export default function Settings() {
     const models = preset?.models ?? [];
     const isCustomModel = d.useCustomModel;
     const isDisabled = provider === 'none';
+    const timeoutDesc = prefix === 'reranker'
+      ? t('settings.providerTimeoutRerankerDesc')
+      : t('settings.providerTimeoutDesc');
 
     const handleProviderChange = (newProvider: string) => {
       updateDraft(`${prefix}.provider`, newProvider);
@@ -843,6 +885,22 @@ export default function Settings() {
                 placeholder={preset?.defaultBaseUrl || 'Default'}
                 onChange={e => updateDraft(`${prefix}.baseUrl`, e.target.value)}
               />
+            </div>
+
+            <div className="form-group">
+              <label>
+                {t('settings.providerTimeoutMs')}
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>{t('common.optional')}</span>
+              </label>
+              <input
+                type="number"
+                min={500}
+                max={120000}
+                value={d.timeoutMs ?? ''}
+                placeholder={t('settings.providerTimeoutPlaceholder')}
+                onChange={e => updateDraft(`${prefix}.timeoutMs`, e.target.value)}
+              />
+              {fieldDesc(timeoutDesc)}
             </div>
           </>
         )}

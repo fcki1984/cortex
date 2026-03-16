@@ -1,7 +1,9 @@
 import type { EmbeddingProvider } from './interface.js';
 import { createLogger } from '../utils/logger.js';
+import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('embed-google');
+const DEFAULT_TIMEOUT_MS = 15000;
 
 export class GoogleEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'google';
@@ -9,12 +11,14 @@ export class GoogleEmbeddingProvider implements EmbeddingProvider {
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; dimensions?: number; baseUrl?: string }) {
+  constructor(opts: { apiKey?: string; model?: string; dimensions?: number; baseUrl?: string; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
     this.model = opts.model || 'text-embedding-004';
     this.dimensions = opts.dimensions || 768;
     this.baseUrl = (opts.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async embed(text: string): Promise<number[]> {
@@ -38,7 +42,7 @@ export class GoogleEmbeddingProvider implements EmbeddingProvider {
             content: { parts: [{ text }] },
             outputDimensionality: this.dimensions,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
         },
       );
 

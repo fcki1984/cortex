@@ -390,12 +390,14 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
           provider: config.llm.extraction.provider,
           model: config.llm.extraction.model,
           baseUrl: config.llm.extraction.baseUrl,
+          timeoutMs: config.llm.extraction.timeoutMs,
           hasApiKey: !!config.llm.extraction.apiKey,
         },
         lifecycle: {
           provider: config.llm.lifecycle.provider,
           model: config.llm.lifecycle.model,
           baseUrl: config.llm.lifecycle.baseUrl,
+          timeoutMs: config.llm.lifecycle.timeoutMs,
           hasApiKey: !!config.llm.lifecycle.apiKey,
         },
       },
@@ -404,6 +406,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
         model: config.embedding.model,
         dimensions: config.embedding.dimensions,
         baseUrl: config.embedding.baseUrl,
+        timeoutMs: config.embedding.timeoutMs,
         hasApiKey: !!config.embedding.apiKey,
       },
       search: {
@@ -411,6 +414,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
         reranker: {
           ...config.search.reranker,
           apiKey: undefined,
+          timeoutMs: config.search.reranker?.timeoutMs,
           hasApiKey: !!config.search.reranker?.apiKey,
         },
       },

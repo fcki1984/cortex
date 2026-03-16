@@ -23,6 +23,7 @@ export default function GateSection({
         <div style={{ padding: '4px 0' }}>
           {renderNumberField(`📌 ${t('settings.fixedBudget')}`, t('settings.fixedBudgetDesc'), 'fixedInjectionTokens', 50)}
           {renderNumberField(`💉 ${t('settings.memoryBudget')}`, t('settings.memoryBudgetDesc'), 'maxInjectionTokens', 100)}
+          {renderToggleField(`🕸️ ${t('settings.relationInjection')}`, t('settings.relationInjectionDesc'), 'relationInjection')}
           {renderNumberField(`🔗 ${t('settings.relationBudget')}`, t('settings.relationBudgetDesc'), 'relationBudget', 0)}
           {renderNumberField(`🔍 ${t('settings.searchCandidates')}`, t('settings.searchCandidatesDesc'), 'searchLimit', 5, 50)}
           {renderToggleField(t('settings.skipSmallTalk'), t('settings.skipSmallTalkDesc'), 'skipSmallTalk')}
@@ -32,6 +33,13 @@ export default function GateSection({
             {renderNumberField(t('settings.cliffAbsolute'), t('settings.cliffAbsoluteDesc'), 'cliffAbsolute', 0.1, 0.9)}
             {renderNumberField(t('settings.cliffGap'), t('settings.cliffGapDesc'), 'cliffGap', 0.1, 0.9)}
             {renderNumberField(t('settings.cliffFloor'), t('settings.cliffFloorDesc'), 'cliffFloor', 0, 0.5)}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>⏱️ {t('settings.recallTimeouts')}</label>
+            {renderNumberField(`🔄 ${t('settings.queryExpansionTimeoutMs')}`, t('settings.queryExpansionTimeoutMsDesc'), 'queryExpansionTimeoutMs', 500, 30000)}
+            {renderNumberField(`🎯 ${t('settings.rerankerTimeoutMs')}`, t('settings.rerankerTimeoutMsDesc'), 'rerankerTimeoutMs', 500, 30000)}
+            {renderNumberField(`🕸️ ${t('settings.relationTimeoutMs')}`, t('settings.relationTimeoutMsDesc'), 'relationTimeoutMs', 500, 30000)}
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
@@ -55,10 +63,12 @@ export default function GateSection({
           <tbody>
             {displayRow(`📌 ${t('settings.fixedBudget')}`, `${config.gate?.fixedInjectionTokens ?? 500} tokens`, t('settings.fixedBudgetDesc'))}
             {displayRow(`💉 ${t('settings.memoryBudget')}`, `${config.gate?.maxInjectionTokens ?? 1000} tokens`, t('settings.memoryBudgetDesc'))}
+            {displayRow(`🕸️ ${t('settings.relationInjection')}`, config.gate?.relationInjection ? t('common.on') : t('common.off'), t('settings.relationInjectionDesc'))}
             {displayRow(`🔗 ${t('settings.relationBudget')}`, `${config.gate?.relationBudget ?? 100} tokens`, t('settings.relationBudgetDesc'))}
             {displayRow(`🔍 ${t('settings.searchCandidates')}`, config.gate?.searchLimit ?? 30, t('settings.searchCandidatesDesc'))}
             {displayRow(t('settings.skipSmallTalk'), config.gate?.skipSmallTalk ? t('common.on') : t('common.off'), t('settings.skipSmallTalkDesc'))}
             {displayRow(`✂️ ${t('settings.cliffFilter')}`, `${t('settings.cliffAbsolute')}: ${config.gate?.cliffAbsolute ?? 0.4} · ${t('settings.cliffGap')}: ${config.gate?.cliffGap ?? 0.6} · ${t('settings.cliffFloor')}: ${config.gate?.cliffFloor ?? 0.05}`)}
+            {displayRow(`⏱️ ${t('settings.recallTimeouts')}`, `${t('settings.queryExpansionTimeoutMs')}: ${config.gate?.queryExpansionTimeoutMs ?? 5000}ms · ${t('settings.rerankerTimeoutMs')}: ${config.gate?.rerankerTimeoutMs ?? 8000}ms · ${t('settings.relationTimeoutMs')}: ${config.gate?.relationTimeoutMs ?? 5000}ms`)}
             {displayRow(`🔄 ${t('settings.queryExpansion')}`, config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} variants)` : t('common.off'), t('settings.queryExpansionDesc'))}
           </tbody>
         </table>

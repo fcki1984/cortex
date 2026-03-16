@@ -16,6 +16,9 @@ interface LlmSectionProps {
 export default function LlmSection({
   config, editing, sectionHeader, renderProviderBlock, testState, handleTestLLM, handleTestEmbedding, handleTestReranker, t,
 }: LlmSectionProps) {
+  const formatProvider = (provider?: string, model?: string, timeoutMs?: number) =>
+    `${provider}${model ? ` / ${model}` : ''}${timeoutMs ? ` · ${timeoutMs}ms` : ''}`;
+
   return (
     <div className="card">
       {sectionHeader(t('settings.llmEmbedding'), 'llm')}
@@ -32,7 +35,7 @@ export default function LlmSection({
             <tr>
               <td>{t('settings.extractionLlm')}</td>
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{config.llm?.extraction?.provider} / {config.llm?.extraction?.model}</span>
+                <span>{formatProvider(config.llm?.extraction?.provider, config.llm?.extraction?.model, config.llm?.extraction?.timeoutMs)}</span>
                 <button
                   className="btn"
                   style={{ fontSize: 11, padding: '2px 8px' }}
@@ -52,7 +55,7 @@ export default function LlmSection({
             <tr>
               <td>{t('settings.lifecycleLlm')}</td>
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{config.llm?.lifecycle?.provider} / {config.llm?.lifecycle?.model}</span>
+                <span>{formatProvider(config.llm?.lifecycle?.provider, config.llm?.lifecycle?.model, config.llm?.lifecycle?.timeoutMs)}</span>
                 <button
                   className="btn"
                   style={{ fontSize: 11, padding: '2px 8px' }}
@@ -72,7 +75,7 @@ export default function LlmSection({
             <tr>
               <td>{t('settings.embedding')}</td>
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{config.embedding?.provider} / {config.embedding?.model}</span>
+                <span>{formatProvider(config.embedding?.provider, config.embedding?.model, config.embedding?.timeoutMs)}</span>
                 <button
                   className="btn"
                   style={{ fontSize: 11, padding: '2px 8px' }}
@@ -97,8 +100,8 @@ export default function LlmSection({
                   {config.search?.reranker?.provider === 'none' || !config.search?.reranker?.provider
                     ? 'Disabled'
                     : config.search?.reranker?.provider === 'llm'
-                      ? 'LLM (extraction model)'
-                      : `${config.search.reranker.provider}${config.search.reranker.model ? ' / ' + config.search.reranker.model : ''}`
+                      ? `LLM (extraction model)${config.search?.reranker?.timeoutMs ? ` · ${config.search.reranker.timeoutMs}ms` : ''}`
+                      : formatProvider(config.search.reranker.provider, config.search.reranker.model, config.search.reranker.timeoutMs)
                   }
                 </span>
                 {config.search?.reranker?.provider && config.search.reranker.provider !== 'none' && (
