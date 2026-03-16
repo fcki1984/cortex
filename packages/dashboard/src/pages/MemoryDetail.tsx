@@ -7,6 +7,8 @@ interface Memory {
   id: string;
   layer: string;
   category: string;
+  owner_type?: 'user' | 'agent' | 'system' | null;
+  recall_scope?: 'global' | 'topic' | null;
   content: string;
   importance: number;
   confidence: number;
@@ -186,6 +188,8 @@ export default function MemoryDetail({ memoryId, onBack }: { memoryId: string; o
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <span className={`badge ${memory.layer}`}>{memory.layer}</span>
           <span className="badge">{memory.category}</span>
+          {memory.owner_type ? <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>{t(`memories.ownerTypes.${memory.owner_type}`)}</span> : null}
+          {memory.recall_scope ? <span className="badge" style={{ background: 'rgba(249,115,22,0.15)', color: '#fb923c' }}>{t(`memories.recallScopes.${memory.recall_scope}`)}</span> : null}
           {memory.is_pinned ? <span className="badge" style={{ background: 'rgba(255,170,0,0.2)', color: '#b8860b' }}>{t('memoryDetail.pinned')}</span> : null}
         </div>
 
@@ -268,6 +272,8 @@ export default function MemoryDetail({ memoryId, onBack }: { memoryId: string; o
             <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.accessCount')}</td><td>{memory.access_count}</td></tr>
             <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.created')}</td><td>{toLocal(memory.created_at)}</td></tr>
             <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.updated')}</td><td>{toLocal(memory.updated_at)}</td></tr>
+            {memory.owner_type && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.ownerType')}</td><td>{t(`memories.ownerTypes.${memory.owner_type}`)}</td></tr>}
+            {memory.recall_scope && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.recallScope')}</td><td>{t(`memories.recallScopes.${memory.recall_scope}`)}</td></tr>}
             {memory.agent_id && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.agent')}</td><td>{memory.agent_id}</td></tr>}
             {memory.source && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.source')}</td><td>{memory.source}</td></tr>}
             {memory.metadata && (

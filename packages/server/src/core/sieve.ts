@@ -1,7 +1,12 @@
 import { createHash } from 'crypto';
 import { createLogger } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import { upsertRelation as sqliteUpsertRelation, type Memory, type MemoryCategory } from '../db/index.js';
+import {
+  upsertRelation as sqliteUpsertRelation,
+  type Memory,
+  type MemoryCategory,
+  type MemoryRecallScope,
+} from '../db/index.js';
 import { getDriver, upsertRelation as neo4jUpsertRelation } from '../db/neo4j.js';
 import { randomUUID } from 'crypto';
 import { detectHighSignals, isSmallTalk, type DetectedSignal } from '../signals/index.js';
@@ -223,7 +228,7 @@ export class MemorySieve {
       try {
         const signalExtractions: ExtractedMemory[] = signals.map(s => ({
           content: s.content, category: s.category, importance: s.importance,
-          source: 'user_stated' as const, reasoning: `signal: ${s.pattern}`,
+          source: 'user_stated' as const, reasoning: `signal: ${s.pattern}`, scope_hint: s.scope_hint,
         }));
         const batchResults = await this.writer.processNewMemoryBatch(
           signalExtractions, agentId, sessionId, signals[0]?.confidence, 'session',
@@ -248,7 +253,14 @@ export class MemorySieve {
       channel: 'fast',
       exchange_preview: fastPreview,
       raw_output: JSON.stringify(signals.map(s => ({ pattern: s.pattern, category: s.category, content: s.content }))),
-      parsed_memories: signals.map(s => ({ content: s.content, category: s.category, importance: s.importance, source: 'user_stated' as const, reasoning: `signal: ${s.pattern}` })),
+      parsed_memories: signals.map(s => ({
+        content: s.content,
+        category: s.category,
+        importance: s.importance,
+        source: 'user_stated' as const,
+        reasoning: `signal: ${s.pattern}`,
+        scope_hint: s.scope_hint,
+      })),
       memories_written: extracted.length,
       memories_deduped: deduplicated,
       memories_smart_updated: smart_updated,
@@ -536,10 +548,13 @@ export class MemorySieve {
         content: m.content,
         category: m.category as MemoryCategory,
         importance: m.importance,
-        source: (['user_stated', 'user_implied', 'observed_pattern'].includes(m.source)
+        source: (['user_stated', 'user_implied', 'observed_pattern', 'system_defined', 'self_reflection'].includes(m.source)
           ? m.source
           : 'user_implied') as ExtractedMemory['source'],
         reasoning: m.reasoning || '',
+        scope_hint: (m.scope_hint === 'global' || m.scope_hint === 'topic'
+          ? m.scope_hint
+          : undefined) as MemoryRecallScope | undefined,
       }));
 
     return { memories, relations: parseRelations(obj) };

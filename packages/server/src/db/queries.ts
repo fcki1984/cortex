@@ -6,6 +6,8 @@ import { tokenize, tokenizeQuery } from '../utils/tokenizer.js';
 // ============ Memory Types ============
 
 export type MemoryLayer = 'working' | 'core' | 'archive';
+export type MemoryOwnerType = 'user' | 'agent' | 'system';
+export type MemoryRecallScope = 'global' | 'topic';
 export type MemoryCategory =
   | 'identity' | 'preference' | 'decision' | 'fact' | 'entity'
   | 'correction' | 'todo' | 'context' | 'summary'
@@ -19,6 +21,8 @@ export interface Memory {
   id: string;
   layer: MemoryLayer;
   category: MemoryCategory;
+  owner_type: MemoryOwnerType | null;
+  recall_scope: MemoryRecallScope | null;
   content: string;
   source: string | null;
   agent_id: string;
@@ -85,12 +89,17 @@ export function insertMemory(mem: Partial<Memory> & { layer: MemoryLayer; catego
   const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO memories (id, layer, category, content, source, agent_id, importance, confidence, decay_score, expires_at, metadata, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (
+      id, layer, category, owner_type, recall_scope, content, source, agent_id,
+      importance, confidence, decay_score, expires_at, metadata, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     mem.layer,
     mem.category,
+    mem.owner_type || null,
+    mem.recall_scope || null,
     mem.content,
     mem.source || null,
     mem.agent_id || 'default',
@@ -160,6 +169,8 @@ export function getMemoryById(id: string): Memory | null {
 export function listMemories(opts: {
   layer?: MemoryLayer;
   category?: MemoryCategory;
+  owner_type?: MemoryOwnerType;
+  recall_scope?: MemoryRecallScope;
   agent_id?: string;
   limit?: number;
   offset?: number;
@@ -174,6 +185,8 @@ export function listMemories(opts: {
 
   if (opts.layer) { conditions.push('layer = ?'); params.push(opts.layer); }
   if (opts.category) { conditions.push('category = ?'); params.push(opts.category); }
+  if (opts.owner_type) { conditions.push('owner_type = ?'); params.push(opts.owner_type); }
+  if (opts.recall_scope) { conditions.push('recall_scope = ?'); params.push(opts.recall_scope); }
   if (opts.agent_id) { conditions.push('(agent_id = ? OR agent_id IS NULL OR agent_id = \'\')'); params.push(opts.agent_id); }
   if (!opts.include_superseded) { conditions.push('superseded_by IS NULL'); }
   if (opts.has_versions) {
@@ -195,7 +208,7 @@ export function listMemories(opts: {
   return { items, total };
 }
 
-export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' | 'category' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned' | 'source'>>): Memory | null {
+export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' | 'category' | 'owner_type' | 'recall_scope' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned' | 'source'>>): Memory | null {
   const db = getDb();
   const sets: string[] = [];
   const params: any[] = [];

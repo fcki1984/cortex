@@ -1,4 +1,4 @@
-import type { MemoryCategory } from '../db/queries.js';
+import type { MemoryCategory, MemoryRecallScope } from '../db/queries.js';
 
 export interface DetectedSignal {
   category: MemoryCategory;
@@ -6,6 +6,7 @@ export interface DetectedSignal {
   importance: number;
   confidence: number;
   pattern: string;
+  scope_hint?: MemoryRecallScope;
 }
 
 /** Sentence boundary characters for CJK and Western text */
@@ -69,6 +70,7 @@ const HIGH_SIGNAL_PATTERNS: {
   patterns: RegExp[];
   importance: number;
   name: string;
+  scope_hint?: MemoryRecallScope;
   /** If true, skip this rule when the user message looks like a question */
   skipOnQuestion?: boolean;
 }[] = [
@@ -109,8 +111,6 @@ const HIGH_SIGNAL_PATTERNS: {
       /私は.{0,10}(好き|嫌い|したい|したくない)/,
       /が好き/,
       /は嫌[いだ]/,
-      /please (always|never|don'?t)/i,
-      /以后(都|总是|不要|别)/,
       /记住我(喜欢|不喜欢|偏好)/,
       /can'?t stand/i,
       // Korean preference patterns
@@ -313,10 +313,34 @@ const HIGH_SIGNAL_PATTERNS: {
     name: 'goal',
   },
 
+  // ── Global policies / answering strategies ──
+  {
+    category: 'policy',
+    patterns: [
+      /通过澄清[^，。！？\n]{0,30}(语境|词汇|句意|需求)/,
+      /(必要时|正式回答前).{0,20}(提问|先问)/,
+      /建议作为[^，。！？\n]{0,20}(唯一选择|首选)/,
+      /用于动态和反思性问题解决/,
+      /优先使用[^，。！？\n]{0,20}(搜索工具|联网搜索)/,
+      /clarify.{0,30}(context|intent|meaning)/i,
+      /ask follow[- ]up questions before/i,
+      /use .{0,30}search.{0,30}(only|first)/i,
+    ],
+    importance: 0.9,
+    name: 'policy',
+    scope_hint: 'global',
+  },
+
   // ── Constraint ──
   {
     category: 'constraint',
     patterns: [
+      /不要使用怪异化的表达方式/,
+      /回答应避免[^，。！？\n]{0,30}(表达|措辞|语气|说法)/,
+      /只能作为可参考的来源之一/,
+      /不能作为唯一权威|不能作为唯一[^，。！？\n]{0,10}参考源/,
+      /必须使用搜索工具[^，。！？\n]{0,30}(获取|补充|搜索)/,
+      /生成代码时必须包含完整的错误处理/,
       /禁止.{1,30}/,
       /绝对不[要能可]/,
       /(?<!怪|难|舍|巴|了|恨|免)不得(?!了|已|而知|不).{1,40}/,
@@ -334,6 +358,7 @@ const HIGH_SIGNAL_PATTERNS: {
     ],
     importance: 0.95,
     name: 'constraint',
+    scope_hint: 'global',
   },
 
   // ── Agent self-improvement (matches ASSISTANT text only) ──
@@ -406,6 +431,7 @@ export function detectHighSignals(exchange: { user: string; assistant: string })
           importance: rule.importance,
           confidence: 0.85,
           pattern: rule.name,
+          scope_hint: rule.scope_hint,
         });
         break; // One match per category is enough
       }

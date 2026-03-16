@@ -491,6 +491,15 @@ const migrations = [
       );
     `,
   },
+  {
+    name: '013_memory_placement_axes',
+    sql: `
+      ALTER TABLE memories ADD COLUMN owner_type TEXT CHECK (owner_type IN ('user', 'agent', 'system'));
+      ALTER TABLE memories ADD COLUMN recall_scope TEXT CHECK (recall_scope IN ('global', 'topic'));
+      CREATE INDEX IF NOT EXISTS idx_memories_owner_type ON memories(owner_type);
+      CREATE INDEX IF NOT EXISTS idx_memories_recall_scope ON memories(recall_scope);
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

@@ -8,7 +8,15 @@
  * - Cross-family awareness (agent_* vs user categories)
  */
 import { createLogger } from '../utils/logger.js';
-import { insertMemory, getMemoryById, updateMemory, type Memory, type MemoryCategory } from '../db/index.js';
+import {
+  insertMemory,
+  getMemoryById,
+  updateMemory,
+  type Memory,
+  type MemoryCategory,
+  type MemoryOwnerType,
+  type MemoryRecallScope,
+} from '../db/index.js';
 import { parseDuration } from '../utils/helpers.js';
 import { stripCodeFences } from '../utils/sanitize.js';
 import type { LLMProvider } from '../llm/interface.js';
@@ -18,6 +26,11 @@ import type { CortexConfig } from '../utils/config.js';
 import { SMART_UPDATE_SYSTEM_PROMPT } from './prompts.js';
 import { insertExtractionFeedback } from '../db/index.js';
 import { isLifecycleActive } from '../decay/lifecycle.js';
+import {
+  canMergeMemoryPlacements,
+  classifyMemoryPlacement,
+  resolveMemoryPlacement,
+} from '../utils/memory-placement.js';
 
 const log = createLogger('memory-writer');
 
@@ -45,8 +58,11 @@ export interface ExtractedMemory {
   content: string;
   category: MemoryCategory;
   importance: number;
-  source: 'user_stated' | 'user_implied' | 'observed_pattern';
+  source: 'user_stated' | 'user_implied' | 'observed_pattern' | 'system_defined' | 'self_reflection';
   reasoning: string;
+  scope_hint?: MemoryRecallScope;
+  owner_type?: MemoryOwnerType;
+  recall_scope?: MemoryRecallScope;
 }
 
 export interface SimilarMemory {
@@ -73,21 +89,67 @@ export class MemoryWriter {
     private config: CortexConfig,
   ) {}
 
+  private classifyExtraction(extraction: ExtractedMemory): ExtractedMemory {
+    const placement = classifyMemoryPlacement({
+      category: extraction.category,
+      content: extraction.content,
+      source: extraction.source,
+      scope_hint: extraction.scope_hint,
+    });
+    return {
+      ...extraction,
+      owner_type: placement.owner_type,
+      recall_scope: placement.recall_scope,
+    };
+  }
+
+  private formatPlacementPromptBlock(
+    label: 'EXISTING MEMORY' | 'NEW MEMORY',
+    payload: {
+      content: string;
+      category: MemoryCategory;
+      owner_type: MemoryOwnerType;
+      recall_scope: MemoryRecallScope;
+    },
+  ): string {
+    return [
+      `${label}:`,
+      `CATEGORY: ${payload.category}`,
+      `OWNER_TYPE: ${payload.owner_type}`,
+      `RECALL_SCOPE: ${payload.recall_scope}`,
+      payload.content,
+    ].join('\n');
+  }
+
   /**
    * Find similar memories via vector search.
    */
-  async findSimilar(content: string, agentId: string, categories?: string[], topK = 3): Promise<SimilarMemory[]> {
+  async findSimilar(
+    content: string,
+    agentId: string,
+    incoming: Pick<ExtractedMemory, 'category' | 'owner_type' | 'recall_scope'>,
+    categories?: string[],
+    topK = 3,
+  ): Promise<SimilarMemory[]> {
     try {
       const embedding = await this.embeddingProvider.embed(content);
       if (embedding.length === 0) return [];
 
-      const results = await this.vectorBackend.search(embedding, topK, { agent_id: agentId });
+      const results = await this.vectorBackend.search(embedding, Math.max(topK * 4, 12), { agent_id: agentId });
       const similar: SimilarMemory[] = [];
       for (const r of results) {
         const mem = getMemoryById(r.id);
         if (mem && !mem.superseded_by && !mem.is_pinned) {
           if (categories && categories.length > 0 && !categories.includes(mem.category)) continue;
+          if (!canMergeMemoryPlacements(mem, {
+            category: incoming.category,
+            owner_type: incoming.owner_type!,
+            recall_scope: incoming.recall_scope!,
+          })) {
+            continue;
+          }
           similar.push({ memory: mem, distance: r.distance });
+          if (similar.length >= topK) break;
         }
       }
       return similar;
@@ -99,8 +161,23 @@ export class MemoryWriter {
   /**
    * Ask LLM to decide: keep, replace, or merge (single pair).
    */
-  async smartUpdateDecision(existing: Memory, newContent: string): Promise<SmartUpdateDecision> {
-    const prompt = `EXISTING MEMORY:\n${existing.content}\n\nNEW MEMORY:\n${newContent}`;
+  async smartUpdateDecision(existing: Memory, extraction: ExtractedMemory): Promise<SmartUpdateDecision> {
+    const existingPlacement = resolveMemoryPlacement(existing);
+    const prompt = [
+      this.formatPlacementPromptBlock('EXISTING MEMORY', {
+        content: existing.content,
+        category: existing.category,
+        owner_type: existingPlacement.owner_type,
+        recall_scope: existingPlacement.recall_scope,
+      }),
+      '',
+      this.formatPlacementPromptBlock('NEW MEMORY', {
+        content: extraction.content,
+        category: extraction.category,
+        owner_type: extraction.owner_type!,
+        recall_scope: extraction.recall_scope!,
+      }),
+    ].join('\n');
     // Fix #6: Concurrency control for smart update LLM calls
     await smartUpdateSemaphore.acquire();
     try {
@@ -124,15 +201,30 @@ export class MemoryWriter {
    * Falls back to individual calls if batch parsing fails.
    */
   async batchSmartUpdateDecision(
-    pairs: Array<{ existing: Memory; newContent: string }>,
+    pairs: Array<{ existing: Memory; extraction: ExtractedMemory }>,
   ): Promise<SmartUpdateDecision[]> {
     if (pairs.length === 0) return [];
     if (pairs.length === 1) {
-      return [await this.smartUpdateDecision(pairs[0]!.existing, pairs[0]!.newContent)];
+      return [await this.smartUpdateDecision(pairs[0]!.existing, pairs[0]!.extraction)];
     }
 
     const pairBlocks = pairs.map((p, i) =>
-      `--- PAIR ${i} ---\nEXISTING MEMORY:\n${p.existing.content}\n\nNEW MEMORY:\n${p.newContent}`,
+      [
+        `--- PAIR ${i} ---`,
+        this.formatPlacementPromptBlock('EXISTING MEMORY', {
+          content: p.existing.content,
+          category: p.existing.category,
+          owner_type: resolveMemoryPlacement(p.existing).owner_type,
+          recall_scope: resolveMemoryPlacement(p.existing).recall_scope,
+        }),
+        '',
+        this.formatPlacementPromptBlock('NEW MEMORY', {
+          content: p.extraction.content,
+          category: p.extraction.category,
+          owner_type: p.extraction.owner_type!,
+          recall_scope: p.extraction.recall_scope!,
+        }),
+      ].join('\n'),
     ).join('\n\n');
 
     const batchPrompt = `You have ${pairs.length} pairs of (existing, new) memories to evaluate.\nFor each pair, decide: keep, replace, or merge.\n\n${pairBlocks}`;
@@ -172,7 +264,7 @@ export class MemoryWriter {
       log.warn({ error: e.message, count: pairs.length }, 'Batch smart update failed, falling back to individual calls');
       const results: SmartUpdateDecision[] = [];
       for (const pair of pairs) {
-        results.push(await this.smartUpdateDecision(pair.existing, pair.newContent));
+        results.push(await this.smartUpdateDecision(pair.existing, pair.extraction));
       }
       return results;
     }
@@ -210,22 +302,23 @@ export class MemoryWriter {
     sourcePrefix = 'sieve',
     forceLayer?: 'working' | 'core',
   ): Promise<Memory> {
+    const classified = this.classifyExtraction(extraction);
     const content = decision.action === 'merge' && decision.merged_content
       ? decision.merged_content
-      : extraction.content;
+      : classified.content;
 
     // Importance merge strategy: merge takes max, replace/conflict uses new
     const newImportance = decision.action === 'merge'
-      ? Math.max(existing.importance, extraction.importance)
-      : extraction.importance;
+      ? Math.max(existing.importance, classified.importance)
+      : classified.importance;
 
     const layer = forceLayer || (newImportance >= 0.8 ? 'core' : 'working');
     const ttlMs = parseDuration(this.config.layers.working.ttl);
     const expiresAt = layer === 'working' ? new Date(Date.now() + ttlMs).toISOString() : undefined;
 
     const metadata: Record<string, any> = {
-      extraction_source: extraction.source,
-      reasoning: extraction.reasoning,
+      extraction_source: classified.source,
+      reasoning: classified.reasoning,
       smart_update_type: decision.action,
       update_reasoning: decision.reasoning,
       supersedes: existing.id,
@@ -233,7 +326,9 @@ export class MemoryWriter {
 
     const newMem = insertMemory({
       layer,
-      category: extraction.category,
+      category: classified.category,
+      owner_type: classified.owner_type,
+      recall_scope: classified.recall_scope,
       content,
       importance: newImportance,
       confidence: confidenceOverride ?? 0.8,
@@ -263,7 +358,7 @@ export class MemoryWriter {
     await this.indexVector(newMem.id, content);
 
     // Auto-log feedback when a correction replaces an existing memory
-    if (extraction.category === 'correction') {
+    if (classified.category === 'correction') {
       try {
         insertExtractionFeedback({
           memory_id: existing.id,
@@ -304,18 +399,20 @@ export class MemoryWriter {
     sourcePrefix = 'sieve',
     forceLayer?: 'working' | 'core',
   ): Promise<ProcessResult> {
+    const classified = this.classifyExtraction(extraction);
+
     // Gate: filter obvious noise before expensive operations
     const minImportance = this.config.sieve.minImportance ?? 0.3;
-    if (extraction.importance < minImportance) {
-      log.debug({ content: extraction.content.slice(0, 50), importance: extraction.importance, threshold: minImportance }, 'Below minimum importance threshold, skipping');
+    if (classified.importance < minImportance) {
+      log.debug({ content: classified.content.slice(0, 50), importance: classified.importance, threshold: minImportance }, 'Below minimum importance threshold, skipping');
       return { action: 'skipped' };
     }
-    if (extraction.content.length < 8) {
-      log.info({ content: extraction.content }, 'Content too short, skipping');
+    if (classified.content.length < 8) {
+      log.info({ content: classified.content }, 'Content too short, skipping');
       return { action: 'skipped' };
     }
-    if (extraction.content.length > 500) {
-      log.info({ content: extraction.content.slice(0, 50) }, 'Content too long (not refined), skipping');
+    if (classified.content.length > 500) {
+      log.info({ content: classified.content.slice(0, 50) }, 'Content too long (not refined), skipping');
       return { action: 'skipped' };
     }
 
@@ -325,26 +422,26 @@ export class MemoryWriter {
     const effectiveSmartUpdate = smartUpdate && !isLifecycleActive();
 
     // Corrections get a wider similarity window (1.5x)
-    const effectiveThreshold = extraction.category === 'correction'
+    const effectiveThreshold = classified.category === 'correction'
       ? Math.min(similarityThreshold * 1.5, 0.6)
       : similarityThreshold;
 
     // Corrections search within related categories
-    const correctionCategories = extraction.category === 'correction'
+    const correctionCategories = classified.category === 'correction'
       ? ['identity', 'fact', 'preference', 'decision', 'entity', 'skill', 'relationship', 'goal', 'project_state', 'correction']
       : undefined;
 
     // Corrections get wider search (top 10) to find the target memory
-    const topK = extraction.category === 'correction' ? 10 : 3;
-    const similar = await this.findSimilar(extraction.content, agentId, correctionCategories, topK);
+    const topK = classified.category === 'correction' ? 10 : 3;
+    const similar = await this.findSimilar(classified.content, agentId, classified, correctionCategories, topK);
 
     if (!effectiveSmartUpdate) {
       // Legacy behavior (or lifecycle active — skip smart update to avoid races)
       if (similar.length > 0 && similar[0]!.distance < LEGACY_DEDUP_THRESHOLD) {
         return { action: 'skipped' };
       }
-      const mem = this.insertNewMemory(extraction, agentId, sessionId, confidenceOverride, sourcePrefix);
-      await this.indexVector(mem.id, extraction.content);
+      const mem = this.insertNewMemory(classified, agentId, sessionId, confidenceOverride, sourcePrefix);
+      await this.indexVector(mem.id, classified.content);
       return { action: 'inserted', memory: mem };
     }
 
@@ -352,54 +449,47 @@ export class MemoryWriter {
     if (similar.length > 0) {
       const closest = similar[0]!;
 
-      // Cross-family check
-      const newIsAgent = extraction.category.startsWith('agent_');
-      const existingIsAgent = closest.memory.category.startsWith('agent_');
-      const crossFamily = newIsAgent !== existingIsAgent;
+      // Tier 1: exact duplicate → skip
+      if (closest.distance < exactDupThreshold) {
+        log.info({ distance: closest.distance, existing_id: closest.memory.id }, 'Exact duplicate, skipping');
+        return { action: 'skipped' };
+      }
 
-      if (!crossFamily) {
-        // Tier 1: exact duplicate → skip
-        if (closest.distance < exactDupThreshold) {
-          log.info({ distance: closest.distance, existing_id: closest.memory.id }, 'Exact duplicate, skipping');
+      // Tier 1.5: near-exact → auto-replace without LLM call
+      const nearExactThreshold = exactDupThreshold * 1.5;
+      if (closest.distance < nearExactThreshold) {
+        log.info({ distance: closest.distance, existing_id: closest.memory.id }, 'Near-exact match, auto-replacing');
+        const newMem = await this.executeSmartUpdate(
+          { action: 'replace', reasoning: 'Near-exact match, auto-replaced without LLM' },
+          closest.memory, classified, agentId, sessionId, confidenceOverride, sourcePrefix,
+        );
+        return { action: 'smart_updated', memory: newMem };
+      }
+
+      // Tier 2: semantic overlap → LLM decides
+      if (closest.distance < effectiveThreshold) {
+        const decision = await this.smartUpdateDecision(closest.memory, classified);
+        if (decision.action === 'keep') {
+          log.info({ existing_id: closest.memory.id, reasoning: decision.reasoning }, 'Smart update: keep existing');
+          // Refresh confirmation timestamp — memory is still accurate
+          try {
+            const existingMeta = JSON.parse(closest.memory.metadata || '{}');
+            updateMemory(closest.memory.id, {
+              metadata: JSON.stringify({ ...existingMeta, last_confirmed_at: new Date().toISOString() }),
+            });
+          } catch { /* best-effort */ }
           return { action: 'skipped' };
         }
-
-        // Tier 1.5: near-exact → auto-replace without LLM call
-        const nearExactThreshold = exactDupThreshold * 1.5;
-        if (closest.distance < nearExactThreshold) {
-          log.info({ distance: closest.distance, existing_id: closest.memory.id }, 'Near-exact match, auto-replacing');
-          const newMem = await this.executeSmartUpdate(
-            { action: 'replace', reasoning: 'Near-exact match, auto-replaced without LLM' },
-            closest.memory, extraction, agentId, sessionId, confidenceOverride, sourcePrefix,
-          );
-          return { action: 'smart_updated', memory: newMem };
-        }
-
-        // Tier 2: semantic overlap → LLM decides
-        if (closest.distance < effectiveThreshold) {
-          const decision = await this.smartUpdateDecision(closest.memory, extraction.content);
-          if (decision.action === 'keep') {
-            log.info({ existing_id: closest.memory.id, reasoning: decision.reasoning }, 'Smart update: keep existing');
-            // Refresh confirmation timestamp — memory is still accurate
-            try {
-              const existingMeta = JSON.parse(closest.memory.metadata || '{}');
-              updateMemory(closest.memory.id, {
-                metadata: JSON.stringify({ ...existingMeta, last_confirmed_at: new Date().toISOString() }),
-              });
-            } catch { /* best-effort */ }
-            return { action: 'skipped' };
-          }
-          const newMem = await this.executeSmartUpdate(
-            decision, closest.memory, extraction, agentId, sessionId, confidenceOverride, sourcePrefix,
-          );
-          return { action: 'smart_updated', memory: newMem };
-        }
+        const newMem = await this.executeSmartUpdate(
+          decision, closest.memory, classified, agentId, sessionId, confidenceOverride, sourcePrefix,
+        );
+        return { action: 'smart_updated', memory: newMem };
       }
     }
 
     // Tier 3: unrelated → normal insert
-    const mem = this.insertNewMemory(extraction, agentId, sessionId, confidenceOverride, sourcePrefix, forceLayer);
-    await this.indexVector(mem.id, extraction.content);
+    const mem = this.insertNewMemory(classified, agentId, sessionId, confidenceOverride, sourcePrefix, forceLayer);
+    await this.indexVector(mem.id, classified.content);
     return { action: 'inserted', memory: mem };
   }
 
@@ -416,10 +506,11 @@ export class MemoryWriter {
     sourcePrefix = 'sieve',
   ): Promise<ProcessResult[]> {
     if (extractions.length === 0) return [];
+    const classifiedExtractions = extractions.map(extraction => this.classifyExtraction(extraction));
 
     // Gate: filter obvious noise before expensive operations
     const minImportance = this.config.sieve.minImportance ?? 0.3;
-    const gatedExtractions = extractions.filter((ext, i) => {
+    const gatedExtractions = classifiedExtractions.filter((ext) => {
       if (ext.importance < minImportance) {
         log.debug({ content: ext.content.slice(0, 50), importance: ext.importance, threshold: minImportance }, 'Batch gate: below threshold');
         return false;
@@ -431,7 +522,7 @@ export class MemoryWriter {
       return true;
     });
     // Build result array with skipped entries for gated items
-    const gateResults: (ProcessResult | null)[] = extractions.map((ext) =>
+    const gateResults: (ProcessResult | null)[] = classifiedExtractions.map((ext) =>
       (ext.importance < minImportance || ext.content.length < 8 || ext.content.length > 500)
         ? { action: 'skipped' as const }
         : null,
@@ -459,7 +550,7 @@ export class MemoryWriter {
           : undefined;
         // Corrections get wider search (top 10) to find the target memory
         const topK = ext.category === 'correction' ? 10 : 3;
-        return this.findSimilar(ext.content, agentId, cats, topK);
+        return this.findSimilar(ext.content, agentId, ext, cats, topK);
       }),
     );
 
@@ -482,20 +573,12 @@ export class MemoryWriter {
 
       if (similar.length > 0) {
         const closest = similar[0]!;
-        const newIsAgent = extraction.category.startsWith('agent_');
-        const existingIsAgent = closest.memory.category.startsWith('agent_');
-        const crossFamily = newIsAgent !== existingIsAgent;
-
-        if (!crossFamily) {
-          if (closest.distance < exactDupThreshold) {
-            pending.push({ index: i, extraction, similar, tier: 'skip', closest });
-          } else if (closest.distance < exactDupThreshold * 1.5) {
-            pending.push({ index: i, extraction, similar, tier: 'near_exact', closest });
-          } else if (closest.distance < effectiveThreshold) {
-            pending.push({ index: i, extraction, similar, tier: 'needs_llm', closest });
-          } else {
-            pending.push({ index: i, extraction, similar, tier: 'insert' });
-          }
+        if (closest.distance < exactDupThreshold) {
+          pending.push({ index: i, extraction, similar, tier: 'skip', closest });
+        } else if (closest.distance < exactDupThreshold * 1.5) {
+          pending.push({ index: i, extraction, similar, tier: 'near_exact', closest });
+        } else if (closest.distance < effectiveThreshold) {
+          pending.push({ index: i, extraction, similar, tier: 'needs_llm', closest });
         } else {
           pending.push({ index: i, extraction, similar, tier: 'insert' });
         }
@@ -509,7 +592,7 @@ export class MemoryWriter {
     let llmDecisions: SmartUpdateDecision[] = [];
     if (llmItems.length > 0) {
       llmDecisions = await this.batchSmartUpdateDecision(
-        llmItems.map(p => ({ existing: p.closest!.memory, newContent: p.extraction.content })),
+        llmItems.map(p => ({ existing: p.closest!.memory, extraction: p.extraction })),
       );
     }
 
@@ -573,20 +656,23 @@ export class MemoryWriter {
     sourcePrefix = 'sieve',
     forceLayer?: 'working' | 'core',
   ): Memory {
-    const layer = forceLayer || (extraction.importance >= 0.8 ? 'core' : 'working');
+    const classified = this.classifyExtraction(extraction);
+    const layer = forceLayer || (classified.importance >= 0.8 ? 'core' : 'working');
     const ttlMs = parseDuration(this.config.layers.working.ttl);
     const expiresAt = layer === 'working' ? new Date(Date.now() + ttlMs).toISOString() : undefined;
 
     return insertMemory({
       layer,
-      category: extraction.category,
-      content: extraction.content,
-      importance: extraction.importance,
+      category: classified.category,
+      owner_type: classified.owner_type,
+      recall_scope: classified.recall_scope,
+      content: classified.content,
+      importance: classified.importance,
       confidence: confidenceOverride ?? 0.8,
       agent_id: agentId,
       source: sessionId ? `${sourcePrefix}:${sessionId}` : sourcePrefix,
       expires_at: expiresAt,
-      metadata: JSON.stringify({ extraction_source: extraction.source, reasoning: extraction.reasoning }),
+      metadata: JSON.stringify({ extraction_source: classified.source, reasoning: classified.reasoning }),
     });
   }
 

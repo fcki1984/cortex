@@ -107,6 +107,8 @@ export default {
     searchPlaceholder: '搜索记忆...',
     allLayers: '所有层级',
     allCategories: '所有分类',
+    allOwnerTypes: '所有归属',
+    allRecallScopes: '所有作用域',
     allMemories: '全部记忆',
     hasVersions: '有版本历史',
     includeSuperseded: '含已替代版本',
@@ -143,6 +145,15 @@ export default {
     toastDeleteFailed: '删除失败',
     toastCategoryUpdated: '已将 {{count}} 条记忆的分类更新为 "{{category}}"',
     toastUpdateFailed: '更新失败',
+    ownerTypes: {
+      user: '用户',
+      agent: '智能体',
+      system: '系统',
+    },
+    recallScopes: {
+      global: '全局',
+      topic: '主题',
+    },
     categories: {
       constraint: '硬约束',
       policy: '执行策略',
@@ -162,6 +173,8 @@ export default {
     accessCount: '访问次数',
     created: '创建时间',
     updated: '更新时间',
+    ownerType: '归属类型',
+    recallScope: '召回作用域',
     agent: '智能体',
     source: '来源',
     metadata: '元数据',

@@ -9,6 +9,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
     return listMemories({
       layer: q.layer,
       category: q.category,
+      owner_type: q.owner_type,
+      recall_scope: q.recall_scope,
       agent_id: q.agent_id,
       limit: q.limit ? parseInt(q.limit) : undefined,
       offset: q.offset ? parseInt(q.offset) : undefined,
@@ -54,6 +56,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
               'agent_self_improvement', 'agent_user_habit', 'agent_relationship', 'agent_persona',
             ],
           },
+          owner_type: { type: 'string', enum: ['user', 'agent', 'system'] },
+          recall_scope: { type: 'string', enum: ['global', 'topic'] },
           content: { type: 'string' },
           agent_id: { type: 'string' },
           importance: { type: 'number' },
@@ -119,6 +123,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
     const restored = updateMemory(current.id, {
       content: target.content,
       category: target.category,
+      owner_type: target.owner_type,
+      recall_scope: target.recall_scope,
       importance: target.importance,
       confidence: target.confidence,
     });

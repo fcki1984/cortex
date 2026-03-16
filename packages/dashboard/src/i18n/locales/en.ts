@@ -107,6 +107,8 @@ export default {
     searchPlaceholder: 'Search memories...',
     allLayers: 'All Layers',
     allCategories: 'All Categories',
+    allOwnerTypes: 'All Owners',
+    allRecallScopes: 'All Scopes',
     allMemories: 'All Memories',
     hasVersions: 'Has Versions',
     includeSuperseded: 'Include Superseded',
@@ -143,6 +145,15 @@ export default {
     toastDeleteFailed: 'Delete failed',
     toastCategoryUpdated: 'Updated {{count}} memories to category "{{category}}"',
     toastUpdateFailed: 'Update failed',
+    ownerTypes: {
+      user: 'User',
+      agent: 'Agent',
+      system: 'System',
+    },
+    recallScopes: {
+      global: 'Global',
+      topic: 'Topic',
+    },
     categories: {
       constraint: 'Constraints',
       policy: 'Policies',
@@ -162,6 +173,8 @@ export default {
     accessCount: 'Access Count',
     created: 'Created',
     updated: 'Updated',
+    ownerType: 'Owner Type',
+    recallScope: 'Recall Scope',
     agent: 'Agent',
     source: 'Source',
     metadata: 'Metadata',

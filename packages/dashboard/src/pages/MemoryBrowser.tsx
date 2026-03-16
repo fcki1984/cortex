@@ -8,6 +8,8 @@ interface Memory {
   id: string;
   layer: string;
   category: string;
+  owner_type?: 'user' | 'agent' | 'system' | null;
+  recall_scope?: 'global' | 'topic' | null;
   content: string;
   importance: number;
   confidence: number;
@@ -30,6 +32,8 @@ export default function MemoryBrowser() {
   const [total, setTotal] = useState(0);
   const [layer, setLayer] = useState('');
   const [category, setCategory] = useState('');
+  const [ownerTypeFilter, setOwnerTypeFilter] = useState('');
+  const [recallScopeFilter, setRecallScopeFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
   const [agents, setAgents] = useState<any[]>([]);
   const [versionFilter, setVersionFilter] = useState('');
@@ -73,6 +77,8 @@ export default function MemoryBrowser() {
         if (layer) results = results.filter(m => m.layer === layer);
         if (category) results = results.filter(m => m.category === category);
         if (agentFilter) results = results.filter(m => m.agent_id === agentFilter);
+        if (ownerTypeFilter) results = results.filter(m => (m.owner_type || '') === ownerTypeFilter);
+        if (recallScopeFilter) results = results.filter(m => (m.recall_scope || '') === recallScopeFilter);
         // Default sort by score (desc) in search mode, unless user picked a different sort
         if (sortField === 'created_at' && sortDir === 'desc') {
           results.sort((a: any, b: any) => (b.finalScore ?? 0) - (a.finalScore ?? 0));
@@ -91,6 +97,8 @@ export default function MemoryBrowser() {
       const params: Record<string, string> = { limit: String(limit), offset: String(page * limit) };
       if (layer) params.layer = layer;
       if (category) params.category = category;
+      if (ownerTypeFilter) params.owner_type = ownerTypeFilter;
+      if (recallScopeFilter) params.recall_scope = recallScopeFilter;
       if (agentFilter) params.agent_id = agentFilter;
       if (versionFilter === 'has_versions') {
         params.has_versions = 'true';
@@ -113,7 +121,7 @@ export default function MemoryBrowser() {
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layer, category, agentFilter, versionFilter, page, searchQuery, isSearchMode, sortField, sortDir]);
+  }, [layer, category, ownerTypeFilter, recallScopeFilter, agentFilter, versionFilter, page, searchQuery, isSearchMode, sortField, sortDir]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { listAgents().then((res: any) => setAgents(res.agents || [])).catch(() => {}); }, []);
@@ -306,6 +314,17 @@ export default function MemoryBrowser() {
           <option value="">{t('memories.allCategories')}</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select value={ownerTypeFilter} onChange={e => { setOwnerTypeFilter(e.target.value); setPage(0); }}>
+          <option value="">{t('memories.allOwnerTypes')}</option>
+          <option value="user">{t('memories.ownerTypes.user')}</option>
+          <option value="agent">{t('memories.ownerTypes.agent')}</option>
+          <option value="system">{t('memories.ownerTypes.system')}</option>
+        </select>
+        <select value={recallScopeFilter} onChange={e => { setRecallScopeFilter(e.target.value); setPage(0); }}>
+          <option value="">{t('memories.allRecallScopes')}</option>
+          <option value="global">{t('memories.recallScopes.global')}</option>
+          <option value="topic">{t('memories.recallScopes.topic')}</option>
+        </select>
         <select value={agentFilter} onChange={e => { setAgentFilter(e.target.value); setPage(0); }}>
           <option value="">All Agents</option>
           {agents.map((a: any) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
@@ -393,6 +412,16 @@ export default function MemoryBrowser() {
                 />
                 <span className={`badge ${m.layer}`}>{m.layer}</span>
                 <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>{m.category}</span>
+                {m.owner_type ? (
+                  <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>
+                    {t(`memories.ownerTypes.${m.owner_type}`)}
+                  </span>
+                ) : null}
+                {m.recall_scope ? (
+                  <span className="badge" style={{ background: 'rgba(249,115,22,0.15)', color: '#fb923c' }}>
+                    {t(`memories.recallScopes.${m.recall_scope}`)}
+                  </span>
+                ) : null}
                 {m.is_pinned ? <span className="badge" style={{ background: 'rgba(255,170,0,0.2)', color: '#b8860b' }}>{t('memoryDetail.pinned')}</span> : null}
                 {isSearchMode && scoreMap[m.id] !== undefined && (
                   <span className="badge" style={{

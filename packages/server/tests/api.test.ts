@@ -84,12 +84,20 @@ describe('API Integration', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/memories',
-        payload: { layer: 'core', category: 'fact', content: 'API test memory' },
+        payload: {
+          layer: 'core',
+          category: 'fact',
+          owner_type: 'user',
+          recall_scope: 'topic',
+          content: 'API test memory',
+        },
       });
       expect(res.statusCode).toBe(201);
       const body = JSON.parse(res.payload);
       expect(body.id).toBeTruthy();
       expect(body.content).toBe('API test memory');
+      expect(body.owner_type).toBe('user');
+      expect(body.recall_scope).toBe('topic');
     });
   });
 
@@ -107,6 +115,32 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       body.items.forEach((m: any) => expect(m.layer).toBe('core'));
+    });
+
+    it('should filter by owner_type and recall_scope', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/api/v1/memories',
+        payload: {
+          layer: 'core',
+          category: 'constraint',
+          owner_type: 'system',
+          recall_scope: 'global',
+          content: 'Always cite external sources when available',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/memories?owner_type=system&recall_scope=global',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.items.length).toBeGreaterThanOrEqual(1);
+      body.items.forEach((m: any) => {
+        expect(m.owner_type).toBe('system');
+        expect(m.recall_scope).toBe('global');
+      });
     });
   });
 
@@ -160,6 +194,24 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.results).toBeDefined();
+    });
+
+    it('should pass owner_type and recall_scope filters through search', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/search',
+        payload: {
+          query: 'cite external sources',
+          owner_type: 'system',
+          recall_scope: 'global',
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      body.results.forEach((m: any) => {
+        expect(m.owner_type).toBe('system');
+        expect(m.recall_scope).toBe('global');
+      });
     });
   });
 

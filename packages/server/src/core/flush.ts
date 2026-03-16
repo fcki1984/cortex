@@ -1,5 +1,11 @@
 import { createLogger } from '../utils/logger.js';
-import { insertMemory, upsertRelation, type Memory, type MemoryCategory } from '../db/index.js';
+import {
+  insertMemory,
+  upsertRelation,
+  type Memory,
+  type MemoryCategory,
+  type MemoryRecallScope,
+} from '../db/index.js';
 import { parseDuration } from '../utils/helpers.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
@@ -115,6 +121,8 @@ export class MemoryFlush {
         const mem = insertMemory({
           layer: 'working',
           category: 'summary',
+          owner_type: 'system',
+          recall_scope: 'topic',
           content: summary,
           importance: 0.7,
           confidence: 0.85,
@@ -262,10 +270,13 @@ export class MemoryFlush {
         content: m.content,
         category: m.category as MemoryCategory,
         importance: m.importance,
-        source: (['user_stated', 'user_implied', 'observed_pattern'].includes(m.source)
+        source: (['user_stated', 'user_implied', 'observed_pattern', 'system_defined', 'self_reflection'].includes(m.source)
           ? m.source
           : 'user_implied') as ExtractedMemory['source'],
         reasoning: m.reasoning || '',
+        scope_hint: (m.scope_hint === 'global' || m.scope_hint === 'topic'
+          ? m.scope_hint
+          : undefined) as MemoryRecallScope | undefined,
       }));
   }
 }

@@ -33,6 +33,8 @@ function createSearchResult(id: string, content: string, finalScore = 0.6): any 
     content,
     layer: 'core',
     category: 'fact',
+    owner_type: 'user',
+    recall_scope: 'topic',
     agent_id: 'default',
     importance: 0.8,
     decay_score: 1,
@@ -274,6 +276,100 @@ describe('MemoryGate', () => {
     expect(result.context).not.toContain('proxy traffic residential plan');
     expect(result.meta.injected_count).toBe(1);
     expect(relevanceGate.buildRelationBlock).not.toHaveBeenCalled();
+  });
+
+  it('should keep global rules but suppress topic memories on low relevance', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Use natural and formal Chinese writing',
+      agent_id: 'rule-scope-test',
+      importance: 1,
+      owner_type: 'user',
+      recall_scope: 'global',
+    });
+    insertMemory({
+      layer: 'core',
+      category: 'preference',
+      content: 'Prefers traffic-billed residential proxies',
+      agent_id: 'rule-scope-test',
+      importance: 0.9,
+      owner_type: 'user',
+      recall_scope: 'topic',
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('topic-1', 'Prefers traffic-billed residential proxies', 0.92),
+        agent_id: 'rule-scope-test',
+        category: 'preference',
+        owner_type: 'user',
+        recall_scope: 'topic',
+        vectorScore: 0.15,
+        fusedScore: 0.08,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: true,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+      },
+    });
+    const relevanceGate = new MemoryGate(searchEngine, config.gate) as any;
+    relevanceGate.buildRelationBlock = vi.fn().mockResolvedValue({ block: '', count: 0 });
+
+    const result = await relevanceGate.recall({ query: 'how to make crispy chicken wings', agent_id: 'rule-scope-test' });
+
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.context).toContain('Use natural and formal Chinese writing');
+    expect(result.context).not.toContain('Prefers traffic-billed residential proxies');
+    expect(result.memories).toHaveLength(1);
+    expect(relevanceGate.buildRelationBlock).not.toHaveBeenCalled();
+  });
+
+  it('should not treat legacy constraint memories as fixed global rules by default', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Buying a car should stay within a 16万落地 budget',
+      agent_id: 'legacy-constraint-test',
+      importance: 1,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('legacy-1', 'Buying a car should stay within a 16万落地 budget', 0.91),
+        agent_id: 'legacy-constraint-test',
+        category: 'constraint',
+        owner_type: null,
+        recall_scope: null,
+        vectorScore: 0.2,
+        fusedScore: 0.1,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+      },
+    });
+    const relevanceGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await relevanceGate.recall({ query: 'crispy chicken wings recipe', agent_id: 'legacy-constraint-test' });
+
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.context).toBe('');
+    expect(result.memories).toHaveLength(1);
   });
 
   it('should allow semantic fallback when top candidate is strong enough without token overlap', async () => {

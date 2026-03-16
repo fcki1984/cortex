@@ -59,7 +59,7 @@ const SHARED_EXCLUSIONS = `## Do NOT extract
 3. System metadata: prompts, tool descriptions, framework markers, injected tags`;
 
 const SHARED_OUTPUT_FORMAT = `## Output format
-{"memories": [{"content": "...", "category": "...", "importance": 0.0-1.0, "source": "user_stated|user_implied|observed_pattern|system_defined|self_reflection", "reasoning": "..."}], "relations": [{"subject": "entity (1-5 words)", "predicate": "uses|works_at|lives_in|knows|manages|belongs_to|created|prefers|studies|skilled_in|collaborates_with|reports_to|owns|interested_in|related_to|not_uses|not_interested_in|dislikes", "object": "entity (1-5 words)", "confidence": 0.0-1.0, "expired": false}], "nothing_extracted": false}
+{"memories": [{"content": "...", "category": "...", "importance": 0.0-1.0, "source": "user_stated|user_implied|observed_pattern|system_defined|self_reflection", "scope_hint": "global|topic", "reasoning": "..."}], "relations": [{"subject": "entity (1-5 words)", "predicate": "uses|works_at|lives_in|knows|manages|belongs_to|created|prefers|studies|skilled_in|collaborates_with|reports_to|owns|interested_in|related_to|not_uses|not_interested_in|dislikes", "object": "entity (1-5 words)", "confidence": 0.0-1.0, "expired": false}], "nothing_extracted": false}
 
 The "nothing_extracted" field is REQUIRED — always include it (true when memories is empty, false otherwise).
 If nothing qualifies: {"memories": [], "relations": [], "nothing_extracted": true}`;
@@ -115,6 +115,10 @@ ${SHARED_ATTRIBUTION}
 ## Rules
 - Same language as user input.
 - Extract in the SAME language as the user's message. Never translate. Category names and JSON keys stay in English (they are schema).
+- Every memory MUST include scope_hint:
+  - global: stable cross-topic rules only (answer style, evidence policy, tool policy, assistant persona)
+  - topic: user preferences, budgets, product choices, project constraints, domain facts
+- One memory must express ONE role only. Do not mix a global rule with a user/domain fact in the same memory.
 - Extract everything genuinely worth remembering — don't miss real information.
 - But don't pad: if an exchange has 1 memory, output 1. If it has 0, output 0.
 - Typical range: 0-3 memories per exchange. Max 5 only for unusually information-dense exchanges.
@@ -122,6 +126,9 @@ ${SHARED_ATTRIBUTION}
 - nothing_extracted: true is a valid and common output — use it when appropriate.
 - Be specific: "prefers dark mode in all editors" not "has UI preferences"
 - Corrections: category="correction", importance≥0.9, content MUST include the updated fact
+- scope_hint:
+  - Use global only for stable answer style, citation rules, search/tool strategy, or assistant persona
+  - Use topic for all user domain preferences, budgets, product/model choices, project state, and session-derived facts
 - Relations: only EXPLICITLY stated, short entity names, use "expired":true for past tense
 - source: constraint→"user_stated"/"system_defined", policy→"user_stated"/"observed_pattern", agent_*→"observed_pattern"/"self_reflection"
 
@@ -269,6 +276,10 @@ ${SHARED_RELATION_RULES}
 ## Rules
 - Extract in the SAME language as the user's message. Never translate. Category names and JSON keys stay in English.
 - Be specific and factual. Do not infer or speculate.
+- Every memory MUST include scope_hint:
+  - global only for stable cross-topic rules (answer style, tool strategy, evidence policy, assistant persona)
+  - topic for user/domain facts, budgets, product choices, project conditions, and goals
+- Never combine a global rule and a domain fact into one memory.
 - source: constraint→"user_stated"/"system_defined", policy→"user_stated"/"observed_pattern", agent_*→"observed_pattern"/"self_reflection"`;
 
 
@@ -295,6 +306,8 @@ Given an EXISTING memory and a NEW memory that are semantically similar, decide 
 - If the new memory directly contradicts the old one (opposite facts) → conflict
 - Prefer merge when both contain unique useful details
 - Prefer replace when the new memory is strictly better (more specific, corrects errors)
+- Only compare memories within the SAME placement family.
+- If CATEGORY / OWNER_TYPE / RECALL_SCOPE are different enough that they represent different roles, do NOT force a merge.
 
 ## Output format
 Output ONLY a valid JSON object:
