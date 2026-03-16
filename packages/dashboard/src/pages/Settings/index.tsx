@@ -165,6 +165,12 @@ export default function Settings() {
         cliffAbsolute: config.gate?.cliffAbsolute ?? 0.4,
         cliffGap: config.gate?.cliffGap ?? 0.6,
         cliffFloor: config.gate?.cliffFloor ?? 0.05,
+        relevanceGate: {
+          enabled: config.gate?.relevanceGate?.enabled ?? true,
+          inspectTopK: config.gate?.relevanceGate?.inspectTopK ?? 3,
+          minSemanticScore: config.gate?.relevanceGate?.minSemanticScore ?? 0.55,
+          minFusedScoreNoOverlap: config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15,
+        },
         queryExpansion: {
           enabled: config.gate?.queryExpansion?.enabled ?? false,
           maxVariants: config.gate?.queryExpansion?.maxVariants ?? 3,
@@ -277,6 +283,12 @@ export default function Settings() {
       if (isNaN(cg) || cg < 0.1 || cg > 0.9) errors.push(t('settings.validationCliffRange'));
       const cf = Number(draft.cliffFloor);
       if (isNaN(cf) || cf < 0 || cf > 0.5) errors.push(t('settings.validationCliffRange'));
+      const inspectTopK = Number(draft.relevanceGate?.inspectTopK);
+      if (isNaN(inspectTopK) || inspectTopK < 1 || inspectTopK > 10) errors.push(t('settings.validationPositiveNumber'));
+      const semanticScore = Number(draft.relevanceGate?.minSemanticScore);
+      if (isNaN(semanticScore) || semanticScore < 0 || semanticScore > 1) errors.push(t('settings.validationThresholdRange'));
+      const fusedScore = Number(draft.relevanceGate?.minFusedScoreNoOverlap);
+      if (isNaN(fusedScore) || fusedScore < 0 || fusedScore > 1) errors.push(t('settings.validationThresholdRange'));
     }
 
     if (section === 'llm') {
@@ -393,6 +405,12 @@ export default function Settings() {
           cliffAbsolute: Number(draft.cliffAbsolute),
           cliffGap: Number(draft.cliffGap),
           cliffFloor: Number(draft.cliffFloor),
+          relevanceGate: {
+            enabled: draft.relevanceGate?.enabled ?? true,
+            inspectTopK: Number(draft.relevanceGate?.inspectTopK ?? 3),
+            minSemanticScore: Number(draft.relevanceGate?.minSemanticScore ?? 0.55),
+            minFusedScoreNoOverlap: Number(draft.relevanceGate?.minFusedScoreNoOverlap ?? 0.15),
+          },
           queryExpansion: {
             enabled: draft.queryExpansion?.enabled ?? false,
             maxVariants: Number(draft.queryExpansion?.maxVariants ?? 3),

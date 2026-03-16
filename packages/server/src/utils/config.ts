@@ -91,6 +91,12 @@ const CortexConfigSchema = z.object({
     rerankerTimeoutMs: z.number().min(500).max(30000).default(8000),
     relationInjection: z.boolean().default(true),
     relationTimeoutMs: z.number().min(500).max(30000).default(5000),
+    relevanceGate: z.object({
+      enabled: z.boolean().default(true),
+      inspectTopK: z.number().min(1).max(10).default(3),
+      minSemanticScore: z.number().min(0).max(1).default(0.55),
+      minFusedScoreNoOverlap: z.number().min(0).max(1).default(0.15),
+    }).default({}),
     relationBudget: z.number().min(0).default(100),
     cliffAbsolute: z.number().min(0.1).max(0.9).default(0.4),
     cliffGap: z.number().min(0.1).max(0.9).default(0.6),

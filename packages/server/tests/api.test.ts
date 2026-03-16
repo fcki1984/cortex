@@ -25,6 +25,12 @@ describe('API Integration', () => {
         rerankerTimeoutMs: 6666,
         relationInjection: true,
         relationTimeoutMs: 7777,
+        relevanceGate: {
+          enabled: true,
+          inspectTopK: 4,
+          minSemanticScore: 0.66,
+          minFusedScoreNoOverlap: 0.22,
+        },
       },
       search: {
         reranker: {
@@ -206,6 +212,10 @@ describe('API Integration', () => {
       expect(body.gate.rerankerTimeoutMs).toBe(6666);
       expect(body.gate.relationInjection).toBe(true);
       expect(body.gate.relationTimeoutMs).toBe(7777);
+      expect(body.gate.relevanceGate.enabled).toBe(true);
+      expect(body.gate.relevanceGate.inspectTopK).toBe(4);
+      expect(body.gate.relevanceGate.minSemanticScore).toBe(0.66);
+      expect(body.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.22);
     });
   });
 
@@ -227,6 +237,30 @@ describe('API Integration', () => {
       expect(body.ok).toBe(true);
       expect(body.reloaded_providers).toContain('llm.extraction');
       expect(body.config.llm.extraction.timeoutMs).toBe(9999);
+    });
+
+    it('should persist relevance gate settings', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/config',
+        payload: {
+          gate: {
+            relevanceGate: {
+              enabled: false,
+              inspectTopK: 2,
+              minSemanticScore: 0.71,
+              minFusedScoreNoOverlap: 0.19,
+            },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.ok).toBe(true);
+      expect(body.config.gate.relevanceGate.enabled).toBe(false);
+      expect(body.config.gate.relevanceGate.inspectTopK).toBe(2);
+      expect(body.config.gate.relevanceGate.minSemanticScore).toBe(0.71);
+      expect(body.config.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.19);
     });
   });
 });
