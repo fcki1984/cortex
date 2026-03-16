@@ -400,6 +400,94 @@ describe('MemoryGate', () => {
     expect(result.meta.search_injected_count).toBe(1);
   });
 
+  it('should keep domain-specific constraints out of the fixed rule layer', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Use natural and formal Chinese',
+      agent_id: 'rule-eligibility-test',
+      importance: 1,
+    });
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: '购车预算为16万含落地',
+      agent_id: 'rule-eligibility-test',
+      importance: 0.95,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', '购车预算为16万含落地', 0.9),
+        agent_id: 'rule-eligibility-test',
+        category: 'constraint',
+        vectorScore: 0.8,
+        fusedScore: 0.7,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+        ruleInjection: { enabled: true, maxTokens: 120 },
+      },
+    });
+    const ruleGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await ruleGate.recall({ query: '16万落地买什么车', agent_id: 'rule-eligibility-test' });
+
+    expect(result.context).toContain('Use natural and formal Chinese');
+    expect(result.meta.rule_injected_count).toBe(1);
+    expect(result.meta.search_injected_count).toBe(1);
+    expect(result.context).toContain('购车预算为16万含落地');
+  });
+
+  it('should suppress domain-specific constraints on unrelated queries while keeping global rules', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Use natural and formal Chinese',
+      agent_id: 'rule-suppression-test',
+      importance: 1,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', '购车预算为16万含落地', 0.9),
+        agent_id: 'rule-suppression-test',
+        category: 'constraint',
+        vectorScore: 0.2,
+        fusedScore: 0.1,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+        ruleInjection: { enabled: true, maxTokens: 120 },
+      },
+    });
+    const ruleGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await ruleGate.recall({ query: '空气炸锅鸡翅怎么做', agent_id: 'rule-suppression-test' });
+
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.context).toContain('Use natural and formal Chinese');
+    expect(result.context).not.toContain('购车预算为16万含落地');
+    expect(result.meta.rule_injected_count).toBe(1);
+    expect(result.meta.search_injected_count).toBe(0);
+  });
+
   it('should fall back to normal search injection when rule layer is disabled', async () => {
     const searchEngine = createStubSearchEngine([
       {

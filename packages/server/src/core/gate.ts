@@ -62,6 +62,13 @@ const GATE_STOP_WORDS = new Set([
   'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which',
 ]);
 
+const FIXED_RULE_HINTS = [
+  /回答|作答|回复|输出|表达|语言|语气|风格|口吻|中文|写作/u,
+  /澄清|提问|追问|歧义|语境|句意|词汇|对齐用户需求/u,
+  /搜索|联网|引用|来源|证据|权威|知识库|工具|mcp/u,
+  /answer|respond|response|reply|tone|style|wording|clarif|ambigu|search|browse|tool|source|cite|citation|evidence|mcp|formal|natural|professional|concise|chinese/i,
+];
+
 const DEFAULT_RELEVANCE_GATE: RelevanceGateDecision = {
   passed: true,
   suppressed: false,
@@ -95,6 +102,12 @@ function mergeMemoryBlocks(blocks: string[]): string {
   if (bodies.length === 0) return '';
 
   return ['<cortex_memory>', ...bodies, '</cortex_memory>'].join('\n');
+}
+
+function isEligibleFixedRule(content: string): boolean {
+  const normalized = content.trim();
+  if (!normalized) return false;
+  return FIXED_RULE_HINTS.some(pattern => pattern.test(normalized));
 }
 
 export class MemoryGate {
@@ -273,7 +286,12 @@ export class MemoryGate {
 
     let ruleResults: SearchResult[] = [];
     if (ruleInjectionEnabled) {
-      const ruleExtraction = this.extractFixedLayerResults(req.agent_id, ['constraint', 'policy'], results);
+      const ruleExtraction = this.extractFixedLayerResults(
+        req.agent_id,
+        ['constraint', 'policy'],
+        results,
+        result => isEligibleFixedRule(result.content)
+      );
       ruleResults = ruleExtraction.fixedResults;
       results = ruleExtraction.remainingResults;
     }
@@ -365,14 +383,15 @@ export class MemoryGate {
   private extractFixedLayerResults(
     agentId: string | undefined,
     categories: string[],
-    results: SearchResult[]
+    results: SearchResult[],
+    predicate?: (result: SearchResult) => boolean
   ): { fixedResults: SearchResult[]; remainingResults: SearchResult[] } {
     const categorySet = new Set(categories);
     const fixedMap = new Map<string, SearchResult>();
     const remainingResults: SearchResult[] = [];
 
     for (const result of results) {
-      if (categorySet.has(result.category)) {
+      if (categorySet.has(result.category) && (!predicate || predicate(result))) {
         fixedMap.set(result.id, result);
       } else {
         remainingResults.push(result);
@@ -389,26 +408,27 @@ export class MemoryGate {
       });
 
       for (const memory of items) {
-        if (!fixedMap.has(memory.id)) {
-          fixedMap.set(memory.id, {
-            id: memory.id,
-            content: memory.content,
-            layer: memory.layer,
-            category: memory.category,
-            agent_id: memory.agent_id,
-            importance: memory.importance,
-            decay_score: memory.decay_score,
-            access_count: memory.access_count,
-            created_at: memory.created_at,
-            textScore: 0,
-            vectorScore: 0,
-            rawVectorSim: 0,
-            fusedScore: 0,
-            layerWeight: 1,
-            recencyBoost: 1,
-            accessBoost: 1,
-            finalScore: 0,
-          });
+        const candidate: SearchResult = {
+          id: memory.id,
+          content: memory.content,
+          layer: memory.layer,
+          category: memory.category,
+          agent_id: memory.agent_id,
+          importance: memory.importance,
+          decay_score: memory.decay_score,
+          access_count: memory.access_count,
+          created_at: memory.created_at,
+          textScore: 0,
+          vectorScore: 0,
+          rawVectorSim: 0,
+          fusedScore: 0,
+          layerWeight: 1,
+          recencyBoost: 1,
+          accessBoost: 1,
+          finalScore: 0,
+        };
+        if (!fixedMap.has(memory.id) && (!predicate || predicate(candidate))) {
+          fixedMap.set(memory.id, candidate);
         }
       }
     }
