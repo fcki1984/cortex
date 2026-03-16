@@ -196,4 +196,117 @@ describe('MemoryGate', () => {
     expect(result.meta.relations_count).toBe(0);
     expect(result.context).not.toContain('<cortex_relations>');
   });
+
+  it('should suppress low-relevance search injection but keep memories', async () => {
+    const agentId = 'low-relevance-test';
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'proxy traffic residential plan', 0.9),
+        agent_id: agentId,
+        vectorScore: 0.2,
+        fusedScore: 0.1,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: true,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+      },
+    });
+    const relevanceGate = new MemoryGate(searchEngine, config.gate) as any;
+    relevanceGate.buildRelationBlock = vi.fn().mockResolvedValue({
+      block: '<cortex_relations>\nproxy --relates_to--> network\n</cortex_relations>',
+      count: 1,
+    });
+
+    const result = await relevanceGate.recall({ query: 'beef stew recipe', agent_id: agentId });
+
+    expect(result.memories).toHaveLength(1);
+    expect(result.context).toBe('');
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.meta.suppressed_reason).toBe('low_relevance');
+    expect(result.meta.relations_count).toBe(0);
+    expect(result.meta.relevance_gate.best_overlap).toBe(0);
+    expect(relevanceGate.buildRelationBlock).not.toHaveBeenCalled();
+  });
+
+  it('should keep fixed persona injection when low relevance suppresses search context', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'agent_persona',
+      content: 'Always answer in a concise tone',
+      agent_id: 'persona-test',
+      importance: 1,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'proxy traffic residential plan', 0.9),
+        agent_id: 'persona-test',
+        vectorScore: 0.2,
+        fusedScore: 0.1,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: true,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+      },
+    });
+    const relevanceGate = new MemoryGate(searchEngine, config.gate) as any;
+    relevanceGate.buildRelationBlock = vi.fn().mockResolvedValue({ block: '', count: 0 });
+
+    const result = await relevanceGate.recall({ query: 'beef stew recipe', agent_id: 'persona-test' });
+
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.context).toContain('Always answer in a concise tone');
+    expect(result.context).not.toContain('proxy traffic residential plan');
+    expect(result.meta.injected_count).toBe(1);
+    expect(relevanceGate.buildRelationBlock).not.toHaveBeenCalled();
+  });
+
+  it('should allow semantic fallback when top candidate is strong enough without token overlap', async () => {
+    const agentId = 'semantic-fallback-test';
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'braising techniques kitchen methods', 0.9),
+        agent_id: agentId,
+        vectorScore: 0.8,
+        fusedScore: 0.2,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+      },
+    });
+    const relevanceGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await relevanceGate.recall({ query: 'beef stew recipe', agent_id: agentId });
+
+    expect(result.meta.suppressed).toBe(false);
+    expect(result.meta.relevance_gate.passed).toBe(true);
+    expect(result.context).toContain('braising techniques kitchen methods');
+    expect(result.meta.relevance_gate.best_overlap).toBe(0);
+    expect(result.meta.relevance_gate.best_vector_score).toBe(0.8);
+    expect(result.meta.relevance_gate.best_fused_score).toBe(0.2);
+  });
 });

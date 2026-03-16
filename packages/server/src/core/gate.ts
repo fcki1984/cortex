@@ -30,8 +30,50 @@ export interface RecallResponse {
     relations_count: number;
     skipped: boolean;
     reason?: string;
+    suppressed: boolean;
+    suppressed_reason?: 'low_relevance';
+    relevance_gate: {
+      passed: boolean;
+      inspected_count: number;
+      best_overlap: number;
+      best_vector_score: number;
+      best_fused_score: number;
+    };
     latency_ms: number;
   };
+}
+
+interface RelevanceGateDecision {
+  passed: boolean;
+  suppressed: boolean;
+  inspected_count: number;
+  best_overlap: number;
+  best_vector_score: number;
+  best_fused_score: number;
+}
+
+const GATE_STOP_WORDS = new Set([
+  '\u7684', '\u4e86', '\u5728', '\u662f', '\u6709', '\u6211', '\u4f60', '\u4ed6', '\u5979', '\u5b83', '\u4eec',
+  '\u5417', '\u5427', '\u5462', '\u554a', '\u54e6', '\u55ef', '\u8fd9', '\u90a3', '\u4ec0\u4e48', '\u600e\u4e48',
+  '\u54ea', '\u54ea\u91cc', '\u4e3a\u4ec0\u4e48',
+  'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which',
+]);
+
+const DEFAULT_RELEVANCE_GATE: RelevanceGateDecision = {
+  passed: true,
+  suppressed: false,
+  inspected_count: 0,
+  best_overlap: 0,
+  best_vector_score: 0,
+  best_fused_score: 0,
+};
+
+function getEffectiveTokens(text: string): string[] {
+  return [...new Set(extractEntityTokens(text))].filter(token => token.length >= 2 && !GATE_STOP_WORDS.has(token));
+}
+
+function countInjectedLines(context: string): number {
+  return context ? context.split('\n').filter(line => line.startsWith('[')).length : 0;
 }
 
 export class MemoryGate {
@@ -63,6 +105,8 @@ export class MemoryGate {
           relations_count: 0,
           skipped: true,
           reason: 'small_talk',
+          suppressed: false,
+          relevance_gate: DEFAULT_RELEVANCE_GATE,
           latency_ms: Date.now() - start,
         },
       };
@@ -263,12 +307,15 @@ export class MemoryGate {
     // Constraints are NOT force-injected. If a constraint is relevant to the query,
     // it will survive the cliff filter naturally in search results.
     // Only agent_persona uses fixed injection (always-inject with independent budget).
+    const relevanceGate = this.evaluateRelevanceGate(query, results);
 
     // Format: fixed injection (persona) + search results use independent budgets
     const fixedContext = fixedResults.length > 0
       ? this.searchEngine.formatForInjection(fixedResults, fixedBudget)
       : '';
-    const searchContext = this.searchEngine.formatForInjection(results, memoryBudget);
+    const searchContext = relevanceGate.suppressed
+      ? ''
+      : this.searchEngine.formatForInjection(results, memoryBudget);
 
     // Merge: fixed block first, then search block
     // Both use <cortex_memory> tags internally, merge into one block
@@ -281,11 +328,11 @@ export class MemoryGate {
     } else {
       context = fixedContext || searchContext;
     }
-    const injectedCount = context ? context.split('\n').filter(l => l.startsWith('[')).length : 0;
+    const injectedCount = countInjectedLines(context);
 
     // Inject relevant relations (Neo4j multi-hop or SQLite fallback)
     let relationsCount = 0;
-    if (relationInjection) {
+    if (relationInjection && !relevanceGate.suppressed) {
       try {
         const relationBlock = await Promise.race([
           this.buildRelationBlock(query, req.agent_id),
@@ -304,7 +351,15 @@ export class MemoryGate {
     }
 
     const latency = Date.now() - start;
-    log.info({ query: query.slice(0, 50), results: results.length, injected: injectedCount, relations: relationsCount, latency_ms: latency }, 'Recall completed');
+    log.info({
+      query: query.slice(0, 50),
+      results: results.length,
+      injected: injectedCount,
+      relations: relationsCount,
+      suppressed: relevanceGate.suppressed,
+      relevance_gate: relevanceGate,
+      latency_ms: latency,
+    }, 'Recall completed');
 
     return {
       context,
@@ -315,14 +370,61 @@ export class MemoryGate {
         injected_count: injectedCount,
         relations_count: relationsCount,
         skipped: false,
+        suppressed: relevanceGate.suppressed,
+        ...(relevanceGate.suppressed ? { suppressed_reason: 'low_relevance' as const } : {}),
+        relevance_gate: {
+          passed: relevanceGate.passed,
+          inspected_count: relevanceGate.inspected_count,
+          best_overlap: relevanceGate.best_overlap,
+          best_vector_score: relevanceGate.best_vector_score,
+          best_fused_score: relevanceGate.best_fused_score,
+        },
         latency_ms: latency,
       },
     };
   }
 
+  private evaluateRelevanceGate(query: string, results: SearchResult[]): RelevanceGateDecision {
+    const gateConfig = this.config.relevanceGate;
+    if (gateConfig?.enabled === false || results.length === 0) {
+      return {
+        ...DEFAULT_RELEVANCE_GATE,
+        passed: true,
+      };
+    }
+
+    const inspectTopK = gateConfig?.inspectTopK ?? 3;
+    const inspected = results.slice(0, inspectTopK);
+    const strongest = inspected[0];
+    const queryTokens = getEffectiveTokens(query);
+
+    let bestOverlap = 0;
+    for (const result of inspected) {
+      const memoryTokens = getEffectiveTokens(result.content);
+      const overlap = memoryTokens.filter(token => queryTokens.includes(token)).length;
+      if (overlap > bestOverlap) bestOverlap = overlap;
+    }
+
+    const bestVectorScore = strongest?.vectorScore ?? 0;
+    const bestFusedScore = strongest?.fusedScore ?? 0;
+    const hasOverlap = bestOverlap >= 1;
+    const passesSemanticFallback = !hasOverlap
+      && bestVectorScore >= (gateConfig?.minSemanticScore ?? 0.55)
+      && bestFusedScore >= (gateConfig?.minFusedScoreNoOverlap ?? 0.15);
+    const passed = hasOverlap || passesSemanticFallback;
+
+    return {
+      passed,
+      suppressed: !passed,
+      inspected_count: inspected.length,
+      best_overlap: bestOverlap,
+      best_vector_score: bestVectorScore,
+      best_fused_score: bestFusedScore,
+    };
+  }
+
   private async buildRelationBlock(query: string, agentId?: string): Promise<{ block: string; count: number }> {
     const queryEntities = [...new Set(extractEntityTokens(query))];
-    const stopWords = new Set(['的', '了', '在', '是', '有', '我', '你', '他', '她', '它', '们', '吗', '吧', '呢', '啊', '哦', '嗯', '这', '那', '什么', '怎么', '哪', '哪里', '为什么', 'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which']);
 
     if (queryEntities.length === 0) {
       return { block: '', count: 0 };
@@ -389,7 +491,7 @@ export class MemoryGate {
       }
     }
 
-    const contextKeywords = queryEntities.filter(t => !stopWords.has(t));
+    const contextKeywords = queryEntities.filter(t => !GATE_STOP_WORDS.has(t));
     const subjectEntities = new Set<string>();
     const topicKeywords: string[] = [];
 

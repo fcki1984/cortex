@@ -43,6 +43,14 @@ export default function GateSection({
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>🧭 {t('settings.relevanceGateTitle')}</label>
+            {renderToggleField(t('settings.relevanceGateEnabled'), t('settings.relevanceGateEnabledDesc'), 'relevanceGate.enabled')}
+            {renderNumberField(t('settings.relevanceGateInspectTopK'), t('settings.relevanceGateInspectTopKDesc'), 'relevanceGate.inspectTopK', 1, 10)}
+            {renderNumberField(t('settings.relevanceGateMinSemanticScore'), t('settings.relevanceGateMinSemanticScoreDesc'), 'relevanceGate.minSemanticScore', 0, 1)}
+            {renderNumberField(t('settings.relevanceGateMinFusedScore'), t('settings.relevanceGateMinFusedScoreDesc'), 'relevanceGate.minFusedScoreNoOverlap', 0, 1)}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
             <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>🔄 {t('settings.queryExpansion')}</label>
             {renderToggleField(t('settings.queryExpansion'), t('settings.queryExpansionDesc'), 'queryExpansion.enabled')}
             {draft?.queryExpansion?.enabled && (
@@ -69,6 +77,7 @@ export default function GateSection({
             {displayRow(t('settings.skipSmallTalk'), config.gate?.skipSmallTalk ? t('common.on') : t('common.off'), t('settings.skipSmallTalkDesc'))}
             {displayRow(`✂️ ${t('settings.cliffFilter')}`, `${t('settings.cliffAbsolute')}: ${config.gate?.cliffAbsolute ?? 0.4} · ${t('settings.cliffGap')}: ${config.gate?.cliffGap ?? 0.6} · ${t('settings.cliffFloor')}: ${config.gate?.cliffFloor ?? 0.05}`)}
             {displayRow(`⏱️ ${t('settings.recallTimeouts')}`, `${t('settings.queryExpansionTimeoutMs')}: ${config.gate?.queryExpansionTimeoutMs ?? 5000}ms · ${t('settings.rerankerTimeoutMs')}: ${config.gate?.rerankerTimeoutMs ?? 8000}ms · ${t('settings.relationTimeoutMs')}: ${config.gate?.relationTimeoutMs ?? 5000}ms`)}
+            {displayRow(`🧭 ${t('settings.relevanceGateTitle')}`, `${config.gate?.relevanceGate?.enabled ? t('common.on') : t('common.off')} · topK: ${config.gate?.relevanceGate?.inspectTopK ?? 3} · semantic: ${config.gate?.relevanceGate?.minSemanticScore ?? 0.55} · fused: ${config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15}`, t('settings.relevanceGateEnabledDesc'))}
             {displayRow(`🔄 ${t('settings.queryExpansion')}`, config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} variants)` : t('common.off'), t('settings.queryExpansionDesc'))}
           </tbody>
         </table>
