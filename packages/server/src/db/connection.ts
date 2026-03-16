@@ -111,6 +111,8 @@ const migrations = [
           'identity', 'preference', 'decision', 'fact', 'entity',
           'correction', 'todo', 'context', 'summary'
         )),
+        owner_type    TEXT NOT NULL CHECK (owner_type IN ('user', 'agent', 'system')),
+        recall_scope  TEXT NOT NULL CHECK (recall_scope IN ('global', 'topic')),
         content       TEXT NOT NULL,
         source        TEXT,
         agent_id      TEXT NOT NULL DEFAULT 'default',
@@ -190,6 +192,8 @@ const migrations = [
       CREATE INDEX idx_memories_decay ON memories(layer, decay_score);
       CREATE INDEX idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL;
       CREATE INDEX idx_memories_agent ON memories(agent_id);
+      CREATE INDEX idx_memories_owner_type ON memories(owner_type);
+      CREATE INDEX idx_memories_recall_scope ON memories(recall_scope);
       CREATE INDEX idx_access_log_memory ON access_log(memory_id, accessed_at);
       CREATE INDEX idx_relations_subject ON relations(subject);
       CREATE INDEX idx_relations_object ON relations(object);
@@ -230,6 +234,8 @@ const migrations = [
           'correction', 'todo', 'context', 'summary',
           'skill', 'relationship', 'goal', 'insight', 'project_state'
         )),
+        owner_type    TEXT NOT NULL CHECK (owner_type IN ('user', 'agent', 'system')),
+        recall_scope  TEXT NOT NULL CHECK (recall_scope IN ('global', 'topic')),
         content       TEXT NOT NULL,
         source        TEXT,
         agent_id      TEXT NOT NULL DEFAULT 'default',
@@ -261,6 +267,8 @@ const migrations = [
       CREATE INDEX idx_memories_decay ON memories(layer, decay_score);
       CREATE INDEX idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL;
       CREATE INDEX idx_memories_agent ON memories(agent_id);
+      CREATE INDEX idx_memories_owner_type ON memories(owner_type);
+      CREATE INDEX idx_memories_recall_scope ON memories(recall_scope);
 
       -- Rebuild FTS
       CREATE VIRTUAL TABLE memories_fts USING fts5(
@@ -333,6 +341,8 @@ const migrations = [
           'constraint', 'policy',
           'agent_self_improvement', 'agent_user_habit', 'agent_relationship', 'agent_persona'
         )),
+        owner_type    TEXT NOT NULL CHECK (owner_type IN ('user', 'agent', 'system')),
+        recall_scope  TEXT NOT NULL CHECK (recall_scope IN ('global', 'topic')),
         content       TEXT NOT NULL,
         source        TEXT,
         agent_id      TEXT NOT NULL DEFAULT 'default',
@@ -364,6 +374,8 @@ const migrations = [
       CREATE INDEX idx_memories_decay ON memories(layer, decay_score);
       CREATE INDEX idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL;
       CREATE INDEX idx_memories_agent ON memories(agent_id);
+      CREATE INDEX idx_memories_owner_type ON memories(owner_type);
+      CREATE INDEX idx_memories_recall_scope ON memories(recall_scope);
 
       -- Rebuild FTS
       CREATE VIRTUAL TABLE memories_fts USING fts5(

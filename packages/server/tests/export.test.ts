@@ -24,9 +24,9 @@ describe('MarkdownExporter', () => {
     initDatabase(dbPath);
 
     // Seed data
-    insertMemory({ layer: 'core', category: 'identity', content: 'User name is Harry', agent_id: 'default', importance: 1.0 });
-    insertMemory({ layer: 'core', category: 'preference', content: 'Prefers dark mode', agent_id: 'default', importance: 0.9 });
-    insertMemory({ layer: 'core', category: 'fact', content: 'Tokyo is the capital of Japan', agent_id: 'default', importance: 0.7 });
+    insertMemory({ layer: 'core', category: 'identity', owner_type: 'user', recall_scope: 'topic', content: 'User name is Harry', agent_id: 'default', importance: 1.0 });
+    insertMemory({ layer: 'core', category: 'preference', owner_type: 'user', recall_scope: 'topic', content: 'Prefers dark mode', agent_id: 'default', importance: 0.9 });
+    insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'Tokyo is the capital of Japan', agent_id: 'default', importance: 0.7 });
 
     exporter = new MarkdownExporter(config);
   });

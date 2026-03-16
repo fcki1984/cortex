@@ -7,6 +7,8 @@ interface Memory {
   id: string;
   layer: string;
   category: string;
+  owner_type?: 'user' | 'agent' | 'system';
+  recall_scope?: 'global' | 'topic';
   content: string;
   importance: number;
   confidence: number;
@@ -186,6 +188,8 @@ export default function MemoryDetail({ memoryId, onBack }: { memoryId: string; o
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <span className={`badge ${memory.layer}`}>{memory.layer}</span>
           <span className="badge">{memory.category}</span>
+          {memory.owner_type ? <span className="badge">{memory.owner_type}</span> : null}
+          {memory.recall_scope ? <span className="badge">{memory.recall_scope}</span> : null}
           {memory.is_pinned ? <span className="badge" style={{ background: 'rgba(255,170,0,0.2)', color: '#b8860b' }}>{t('memoryDetail.pinned')}</span> : null}
         </div>
 
@@ -269,6 +273,8 @@ export default function MemoryDetail({ memoryId, onBack }: { memoryId: string; o
             <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.created')}</td><td>{toLocal(memory.created_at)}</td></tr>
             <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.updated')}</td><td>{toLocal(memory.updated_at)}</td></tr>
             {memory.agent_id && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.agent')}</td><td>{memory.agent_id}</td></tr>}
+            {memory.owner_type && <tr><td style={{ color: 'var(--text-muted)' }}>Owner</td><td>{memory.owner_type}</td></tr>}
+            {memory.recall_scope && <tr><td style={{ color: 'var(--text-muted)' }}>Scope</td><td>{memory.recall_scope}</td></tr>}
             {memory.source && <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.source')}</td><td>{memory.source}</td></tr>}
             {memory.metadata && (
               <tr><td style={{ color: 'var(--text-muted)' }}>{t('memoryDetail.metadata')}</td><td><pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxWidth: '100%' }}>{JSON.stringify(JSON.parse(memory.metadata), null, 2)}</pre></td></tr>
@@ -328,6 +334,8 @@ export default function MemoryDetail({ memoryId, onBack }: { memoryId: string; o
               <div className="header">
                 <span className={`badge ${s.layer}`}>{s.layer}</span>
                 <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>{s.category}</span>
+                {s.owner_type ? <span className="badge">{s.owner_type}</span> : null}
+                {s.recall_scope ? <span className="badge">{s.recall_scope}</span> : null}
                 {s.finalScore && (
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
                     {t('memoryDetail.similarity')}: {(s.finalScore * 100).toFixed(1)}%

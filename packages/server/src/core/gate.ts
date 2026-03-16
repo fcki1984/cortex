@@ -9,6 +9,7 @@ import type { LLMProvider } from '../llm/interface.js';
 import { findRelatedRelations, listMemories } from '../db/queries.js';
 import { extractEntityTokens } from '../utils/helpers.js';
 import { getDriver, traverseRelations, listRelations as neo4jListRelations } from '../db/neo4j.js';
+import { isPlacementComplete } from '../utils/memory-placement.js';
 
 const log = createLogger('gate');
 
@@ -27,6 +28,9 @@ export interface RecallResponse {
     query: string;
     total_found: number;
     injected_count: number;
+    persona_injected_count: number;
+    rule_injected_count: number;
+    search_injected_count: number;
     relations_count: number;
     skipped: boolean;
     reason?: string;
@@ -102,6 +106,9 @@ export class MemoryGate {
           query: req.query,
           total_found: 0,
           injected_count: 0,
+          persona_injected_count: 0,
+          rule_injected_count: 0,
+          search_injected_count: 0,
           relations_count: 0,
           skipped: true,
           reason: 'small_talk',
@@ -124,6 +131,7 @@ export class MemoryGate {
     const searchOpts = {
       layers: req.layers,
       agent_id: req.agent_id,
+      recall_scope: 'topic' as const,
       limit: this.config.searchLimit || 30,
     };
 
@@ -180,16 +188,11 @@ export class MemoryGate {
     const merged = Array.from(resultMap.values());
 
     // Boost score for memories hit by multiple query variants (diminishing returns)
-    // Also boost constraint memories with high importance to increase selection probability
     let results = merged
       .map(r => {
         const hits = hitCount.get(r.id) ?? 1;
         // ln(1)=0, ln(2)≈0.69, ln(3)≈1.10, ln(5)≈1.61 → boost caps naturally
         let boost = hits > 1 ? 1 + 0.08 * Math.log(hits) : 1;
-        // Constraint category boost: important constraints get priority in search results
-        if (r.category === 'constraint' && r.importance >= 0.7) {
-          boost *= 1.5;
-        }
         return { ...r, finalScore: r.finalScore * boost };
       })
       .sort((a, b) => b.finalScore - a.finalScore);
@@ -273,62 +276,78 @@ export class MemoryGate {
       }
     }
 
-    // --- Fixed injection: agent_persona (independent token budget) ---
-    // These define who the agent IS and are always injected regardless of query.
-    // Uses fixedInjectionTokens budget, separate from search result budget.
     const fixedBudget = this.config.fixedInjectionTokens ?? 500;
-    const fixedResults: SearchResult[] = [];
-    const existingIds = new Set(results.map(r => r.id));
+    const ruleBudget = fixedBudget;
+    const toFixedResult = (memory: any): SearchResult => ({
+      id: memory.id,
+      content: memory.content,
+      layer: memory.layer,
+      category: memory.category,
+      owner_type: memory.owner_type,
+      recall_scope: memory.recall_scope,
+      agent_id: memory.agent_id,
+      importance: memory.importance,
+      decay_score: memory.decay_score,
+      access_count: memory.access_count,
+      created_at: memory.created_at,
+      textScore: 0,
+      vectorScore: 0,
+      rawVectorSim: 0,
+      fusedScore: 0,
+      layerWeight: 1,
+      recencyBoost: 1,
+      accessBoost: 1,
+      finalScore: 0,
+    });
 
-    const { items: personaMemories } = listMemories({
+    const personaResults = listMemories({
       agent_id: req.agent_id,
       category: 'agent_persona' as any,
+      owner_type: 'agent',
+      recall_scope: 'global',
       limit: 50,
       orderBy: 'importance',
       orderDir: 'desc',
-    });
-    for (const pm of personaMemories) {
-      if (existingIds.has(pm.id)) {
-        // Already in search results — move to fixed bucket to use fixed budget
-        results = results.filter(r => r.id !== pm.id);
-      }
-      existingIds.add(pm.id);
-      fixedResults.push({
-        id: pm.id, content: pm.content, layer: pm.layer, category: pm.category,
-        agent_id: pm.agent_id,
-        importance: pm.importance, decay_score: pm.decay_score,
-        access_count: pm.access_count, created_at: pm.created_at,
-        textScore: 0, vectorScore: 0, rawVectorSim: 0, fusedScore: 0,
-        layerWeight: 1, recencyBoost: 1, accessBoost: 1,
-        finalScore: 0,
-      });
-    }
+    }).items.filter(isPlacementComplete).map(toFixedResult);
 
-    // Constraints are NOT force-injected. If a constraint is relevant to the query,
-    // it will survive the cliff filter naturally in search results.
-    // Only agent_persona uses fixed injection (always-inject with independent budget).
+    const ruleResults = listMemories({
+      agent_id: req.agent_id,
+      owner_type: 'system',
+      recall_scope: 'global',
+      limit: 50,
+      orderBy: 'importance',
+      orderDir: 'desc',
+    }).items
+      .filter((memory) => isPlacementComplete(memory) && (memory.category === 'constraint' || memory.category === 'policy'))
+      .map(toFixedResult);
+
     const relevanceGate = this.evaluateRelevanceGate(query, results);
 
-    // Format: fixed injection (persona) + search results use independent budgets
-    const fixedContext = fixedResults.length > 0
-      ? this.searchEngine.formatForInjection(fixedResults, fixedBudget)
+    const personaContext = personaResults.length > 0
+      ? this.searchEngine.formatForInjection(personaResults, fixedBudget, { priorityCategories: ['agent_persona'] })
+      : '';
+    const ruleContext = ruleResults.length > 0
+      ? this.searchEngine.formatForInjection(ruleResults, ruleBudget, { priorityCategories: ['constraint', 'policy'] })
       : '';
     const searchContext = relevanceGate.suppressed
       ? ''
-      : this.searchEngine.formatForInjection(results, memoryBudget);
+      : this.searchEngine.formatForInjection(results, memoryBudget, { priorityCategories: ['correction'] });
 
-    // Merge: fixed block first, then search block
-    // Both use <cortex_memory> tags internally, merge into one block
+    const blocks = [personaContext, ruleContext, searchContext].filter(Boolean);
     let context = '';
-    if (fixedContext && searchContext) {
-      // Strip closing tag from fixed, opening tag from search, merge
-      const fixedBody = fixedContext.replace('</cortex_memory>', '').trimEnd();
-      const searchBody = searchContext.replace('<cortex_memory>', '').trimStart();
-      context = `${fixedBody}\n${searchBody}`;
-    } else {
-      context = fixedContext || searchContext;
+    for (const block of blocks) {
+      if (!context) {
+        context = block;
+        continue;
+      }
+      const mergedHead = context.replace('</cortex_memory>', '').trimEnd();
+      const mergedTail = block.replace('<cortex_memory>', '').trimStart();
+      context = `${mergedHead}\n${mergedTail}`;
     }
-    const injectedCount = countInjectedLines(context);
+    const personaInjectedCount = countInjectedLines(personaContext);
+    const ruleInjectedCount = countInjectedLines(ruleContext);
+    const searchInjectedCount = countInjectedLines(searchContext);
+    const injectedCount = personaInjectedCount + ruleInjectedCount + searchInjectedCount;
 
     // Inject relevant relations (Neo4j multi-hop or SQLite fallback)
     let relationsCount = 0;
@@ -364,12 +383,15 @@ export class MemoryGate {
     return {
       context,
       memories: results,
-      meta: {
-        query,
-        total_found: results.length,
-        injected_count: injectedCount,
-        relations_count: relationsCount,
-        skipped: false,
+        meta: {
+          query,
+          total_found: results.length,
+          injected_count: injectedCount,
+          persona_injected_count: personaInjectedCount,
+          rule_injected_count: ruleInjectedCount,
+          search_injected_count: searchInjectedCount,
+          relations_count: relationsCount,
+          skipped: false,
         suppressed: relevanceGate.suppressed,
         ...(relevanceGate.suppressed ? { suppressed_reason: 'low_relevance' as const } : {}),
         relevance_gate: {

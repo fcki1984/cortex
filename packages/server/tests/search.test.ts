@@ -40,10 +40,10 @@ describe('HybridSearchEngine', () => {
     initDatabase(':memory:');
 
     // Seed data
-    insertMemory({ layer: 'core', category: 'fact', content: 'React is a JavaScript library for building UIs', agent_id: 'test', importance: 0.8 });
-    insertMemory({ layer: 'core', category: 'fact', content: 'Vue is a progressive JavaScript framework', agent_id: 'test', importance: 0.7 });
-    insertMemory({ layer: 'working', category: 'context', content: 'Discussed database optimization today', agent_id: 'test' });
-    insertMemory({ layer: 'core', category: 'identity', content: 'Harry is a full-stack developer', agent_id: 'test', importance: 1.0 });
+    insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'React is a JavaScript library for building UIs', agent_id: 'test', importance: 0.8 });
+    insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'Vue is a progressive JavaScript framework', agent_id: 'test', importance: 0.7 });
+    insertMemory({ layer: 'working', category: 'context', owner_type: 'user', recall_scope: 'topic', content: 'Discussed database optimization today', agent_id: 'test' });
+    insertMemory({ layer: 'core', category: 'identity', owner_type: 'user', recall_scope: 'topic', content: 'Harry is a full-stack developer', agent_id: 'test', importance: 1.0 });
 
     engine = new HybridSearchEngine(createMockVector(), createMockEmbedding(), config.search);
   });
@@ -72,7 +72,7 @@ describe('HybridSearchEngine', () => {
 
   it('should format results for injection', () => {
     const mockResults = [
-      { id: '1', content: 'Test memory', layer: 'core' as const, category: 'fact', importance: 0.8,
+      { id: '1', content: 'Test memory', layer: 'core' as const, category: 'fact', owner_type: 'user' as const, recall_scope: 'topic' as const, agent_id: 'test', importance: 0.8,
         decay_score: 1, access_count: 0, created_at: '', textScore: 0.5, vectorScore: 0.5,
         fusedScore: 0.5, layerWeight: 1, recencyBoost: 1, accessBoost: 1, finalScore: 0.5 },
     ];

@@ -8,6 +8,8 @@ interface Memory {
   id: string;
   layer: string;
   category: string;
+  owner_type: 'user' | 'agent' | 'system';
+  recall_scope: 'global' | 'topic';
   content: string;
   importance: number;
   confidence: number;
@@ -31,6 +33,8 @@ export default function MemoryBrowser() {
   const [layer, setLayer] = useState('');
   const [category, setCategory] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
+  const [ownerTypeFilter, setOwnerTypeFilter] = useState('');
+  const [recallScopeFilter, setRecallScopeFilter] = useState('');
   const [agents, setAgents] = useState<any[]>([]);
   const [versionFilter, setVersionFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,7 +67,14 @@ export default function MemoryBrowser() {
 
   const load = useCallback(() => {
     if (isSearchMode && searchQuery.trim()) {
-      search({ query: searchQuery, limit: searchLimit, debug: false, agent_id: agentFilter || undefined }).then((r: any) => {
+      search({
+        query: searchQuery,
+        limit: searchLimit,
+        debug: false,
+        agent_id: agentFilter || undefined,
+        owner_type: ownerTypeFilter || undefined,
+        recall_scope: recallScopeFilter || undefined,
+      }).then((r: any) => {
         let results = (r.results || []) as any[];
         // Build score map
         const scores: Record<string, number> = {};
@@ -73,6 +84,8 @@ export default function MemoryBrowser() {
         if (layer) results = results.filter(m => m.layer === layer);
         if (category) results = results.filter(m => m.category === category);
         if (agentFilter) results = results.filter(m => m.agent_id === agentFilter);
+        if (ownerTypeFilter) results = results.filter(m => m.owner_type === ownerTypeFilter);
+        if (recallScopeFilter) results = results.filter(m => m.recall_scope === recallScopeFilter);
         // Default sort by score (desc) in search mode, unless user picked a different sort
         if (sortField === 'created_at' && sortDir === 'desc') {
           results.sort((a: any, b: any) => (b.finalScore ?? 0) - (a.finalScore ?? 0));
@@ -92,6 +105,8 @@ export default function MemoryBrowser() {
       if (layer) params.layer = layer;
       if (category) params.category = category;
       if (agentFilter) params.agent_id = agentFilter;
+      if (ownerTypeFilter) params.owner_type = ownerTypeFilter;
+      if (recallScopeFilter) params.recall_scope = recallScopeFilter;
       if (versionFilter === 'has_versions') {
         params.has_versions = 'true';
         params.include_superseded = 'true';
@@ -113,7 +128,7 @@ export default function MemoryBrowser() {
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layer, category, agentFilter, versionFilter, page, searchQuery, isSearchMode, sortField, sortDir]);
+  }, [layer, category, agentFilter, ownerTypeFilter, recallScopeFilter, versionFilter, page, searchQuery, isSearchMode, sortField, sortDir]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { listAgents().then((res: any) => setAgents(res.agents || [])).catch(() => {}); }, []);
@@ -310,6 +325,17 @@ export default function MemoryBrowser() {
           <option value="">All Agents</option>
           {agents.map((a: any) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
         </select>
+        <select value={ownerTypeFilter} onChange={e => { setOwnerTypeFilter(e.target.value); setPage(0); }}>
+          <option value="">All Owners</option>
+          <option value="user">user</option>
+          <option value="agent">agent</option>
+          <option value="system">system</option>
+        </select>
+        <select value={recallScopeFilter} onChange={e => { setRecallScopeFilter(e.target.value); setPage(0); }}>
+          <option value="">All Scopes</option>
+          <option value="global">global</option>
+          <option value="topic">topic</option>
+        </select>
         <select value={versionFilter} onChange={e => { setVersionFilter(e.target.value); setPage(0); }}>
           <option value="">{t('memories.allMemories')}</option>
           <option value="has_versions">{t('memories.hasVersions')}</option>
@@ -393,6 +419,8 @@ export default function MemoryBrowser() {
                 />
                 <span className={`badge ${m.layer}`}>{m.layer}</span>
                 <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>{m.category}</span>
+                <span className="badge">{m.owner_type}</span>
+                <span className="badge">{m.recall_scope}</span>
                 {m.is_pinned ? <span className="badge" style={{ background: 'rgba(255,170,0,0.2)', color: '#b8860b' }}>{t('memoryDetail.pinned')}</span> : null}
                 {isSearchMode && scoreMap[m.id] !== undefined && (
                   <span className="badge" style={{

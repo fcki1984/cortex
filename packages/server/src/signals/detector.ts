@@ -1,4 +1,5 @@
 import type { MemoryCategory } from '../db/queries.js';
+import type { MemoryRecallScope } from '../utils/memory-placement.js';
 
 export interface DetectedSignal {
   category: MemoryCategory;
@@ -6,6 +7,7 @@ export interface DetectedSignal {
   importance: number;
   confidence: number;
   pattern: string;
+  scope_hint?: MemoryRecallScope;
 }
 
 /** Sentence boundary characters for CJK and Western text */
@@ -71,6 +73,7 @@ const HIGH_SIGNAL_PATTERNS: {
   name: string;
   /** If true, skip this rule when the user message looks like a question */
   skipOnQuestion?: boolean;
+  scope_hint?: MemoryRecallScope;
 }[] = [
   // ── Correction ──
   {
@@ -109,8 +112,6 @@ const HIGH_SIGNAL_PATTERNS: {
       /私は.{0,10}(好き|嫌い|したい|したくない)/,
       /が好き/,
       /は嫌[いだ]/,
-      /please (always|never|don'?t)/i,
-      /以后(都|总是|不要|别)/,
       /记住我(喜欢|不喜欢|偏好)/,
       /can'?t stand/i,
       // Korean preference patterns
@@ -334,6 +335,24 @@ const HIGH_SIGNAL_PATTERNS: {
     ],
     importance: 0.95,
     name: 'constraint',
+    scope_hint: 'global',
+  },
+
+  // —— Policy / answer strategy ——
+  {
+    category: 'policy',
+    patterns: [
+      /(?:回答|回复|作答).{0,20}(使用|保持|采用).{0,30}(中文|英文|正式|自然|简洁|详细)/,
+      /(?:先|优先).{0,20}(澄清|确认|提问|搜索|联网|核实|引用)/,
+      /(?:引用|来源|证据).{0,30}(不能|不得|必须|需要)/,
+      /(?:工具|搜索).{0,30}(优先|必须|只能|不要)/,
+      /please (?:always|first|prefer|use|cite|clarify)/i,
+      /(?:answer|respond).{0,20}(in|with|using).{0,30}(formal|natural|concise|detailed)/i,
+      /(?:always|first|must).{0,30}(clarify|ask|search|cite|verify|use)/i,
+    ],
+    importance: 0.9,
+    name: 'policy',
+    scope_hint: 'global',
   },
 
   // ── Agent self-improvement (matches ASSISTANT text only) ──
@@ -406,6 +425,7 @@ export function detectHighSignals(exchange: { user: string; assistant: string })
           importance: rule.importance,
           confidence: 0.85,
           pattern: rule.name,
+          scope_hint: (rule as any).scope_hint,
         });
         break; // One match per category is enough
       }

@@ -10,6 +10,7 @@ import { stripInjectedContent, stripCodeFences } from '../utils/sanitize.js';
 import { MemoryWriter, type ExtractedMemory } from './memory-writer.js';
 import { type ExtractedRelation, type ExtractionLogData } from './sieve.js';
 import { parseRelations } from './relation-utils.js';
+import { isMemoryRecallScope } from '../utils/memory-placement.js';
 
 const log = createLogger('flush');
 
@@ -115,6 +116,8 @@ export class MemoryFlush {
         const mem = insertMemory({
           layer: 'working',
           category: 'summary',
+          owner_type: 'system',
+          recall_scope: 'topic',
           content: summary,
           importance: 0.7,
           confidence: 0.85,
@@ -262,9 +265,10 @@ export class MemoryFlush {
         content: m.content,
         category: m.category as MemoryCategory,
         importance: m.importance,
-        source: (['user_stated', 'user_implied', 'observed_pattern'].includes(m.source)
+        source: (['user_stated', 'user_implied', 'observed_pattern', 'system_defined', 'self_reflection'].includes(m.source)
           ? m.source
           : 'user_implied') as ExtractedMemory['source'],
+        scope_hint: isMemoryRecallScope(m.scope_hint) ? m.scope_hint : undefined,
         reasoning: m.reasoning || '',
       }));
   }

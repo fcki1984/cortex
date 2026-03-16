@@ -3,6 +3,7 @@ import type { CortexApp } from '../app.js';
 import { getDb } from '../db/connection.js';
 import { insertMemory, type Memory, type MemoryLayer, type MemoryCategory } from '../db/queries.js';
 import { createLogger } from '../utils/logger.js';
+import { classifyMemoryPlacement } from '../utils/memory-placement.js';
 
 const log = createLogger('import-export');
 
@@ -144,9 +145,16 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
               continue;
             }
             try {
+              const placement = classifyMemoryPlacement({
+                category: m.category as MemoryCategory,
+                content: m.content,
+                source: m.source || 'import',
+              });
               const mem = insertMemory({
                 layer: m.layer as MemoryLayer,
                 category: m.category as MemoryCategory,
+                owner_type: placement.owner_type,
+                recall_scope: placement.recall_scope,
                 content: m.content,
                 importance: m.importance ?? 0.5,
                 confidence: m.confidence ?? 0.8,
@@ -301,9 +309,16 @@ function importFromMemoryMd(content: string): { imported: number; skipped: numbe
       }
 
       try {
+        const placement = classifyMemoryPlacement({
+          category: currentCategory,
+          content: entryContent,
+          source: 'import:memory_md',
+        });
         const mem = insertMemory({
           layer: 'core',
           category: currentCategory,
+          owner_type: placement.owner_type,
+          recall_scope: placement.recall_scope,
           content: entryContent,
           importance: 0.7,
           confidence: 0.7,

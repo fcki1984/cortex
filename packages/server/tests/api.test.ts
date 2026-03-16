@@ -90,6 +90,8 @@ describe('API Integration', () => {
       const body = JSON.parse(res.payload);
       expect(body.id).toBeTruthy();
       expect(body.content).toBe('API test memory');
+      expect(body.owner_type).toBe('user');
+      expect(body.recall_scope).toBe('topic');
     });
   });
 
@@ -107,6 +109,16 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       body.items.forEach((m: any) => expect(m.layer).toBe('core'));
+    });
+
+    it('should filter by placement', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/memories?owner_type=user&recall_scope=topic' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      body.items.forEach((m: any) => {
+        expect(m.owner_type).toBe('user');
+        expect(m.recall_scope).toBe('topic');
+      });
     });
   });
 
@@ -160,6 +172,20 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.results).toBeDefined();
+    });
+
+    it('should filter search by placement', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/search',
+        payload: { query: 'test', owner_type: 'user', recall_scope: 'topic' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      body.results.forEach((item: any) => {
+        expect(item.owner_type).toBe('user');
+        expect(item.recall_scope).toBe('topic');
+      });
     });
   });
 

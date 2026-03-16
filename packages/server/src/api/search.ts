@@ -12,6 +12,8 @@ export function registerSearchRoutes(app: FastifyInstance, cortex: CortexApp): v
           layers: { type: 'array', items: { type: 'string' } },
           categories: { type: 'array', items: { type: 'string' } },
           agent_id: { type: 'string' },
+          owner_type: { type: 'string', enum: ['user', 'agent', 'system'] },
+          recall_scope: { type: 'string', enum: ['global', 'topic'] },
           limit: { type: 'number' },
           debug: { type: 'boolean' },
         },
@@ -24,6 +26,8 @@ export function registerSearchRoutes(app: FastifyInstance, cortex: CortexApp): v
       layers: body.layers,
       categories: body.categories,
       agent_id: body.agent_id,
+      owner_type: body.owner_type,
+      recall_scope: body.recall_scope,
       limit: body.limit,
       debug: body.debug,
     });

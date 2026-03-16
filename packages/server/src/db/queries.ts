@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { generateId, normalizeEntity, escapeLikePattern } from '../utils/helpers.js';
 import { tokenize, tokenizeQuery } from '../utils/tokenizer.js';
+import type { MemoryOwnerType, MemoryRecallScope } from '../utils/memory-placement.js';
 
 // ============ Memory Types ============
 
@@ -19,6 +20,8 @@ export interface Memory {
   id: string;
   layer: MemoryLayer;
   category: MemoryCategory;
+  owner_type: MemoryOwnerType;
+  recall_scope: MemoryRecallScope;
   content: string;
   source: string | null;
   agent_id: string;
@@ -79,18 +82,28 @@ export interface LifecycleLogEntry {
 
 // ============ Memory Queries ============
 
-export function insertMemory(mem: Partial<Memory> & { layer: MemoryLayer; category: MemoryCategory; content: string }): Memory {
+export function insertMemory(
+  mem: Partial<Memory> & {
+    layer: MemoryLayer;
+    category: MemoryCategory;
+    owner_type: MemoryOwnerType;
+    recall_scope: MemoryRecallScope;
+    content: string;
+  }
+): Memory {
   const db = getDb();
   const id = mem.id || generateId();
   const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO memories (id, layer, category, content, source, agent_id, importance, confidence, decay_score, expires_at, metadata, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, layer, category, owner_type, recall_scope, content, source, agent_id, importance, confidence, decay_score, expires_at, metadata, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     mem.layer,
     mem.category,
+    mem.owner_type,
+    mem.recall_scope,
     mem.content,
     mem.source || null,
     mem.agent_id || 'default',
@@ -161,6 +174,8 @@ export function listMemories(opts: {
   layer?: MemoryLayer;
   category?: MemoryCategory;
   agent_id?: string;
+  owner_type?: MemoryOwnerType;
+  recall_scope?: MemoryRecallScope;
   limit?: number;
   offset?: number;
   orderBy?: string;
@@ -175,6 +190,8 @@ export function listMemories(opts: {
   if (opts.layer) { conditions.push('layer = ?'); params.push(opts.layer); }
   if (opts.category) { conditions.push('category = ?'); params.push(opts.category); }
   if (opts.agent_id) { conditions.push('(agent_id = ? OR agent_id IS NULL OR agent_id = \'\')'); params.push(opts.agent_id); }
+  if (opts.owner_type) { conditions.push('owner_type = ?'); params.push(opts.owner_type); }
+  if (opts.recall_scope) { conditions.push('recall_scope = ?'); params.push(opts.recall_scope); }
   if (!opts.include_superseded) { conditions.push('superseded_by IS NULL'); }
   if (opts.has_versions) {
     // Memories that have been superseded OR that supersede others
@@ -195,7 +212,10 @@ export function listMemories(opts: {
   return { items, total };
 }
 
-export function updateMemory(id: string, updates: Partial<Pick<Memory, 'layer' | 'category' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned' | 'source'>>): Memory | null {
+export function updateMemory(
+  id: string,
+  updates: Partial<Pick<Memory, 'layer' | 'category' | 'owner_type' | 'recall_scope' | 'content' | 'importance' | 'confidence' | 'decay_score' | 'expires_at' | 'superseded_by' | 'metadata' | 'is_pinned' | 'source'>>
+): Memory | null {
   const db = getDb();
   const sets: string[] = [];
   const params: any[] = [];
@@ -303,7 +323,16 @@ function sanitizeFTSQuery(query: string): string {
   return cleaned.slice(0, 500);
 }
 
-export function searchFTS(query: string, opts?: { layer?: MemoryLayer; limit?: number; agent_id?: string }): (Memory & { rank: number })[] {
+export function searchFTS(
+  query: string,
+  opts?: {
+    layer?: MemoryLayer;
+    limit?: number;
+    agent_id?: string;
+    owner_type?: MemoryOwnerType;
+    recall_scope?: MemoryRecallScope;
+  },
+): (Memory & { rank: number })[] {
   // Tokenize query with jieba for CJK word matching
   const sanitized = sanitizeFTSQuery(tokenizeQuery(query));
   if (!sanitized) return [];
@@ -315,6 +344,8 @@ export function searchFTS(query: string, opts?: { layer?: MemoryLayer; limit?: n
   if (opts?.layer) { conditions.push('m.layer = ?'); params.push(opts.layer); }
   // agent_id filter: null/empty agent_id memories are shared (match any agent)
   if (opts?.agent_id) { conditions.push('(m.agent_id = ? OR m.agent_id IS NULL OR m.agent_id = \'\')'); params.push(opts.agent_id); }
+  if (opts?.owner_type) { conditions.push('m.owner_type = ?'); params.push(opts.owner_type); }
+  if (opts?.recall_scope) { conditions.push('m.recall_scope = ?'); params.push(opts.recall_scope); }
 
   conditions.push('(m.expires_at IS NULL OR m.expires_at > ?)');
   params.push(new Date().toISOString());

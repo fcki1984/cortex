@@ -258,6 +258,8 @@ export class LifecycleEngine {
             const newId = generateId();
             insertMemory({
               id: newId, layer: 'core', category: newCategory,
+              owner_type: entry.owner_type,
+              recall_scope: entry.recall_scope,
               content: entry.content, importance: Math.max(entry.importance, threshold),
               confidence: entry.confidence, agent_id: entry.agent_id,
               source: 'lifecycle:auto-promotion',
@@ -296,6 +298,8 @@ export class LifecycleEngine {
             const newId = generateId();
             insertMemory({
               id: newId, layer: 'core', category: newCategory,
+              owner_type: entry.owner_type,
+              recall_scope: entry.recall_scope,
               content: entry.content, importance: Math.max(entry.importance, threshold),
               confidence: entry.confidence, agent_id: entry.agent_id,
               source: 'lifecycle:promotion',
@@ -488,6 +492,8 @@ export class LifecycleEngine {
             id: newId,
             layer: 'core',
             category: item.category,
+            owner_type: item.owner_type,
+            recall_scope: item.recall_scope,
             content: item.content,
             importance: Math.max(item.importance, BASE_IMPORTANCE[category] || 0.5),
             confidence: item.confidence,
@@ -522,6 +528,8 @@ export class LifecycleEngine {
           id: newId,
           layer: 'core',
           category: category as any,
+          owner_type: items[0]!.owner_type,
+          recall_scope: items[0]!.recall_scope,
           content: compressed.trim(),
           importance: BASE_IMPORTANCE[category] || 0.6,
           confidence: 0.7,

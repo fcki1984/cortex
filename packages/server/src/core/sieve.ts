@@ -14,6 +14,7 @@ import { stripInjectedContent, stripCodeFences } from '../utils/sanitize.js';
 import { MemoryWriter, type ExtractedMemory } from './memory-writer.js';
 import { parseRelations } from './relation-utils.js';
 import { getCategoryFeedbackStats } from '../db/index.js';
+import { isMemoryRecallScope } from '../utils/memory-placement.js';
 
 const log = createLogger('sieve');
 
@@ -223,7 +224,7 @@ export class MemorySieve {
       try {
         const signalExtractions: ExtractedMemory[] = signals.map(s => ({
           content: s.content, category: s.category, importance: s.importance,
-          source: 'user_stated' as const, reasoning: `signal: ${s.pattern}`,
+          source: 'user_stated' as const, scope_hint: s.scope_hint, reasoning: `signal: ${s.pattern}`,
         }));
         const batchResults = await this.writer.processNewMemoryBatch(
           signalExtractions, agentId, sessionId, signals[0]?.confidence, 'session',
@@ -248,7 +249,7 @@ export class MemorySieve {
       channel: 'fast',
       exchange_preview: fastPreview,
       raw_output: JSON.stringify(signals.map(s => ({ pattern: s.pattern, category: s.category, content: s.content }))),
-      parsed_memories: signals.map(s => ({ content: s.content, category: s.category, importance: s.importance, source: 'user_stated' as const, reasoning: `signal: ${s.pattern}` })),
+      parsed_memories: signals.map(s => ({ content: s.content, category: s.category, importance: s.importance, source: 'user_stated' as const, scope_hint: s.scope_hint, reasoning: `signal: ${s.pattern}` })),
       memories_written: extracted.length,
       memories_deduped: deduplicated,
       memories_smart_updated: smart_updated,
@@ -536,9 +537,10 @@ export class MemorySieve {
         content: m.content,
         category: m.category as MemoryCategory,
         importance: m.importance,
-        source: (['user_stated', 'user_implied', 'observed_pattern'].includes(m.source)
+        source: (['user_stated', 'user_implied', 'observed_pattern', 'system_defined', 'self_reflection'].includes(m.source)
           ? m.source
           : 'user_implied') as ExtractedMemory['source'],
+        scope_hint: isMemoryRecallScope(m.scope_hint) ? m.scope_hint : undefined,
         reasoning: m.reasoning || '',
       }));
 

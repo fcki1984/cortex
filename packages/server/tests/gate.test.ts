@@ -33,6 +33,8 @@ function createSearchResult(id: string, content: string, finalScore = 0.6): any 
     content,
     layer: 'core',
     category: 'fact',
+    owner_type: 'user',
+    recall_scope: 'topic',
     agent_id: 'default',
     importance: 0.8,
     decay_score: 1,
@@ -74,9 +76,9 @@ describe('MemoryGate', () => {
     initDatabase(':memory:');
 
     // Insert test data
-    insertMemory({ layer: 'core', category: 'identity', content: 'User name is Harry', agent_id: 'default', importance: 1.0 });
-    insertMemory({ layer: 'core', category: 'fact', content: 'Tokyo apartment prices range from 30-80 million yen', agent_id: 'default', importance: 0.8 });
-    insertMemory({ layer: 'working', category: 'context', content: 'Discussed investment strategy today', agent_id: 'default' });
+    insertMemory({ layer: 'core', category: 'identity', owner_type: 'user', recall_scope: 'topic', content: 'User name is Harry', agent_id: 'default', importance: 1.0 });
+    insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'Tokyo apartment prices range from 30-80 million yen', agent_id: 'default', importance: 0.8 });
+    insertMemory({ layer: 'working', category: 'context', owner_type: 'user', recall_scope: 'topic', content: 'Discussed investment strategy today', agent_id: 'default' });
 
     const searchEngine = new HybridSearchEngine(createMockVector(), createMockEmbedding(), config.search);
     gate = new MemoryGate(searchEngine, config.gate);
@@ -91,6 +93,9 @@ describe('MemoryGate', () => {
     expect(result.meta.skipped).toBe(true);
     expect(result.meta.reason).toBe('small_talk');
     expect(result.memories.length).toBe(0);
+    expect(result.meta.persona_injected_count).toBe(0);
+    expect(result.meta.rule_injected_count).toBe(0);
+    expect(result.meta.search_injected_count).toBe(0);
   });
 
   it('should recall relevant memories', async () => {
@@ -111,6 +116,9 @@ describe('MemoryGate', () => {
     expect(result.meta).toBeDefined();
     expect(result.meta.query).toBe('investment strategy');
     expect(typeof result.meta.total_found).toBe('number');
+    expect(typeof result.meta.persona_injected_count).toBe('number');
+    expect(typeof result.meta.rule_injected_count).toBe('number');
+    expect(typeof result.meta.search_injected_count).toBe('number');
   });
 
   it('should fall back when query expansion times out', async () => {
@@ -217,6 +225,12 @@ describe('MemoryGate', () => {
         skipSmallTalk: false,
         relationInjection: true,
         queryExpansion: { enabled: false, maxVariants: 3 },
+        relevanceGate: {
+          enabled: true,
+          inspectTopK: 3,
+          minSemanticScore: 0.55,
+          minFusedScoreNoOverlap: 0.15,
+        },
       },
     });
     const relevanceGate = new MemoryGate(searchEngine, config.gate) as any;
@@ -240,6 +254,8 @@ describe('MemoryGate', () => {
     insertMemory({
       layer: 'core',
       category: 'agent_persona',
+      owner_type: 'agent',
+      recall_scope: 'global',
       content: 'Always answer in a concise tone',
       agent_id: 'persona-test',
       importance: 1,
@@ -262,6 +278,12 @@ describe('MemoryGate', () => {
         skipSmallTalk: false,
         relationInjection: true,
         queryExpansion: { enabled: false, maxVariants: 3 },
+        relevanceGate: {
+          enabled: true,
+          inspectTopK: 3,
+          minSemanticScore: 0.55,
+          minFusedScoreNoOverlap: 0.15,
+        },
       },
     });
     const relevanceGate = new MemoryGate(searchEngine, config.gate) as any;
@@ -273,6 +295,8 @@ describe('MemoryGate', () => {
     expect(result.context).toContain('Always answer in a concise tone');
     expect(result.context).not.toContain('proxy traffic residential plan');
     expect(result.meta.injected_count).toBe(1);
+    expect(result.meta.persona_injected_count).toBe(1);
+    expect(result.meta.search_injected_count).toBe(0);
     expect(relevanceGate.buildRelationBlock).not.toHaveBeenCalled();
   });
 
@@ -296,6 +320,12 @@ describe('MemoryGate', () => {
         skipSmallTalk: false,
         relationInjection: false,
         queryExpansion: { enabled: false, maxVariants: 3 },
+        relevanceGate: {
+          enabled: true,
+          inspectTopK: 3,
+          minSemanticScore: 0.55,
+          minFusedScoreNoOverlap: 0.15,
+        },
       },
     });
     const relevanceGate = new MemoryGate(searchEngine, config.gate);

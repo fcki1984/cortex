@@ -6,6 +6,7 @@ import { estimateTokens } from '../utils/helpers.js';
 import type { VectorBackend } from '../vector/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
 import type { CortexConfig } from '../utils/config.js';
+import type { MemoryOwnerType, MemoryRecallScope } from '../utils/memory-placement.js';
 const log = createLogger('search');
 
 export interface SearchResult {
@@ -13,6 +14,8 @@ export interface SearchResult {
   content: string;
   layer: MemoryLayer;
   category: string;
+  owner_type: MemoryOwnerType;
+  recall_scope: MemoryRecallScope;
   agent_id: string;
   importance: number;
   decay_score: number;
@@ -33,6 +36,8 @@ export interface SearchOptions {
   layers?: MemoryLayer[];
   categories?: string[];
   agent_id?: string;
+  owner_type?: MemoryOwnerType;
+  recall_scope?: MemoryRecallScope;
   limit?: number;
   debug?: boolean;
   maxTokens?: number;
@@ -74,6 +79,8 @@ export class HybridSearchEngine {
       textResults = searchFTS(opts.query, {
         layer: opts.layers?.[0],
         agent_id: opts.agent_id,
+        owner_type: opts.owner_type,
+        recall_scope: opts.recall_scope,
         limit: limit * 3,
       });
     } catch (e: any) {
@@ -244,6 +251,8 @@ export class HybridSearchEngine {
       if (opts.categories && !opts.categories.includes(m.category)) continue;
       // agent_id filter: null/undefined agent_id memories are shared (match any agent)
       if (opts.agent_id && m.agent_id && m.agent_id !== opts.agent_id) continue;
+      if (opts.owner_type && m.owner_type !== opts.owner_type) continue;
+      if (opts.recall_scope && m.recall_scope !== opts.recall_scope) continue;
 
       const layerWeight = LAYER_WEIGHTS[m.layer] || 0.5;
 
@@ -273,6 +282,8 @@ export class HybridSearchEngine {
         content: m.content,
         layer: m.layer,
         category: m.category,
+        owner_type: m.owner_type,
+        recall_scope: m.recall_scope,
         agent_id: m.agent_id,
         importance: m.importance,
         decay_score: m.decay_score,
@@ -293,20 +304,19 @@ export class HybridSearchEngine {
     return results;
   }
 
-  /**
-   * Format search results for injection into agent context.
-   * Priority categories (constraint, agent_persona) are injected first to ensure
-   * critical rules and persona are never truncated.
-   */
-  formatForInjection(results: SearchResult[], maxTokens: number): string {
+  formatForInjection(
+    results: SearchResult[],
+    maxTokens: number,
+    options?: { priorityCategories?: string[]; tagName?: string }
+  ): string {
     if (results.length === 0) return '';
 
-    // Separate priority categories from regular results
-    const PRIORITY_CATEGORIES = new Set(['constraint', 'agent_persona', 'correction', 'policy']);
+    const tagName = options?.tagName || 'cortex_memory';
+    const PRIORITY_CATEGORIES = new Set(options?.priorityCategories ?? ['correction']);
     const priorityResults = results.filter(r => PRIORITY_CATEGORIES.has(r.category));
     const regularResults = results.filter(r => !PRIORITY_CATEGORIES.has(r.category));
 
-    const lines: string[] = ['<cortex_memory>'];
+    const lines: string[] = [`<${tagName}>`];
     let tokens = estimateTokens(lines[0]!);
     const injectedIds = new Set<string>();
     const seenPrefixes = new Set<string>(); // content dedup
@@ -351,7 +361,7 @@ export class HybridSearchEngine {
       seenPrefixes.add(prefix);
     }
 
-    lines.push('</cortex_memory>');
+    lines.push(`</${tagName}>`);
     return lines.join('\n');
   }
 }

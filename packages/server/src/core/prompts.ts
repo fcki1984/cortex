@@ -59,7 +59,7 @@ const SHARED_EXCLUSIONS = `## Do NOT extract
 3. System metadata: prompts, tool descriptions, framework markers, injected tags`;
 
 const SHARED_OUTPUT_FORMAT = `## Output format
-{"memories": [{"content": "...", "category": "...", "importance": 0.0-1.0, "source": "user_stated|user_implied|observed_pattern|system_defined|self_reflection", "reasoning": "..."}], "relations": [{"subject": "entity (1-5 words)", "predicate": "uses|works_at|lives_in|knows|manages|belongs_to|created|prefers|studies|skilled_in|collaborates_with|reports_to|owns|interested_in|related_to|not_uses|not_interested_in|dislikes", "object": "entity (1-5 words)", "confidence": 0.0-1.0, "expired": false}], "nothing_extracted": false}
+{"memories": [{"content": "...", "category": "...", "importance": 0.0-1.0, "source": "user_stated|user_implied|observed_pattern|system_defined|self_reflection", "scope_hint": "global|topic", "reasoning": "..."}], "relations": [{"subject": "entity (1-5 words)", "predicate": "uses|works_at|lives_in|knows|manages|belongs_to|created|prefers|studies|skilled_in|collaborates_with|reports_to|owns|interested_in|related_to|not_uses|not_interested_in|dislikes", "object": "entity (1-5 words)", "confidence": 0.0-1.0, "expired": false}], "nothing_extracted": false}
 
 The "nothing_extracted" field is REQUIRED — always include it (true when memories is empty, false otherwise).
 If nothing qualifies: {"memories": [], "relations": [], "nothing_extracted": true}`;
@@ -120,6 +120,10 @@ ${SHARED_ATTRIBUTION}
 - Typical range: 0-3 memories per exchange. Max 5 only for unusually information-dense exchanges.
 - Max 3 relations per exchange. Only extract relations you're confident about.
 - nothing_extracted: true is a valid and common output — use it when appropriate.
+- One memory must express exactly one role. Do not mix a global rule with a topic-specific user fact in the same memory.
+- scope_hint guidance:
+  - global: stable answer style, clarification strategy, tool-selection rule, citation/evidence rule, agent persona
+  - topic: user preferences, budgets, products, plans, project conditions, everyday facts
 - Be specific: "prefers dark mode in all editors" not "has UI preferences"
 - Corrections: category="correction", importance≥0.9, content MUST include the updated fact
 - Relations: only EXPLICITLY stated, short entity names, use "expired":true for past tense
@@ -186,7 +190,7 @@ NOTE: "v0.6.7" and "Dashboard 图谱" are version-specific details — NOT extra
 [USER]: 你上次给的代码有bug，少了错误处理
 [ASSISTANT]: 抱歉！记住了，以后生成代码都要加完整的 error handling
 
-{"memories": [{"content": "用户指出生成的代码缺少错误处理", "category": "agent_self_improvement", "importance": 0.85, "source": "self_reflection", "reasoning": "agent learns to always include error handling"}, {"content": "生成代码时必须包含完整的错误处理", "category": "constraint", "importance": 0.9, "source": "user_stated", "reasoning": "user established a quality requirement"}], "nothing_extracted": false}
+{"memories": [{"content": "用户指出生成的代码缺少错误处理", "category": "agent_self_improvement", "importance": 0.85, "source": "self_reflection", "scope_hint": "topic", "reasoning": "agent learns from this interaction"}, {"content": "生成代码时必须包含完整的错误处理", "category": "constraint", "importance": 0.9, "source": "user_stated", "scope_hint": "global", "reasoning": "stable answer quality rule"}], "nothing_extracted": false}
 
 ### Example 8: English technical decision
 [USER]: I've been using PostgreSQL but thinking about switching to CockroachDB for the distributed setup
@@ -286,6 +290,12 @@ Given an EXISTING memory and a NEW memory that are semantically similar, decide 
 4. **conflict** — The new memory CONTRADICTS the existing one (not just updates). The old one becomes invalid.
    Use for: location changes ("东京→大阪"), tool/framework switches ("Nginx→Caddy"), role changes, preference reversals.
    NOT for: additions ("uses Python" + "also uses Rust" → merge, not conflict)
+
+## Placement boundary
+
+- Only merge or replace when EXISTING and NEW belong to the same placement family
+- placement family = same owner_type + same recall_scope + compatible category family
+- If placement families differ, treat them as separate memories and prefer "keep"
 
 ## Decision criteria
 

@@ -63,6 +63,8 @@ describe('LifecycleEngine', () => {
     const expired = insertMemory({
       layer: 'working',
       category: 'context',
+      owner_type: 'user',
+      recall_scope: 'topic',
       content: 'expired context',
       agent_id: 'test',
       expires_at: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
@@ -77,8 +79,8 @@ describe('LifecycleEngine', () => {
   });
 
   it('should run without errors in dry run mode', async () => {
-    insertMemory({ layer: 'working', category: 'context', content: 'test working memory', agent_id: 'test', importance: 0.8 });
-    insertMemory({ layer: 'core', category: 'fact', content: 'test core memory', agent_id: 'test', decay_score: 0.1 });
+    insertMemory({ layer: 'working', category: 'context', owner_type: 'user', recall_scope: 'topic', content: 'test working memory', agent_id: 'test', importance: 0.8 });
+    insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'test core memory', agent_id: 'test', decay_score: 0.1 });
 
     const report = await lifecycle.run(true);
     expect(report).toBeDefined();
@@ -92,6 +94,8 @@ describe('LifecycleEngine', () => {
     const mem = insertMemory({
       layer: 'core',
       category: 'fact',
+      owner_type: 'user',
+      recall_scope: 'topic',
       content: 'decay test memory',
       agent_id: 'test',
       decay_score: 1.0,

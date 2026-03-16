@@ -61,6 +61,8 @@ describe('Database', () => {
       const mem = insertMemory({
         layer: 'core',
         category: 'identity',
+        owner_type: 'user',
+        recall_scope: 'topic',
         content: 'User name is Harry',
         importance: 1.0,
         confidence: 0.9,
@@ -87,8 +89,8 @@ describe('Database', () => {
     });
 
     it('should list memories with filters', () => {
-      insertMemory({ layer: 'working', category: 'context', content: 'some context', agent_id: 'test' });
-      insertMemory({ layer: 'core', category: 'preference', content: 'likes coffee', agent_id: 'test' });
+      insertMemory({ layer: 'working', category: 'context', owner_type: 'user', recall_scope: 'topic', content: 'some context', agent_id: 'test' });
+      insertMemory({ layer: 'core', category: 'preference', owner_type: 'user', recall_scope: 'topic', content: 'likes coffee', agent_id: 'test' });
 
       const { items, total } = listMemories({ layer: 'core', agent_id: 'test' });
       expect(total).toBeGreaterThanOrEqual(2);
@@ -103,7 +105,7 @@ describe('Database', () => {
     });
 
     it('should delete a memory', () => {
-      const extra = insertMemory({ layer: 'archive', category: 'fact', content: 'to delete', agent_id: 'test' });
+      const extra = insertMemory({ layer: 'archive', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'to delete', agent_id: 'test' });
       expect(deleteMemory(extra.id)).toBe(true);
       expect(getMemoryById(extra.id)).toBeFalsy();
     });
@@ -115,14 +117,14 @@ describe('Database', () => {
 
   describe('FTS5 Search', () => {
     it('should find memories by content', () => {
-      insertMemory({ layer: 'core', category: 'fact', content: 'Tokyo is the capital of Japan', agent_id: 'test' });
+      insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'Tokyo is the capital of Japan', agent_id: 'test' });
       const results = searchFTS('Tokyo Japan');
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0]!.content).toContain('Tokyo');
     });
 
     it('should filter by layer', () => {
-      insertMemory({ layer: 'working', category: 'context', content: 'unique searchable text xyz123', agent_id: 'test' });
+      insertMemory({ layer: 'working', category: 'context', owner_type: 'user', recall_scope: 'topic', content: 'unique searchable text xyz123', agent_id: 'test' });
       const results = searchFTS('xyz123', { layer: 'core' });
       expect(results.length).toBe(0);
     });
@@ -147,7 +149,7 @@ describe('Database', () => {
 
   describe('Access Log & Bump', () => {
     it('should bump access count', () => {
-      const mem = insertMemory({ layer: 'core', category: 'fact', content: 'access test', agent_id: 'test' });
+      const mem = insertMemory({ layer: 'core', category: 'fact', owner_type: 'user', recall_scope: 'topic', content: 'access test', agent_id: 'test' });
       expect(mem.access_count).toBe(0);
 
       bumpAccessCount([mem.id], 'test query');

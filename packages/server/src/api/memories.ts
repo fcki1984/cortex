@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { listMemories, getMemoryById, insertMemory, updateMemory, deleteMemory, ensureAgent, getMemoryVersionChain } from '../db/index.js';
 import type { CortexApp } from '../app.js';
+import { classifyMemoryPlacement, isMemoryOwnerType, isMemoryRecallScope } from '../utils/memory-placement.js';
 
 export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp): void {
   // List memories
@@ -10,6 +11,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
       layer: q.layer,
       category: q.category,
       agent_id: q.agent_id,
+      owner_type: isMemoryOwnerType(q.owner_type) ? q.owner_type : undefined,
+      recall_scope: isMemoryRecallScope(q.recall_scope) ? q.recall_scope : undefined,
       limit: q.limit ? parseInt(q.limit) : undefined,
       offset: q.offset ? parseInt(q.offset) : undefined,
       orderBy: q.order_by,
@@ -56,6 +59,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
           },
           content: { type: 'string' },
           agent_id: { type: 'string' },
+          owner_type: { type: 'string', enum: ['user', 'agent', 'system'] },
+          recall_scope: { type: 'string', enum: ['global', 'topic'] },
           importance: { type: 'number' },
           confidence: { type: 'number' },
           source: { type: 'string' },
@@ -67,7 +72,17 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
   }, async (req, reply) => {
     const body = req.body as any;
     if (body.agent_id) ensureAgent(body.agent_id);
-    const mem = insertMemory(body);
+    const placement = classifyMemoryPlacement({
+      category: body.category,
+      content: body.content,
+      source: body.source,
+      scope_hint: isMemoryRecallScope(body.recall_scope) ? body.recall_scope : undefined,
+    });
+    const mem = insertMemory({
+      ...body,
+      owner_type: isMemoryOwnerType(body.owner_type) ? body.owner_type : placement.owner_type,
+      recall_scope: isMemoryRecallScope(body.recall_scope) ? body.recall_scope : placement.recall_scope,
+    });
 
     // Index vector
     try {
@@ -119,6 +134,8 @@ export function registerMemoriesRoutes(app: FastifyInstance, cortex: CortexApp):
     const restored = updateMemory(current.id, {
       content: target.content,
       category: target.category,
+      owner_type: target.owner_type,
+      recall_scope: target.recall_scope,
       importance: target.importance,
       confidence: target.confidence,
     });
