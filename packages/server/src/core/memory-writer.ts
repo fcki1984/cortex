@@ -19,13 +19,16 @@ import { SMART_UPDATE_SYSTEM_PROMPT } from './prompts.js';
 import { insertExtractionFeedback } from '../db/index.js';
 import { isLifecycleActive } from '../decay/lifecycle.js';
 import {
-  canSmartMergePlacement,
   classifyMemoryPlacement,
-  getCategoryFamily,
   type MemoryOwnerType,
   type MemoryPlacement,
   type MemoryRecallScope,
 } from '../utils/memory-placement.js';
+import {
+  canCategoriesSmartUpdate,
+  getUpdateTargetPriority,
+  resolveSmartUpdateCategory,
+} from '../utils/memory-update.js';
 
 const log = createLogger('memory-writer');
 
@@ -99,11 +102,34 @@ export class MemoryWriter {
   }
 
   private canMerge(existing: Memory, incoming: ExtractedMemory & MemoryPlacement): boolean {
-    if (getCategoryFamily(existing.category) !== getCategoryFamily(incoming.category)) return false;
-    return canSmartMergePlacement(
-      { owner_type: existing.owner_type, recall_scope: existing.recall_scope },
+    if (existing.owner_type !== incoming.owner_type || existing.recall_scope !== incoming.recall_scope) {
+      return false;
+    }
+    return canCategoriesSmartUpdate(
+      existing.category,
+      incoming.category,
       { owner_type: incoming.owner_type, recall_scope: incoming.recall_scope },
     );
+  }
+
+  private rankSimilarCandidates(
+    similar: SimilarMemory[],
+    incoming: ExtractedMemory & MemoryPlacement,
+  ): SimilarMemory[] {
+    return [...similar].sort((a, b) => {
+      const aPriority = getUpdateTargetPriority(
+        a.memory.category,
+        incoming.category,
+        { owner_type: incoming.owner_type, recall_scope: incoming.recall_scope },
+      );
+      const bPriority = getUpdateTargetPriority(
+        b.memory.category,
+        incoming.category,
+        { owner_type: incoming.owner_type, recall_scope: incoming.recall_scope },
+      );
+      if (aPriority !== bPriority) return bPriority - aPriority;
+      return a.distance - b.distance;
+    });
   }
 
   /**
@@ -270,6 +296,7 @@ recall_scope: ${p.incoming.recall_scope}`,
     sourcePrefix = 'sieve',
     forceLayer?: 'working' | 'core',
   ): Promise<Memory> {
+    const persistedCategory = resolveSmartUpdateCategory(existing.category, extraction.category);
     const content = decision.action === 'merge' && decision.merged_content
       ? decision.merged_content
       : extraction.content;
@@ -289,11 +316,16 @@ recall_scope: ${p.incoming.recall_scope}`,
       smart_update_type: decision.action,
       update_reasoning: decision.reasoning,
       supersedes: existing.id,
+      supersedes_category: existing.category,
     };
+    if (persistedCategory !== extraction.category) {
+      metadata.update_carrier_category = extraction.category;
+      metadata.persisted_category = persistedCategory;
+    }
 
     const newMem = insertMemory({
       layer,
-      category: extraction.category,
+      category: persistedCategory,
       owner_type: extraction.owner_type!,
       recall_scope: extraction.recall_scope!,
       content,
@@ -394,13 +426,18 @@ recall_scope: ${p.incoming.recall_scope}`,
       : similarityThreshold;
 
     // Corrections search within related categories
-    const correctionCategories = classified.category === 'correction'
-      ? ['identity', 'fact', 'preference', 'decision', 'entity', 'skill', 'relationship', 'goal', 'project_state', 'correction']
-      : undefined;
+    const relatedCategories = classified.category === 'correction'
+      ? ['identity', 'fact', 'preference', 'decision', 'constraint', 'policy', 'entity', 'skill', 'relationship', 'goal', 'project_state', 'correction']
+      : classified.category === 'decision'
+        ? ['decision', 'preference', 'fact', 'constraint', 'goal', 'project_state', 'correction']
+        : undefined;
 
-    // Corrections get wider search (top 10) to find the target memory
-    const topK = classified.category === 'correction' ? 10 : 3;
-    const similar = await this.findSimilar(classified, agentId, correctionCategories, topK);
+    // Corrections and state-updating decisions search a wider window to find the target memory
+    const topK = classified.category === 'correction' ? 10 : classified.category === 'decision' ? 5 : 3;
+    const similar = this.rankSimilarCandidates(
+      await this.findSimilar(classified, agentId, relatedCategories, topK),
+      classified,
+    );
 
     if (!effectiveSmartUpdate) {
       // Legacy behavior (or lifecycle active — skip smart update to avoid races)
@@ -432,7 +469,7 @@ recall_scope: ${p.incoming.recall_scope}`,
           log.info({ distance: closest.distance, existing_id: closest.memory.id }, 'Near-exact match, auto-replacing');
           const newMem = await this.executeSmartUpdate(
             { action: 'replace', reasoning: 'Near-exact match, auto-replaced without LLM' },
-            closest.memory, extraction, agentId, sessionId, confidenceOverride, sourcePrefix,
+            closest.memory, classified, agentId, sessionId, confidenceOverride, sourcePrefix,
           );
           return { action: 'smart_updated', memory: newMem };
         }
@@ -516,13 +553,17 @@ recall_scope: ${p.incoming.recall_scope}`,
 
     // Phase 1: parallel findSimilar for all gated extractions
     const similarResults = await Promise.all(
-      gatedExtractions.map(ext => {
+      gatedExtractions.map(async ext => {
         const cats = ext.category === 'correction'
-          ? ['identity', 'fact', 'preference', 'decision', 'entity', 'skill', 'relationship', 'goal', 'project_state', 'correction']
-          : undefined;
-        // Corrections get wider search (top 10) to find the target memory
-        const topK = ext.category === 'correction' ? 10 : 3;
-        return this.findSimilar(ext, agentId, cats, topK);
+          ? ['identity', 'fact', 'preference', 'decision', 'constraint', 'policy', 'entity', 'skill', 'relationship', 'goal', 'project_state', 'correction']
+          : ext.category === 'decision'
+            ? ['decision', 'preference', 'fact', 'constraint', 'goal', 'project_state', 'correction']
+            : undefined;
+        const topK = ext.category === 'correction' ? 10 : ext.category === 'decision' ? 5 : 3;
+        return this.rankSimilarCandidates(
+          await this.findSimilar(ext, agentId, cats, topK),
+          ext,
+        );
       }),
     );
 

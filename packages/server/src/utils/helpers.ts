@@ -1,7 +1,5 @@
 import { uuidv7 } from 'uuidv7';
-import * as OpenCC from 'opencc-js';
-
-const t2s = OpenCC.Converter({ from: 't', to: 'cn' });
+import { normalizeEntity as normalizeCanonicalEntity } from './normalize.js';
 
 export function generateId(): string {
   return uuidv7();
@@ -9,10 +7,10 @@ export function generateId(): string {
 
 /**
  * Normalize an entity name for consistent relation matching.
- * Applies: trim → NFKC unicode normalization → Traditional→Simplified Chinese → collapse whitespace.
+ * Shared wrapper around the canonical entity normalizer used by relations and recall helpers.
  */
 export function normalizeEntity(text: string): string {
-  return t2s(text.trim().normalize('NFKC')).replace(/\s+/g, ' ').toLowerCase();
+  return normalizeCanonicalEntity(text);
 }
 
 /**

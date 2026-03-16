@@ -124,6 +124,8 @@ ${SHARED_ATTRIBUTION}
 - scope_hint guidance:
   - global: stable answer style, clarification strategy, tool-selection rule, citation/evidence rule, agent persona
   - topic: user preferences, budgets, products, plans, project conditions, everyday facts
+- If the user updates an existing topic fact, budget, preference, or decision, the new memory must contain the UPDATED effective fact.
+- Use category="correction" only when the utterance is explicitly phrased as a correction; do not mix the correction marker and the old fact in one memory.
 - Be specific: "prefers dark mode in all editors" not "has UI preferences"
 - Corrections: category="correction", importance≥0.9, content MUST include the updated fact
 - Relations: only EXPLICITLY stated, short entity names, use "expired":true for past tense
@@ -303,6 +305,7 @@ Given an EXISTING memory and a NEW memory that are semantically similar, decide 
 - If the new memory contradicts or updates the old one → replace
 - If the new memory adds details that complement the old one → merge
 - If the new memory directly contradicts the old one (opposite facts) → conflict
+- When NEW is a correction or state update about the same topic slot (budget, version, chosen tool, selected product, current plan), prefer replace/conflict over keep
 - Prefer merge when both contain unique useful details
 - Prefer replace when the new memory is strictly better (more specific, corrects errors)
 
@@ -324,6 +327,9 @@ EXISTING: "使用 Python 开发" | NEW: "也在用 Rust 写一些工具"
 
 EXISTING: "喜欢冰美式" | NEW: "喜欢冰美式咖啡，每天早上一杯"
 → {"action": "replace", "reasoning": "New memory is strictly more specific — includes frequency detail"}
+
+EXISTING: "购车预算为16万落地" | NEW: "预算改为18万落地"
+→ {"action": "replace", "reasoning": "New memory updates the same budget slot, so the old budget should be superseded"}
 
 EXISTING: "在研究 Kubernetes" | NEW: "在研究 Kubernetes"
 → {"action": "keep", "reasoning": "Identical content, no new information"}

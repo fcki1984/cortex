@@ -4,6 +4,10 @@
  * alias resolution, CJK-aware casing.
  */
 
+import * as OpenCC from 'opencc-js';
+
+const t2s = OpenCC.Converter({ from: 't', to: 'cn' });
+
 // Alias table: maps lowercase variants to canonical form
 /**
  * Project-specific entity aliases.
@@ -16,6 +20,13 @@ const PROJECT_ALIAS_MAP = new Map<string, string>([
   ['cortex 记忆系统', 'Cortex'], ['cortex记忆系统', 'Cortex'], ['cortex项目', 'Cortex'],
   ['cortex 智能体系统', 'Cortex'], ['cortex 记忆系统开发', 'Cortex'],
 
+  // Product/entity aliases seen in topic memories and relations
+  ['比亚迪dm-i', '比亚迪DM-i'],
+  ['比亚迪dmi', '比亚迪DM-i'],
+  ['比亚迪 dm-i', '比亚迪DM-i'],
+  ['byd dm-i', '比亚迪DM-i'],
+  ['byd dmi', '比亚迪DM-i'],
+
   // User identity merging is done at ingest time via agentId
 ]);
 
@@ -24,7 +35,11 @@ const PROJECT_ALIAS_MAP = new Map<string, string>([
  * E.g. "cortex 关系存储" → check if "cortex" is a known entity → use that.
  * "xxx 服务" / "xxx 插件" / "xxx 系统" / "xxx npm 包" etc.
  */
-const STRIP_SUFFIXES = ['npm 包', 'npm包', '服务', '系统', '项目', '插件', '功能', '模块', '工具', '问题', '机器', '实例', '域名', '配置'];
+const STRIP_SUFFIXES = [
+  'npm 包', 'npm包', '服务', '系统', '项目', '插件', '功能', '模块', '工具',
+  '问题', '机器', '实例', '域名', '配置', '混动车', '混动汽车', '混动版',
+  '混动版本', '车型', '版本', '款',
+];
 
 function tryStripSuffix(name: string): string | null {
   const lower = name.toLowerCase().trim();
@@ -112,14 +127,21 @@ function fullWidthToHalf(str: string): string {
  */
 export function normalizeEntity(raw: string): string {
   // Step 1: trim + full-width → half-width
-  let s = fullWidthToHalf(raw.trim());
+  let s = fullWidthToHalf(raw.trim().normalize('NFKC'));
 
   // Step 2: collapse whitespace
   s = s.replace(/\s+/g, ' ').trim();
 
   if (!s) return s;
 
-  // Step 3: alias lookup (case-insensitive)
+  // Step 3: script normalization + common product spellings
+  s = t2s(s)
+    .replace(/\b[dＤ]\s*[-_ ]?\s*[mＭ]\s*[-_ ]?\s*[iＩ]\b/gi, 'DM-i')
+    .replace(/\bBYD\b/gi, '比亚迪')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Step 4: alias lookup (case-insensitive)
   const lower = s.toLowerCase();
 
   // 3a: Project-specific aliases first
@@ -134,7 +156,7 @@ export function normalizeEntity(raw: string): string {
   const stripped = tryStripSuffix(s);
   if (stripped) return stripped;
 
-  // Step 4 & 5: CJK-aware casing
+  // Step 5 & 6: CJK-aware casing
   if (CJK_RE.test(s)) {
     // Contains CJK characters — preserve original casing
     return s;

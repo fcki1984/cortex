@@ -9,6 +9,7 @@ import {
   deleteMemory,
   searchFTS,
   insertRelation,
+  upsertRelation,
   listRelations,
   deleteRelation,
   insertLifecycleLog,
@@ -144,6 +145,35 @@ describe('Database', () => {
       const rel = insertRelation({ subject: 'Test', predicate: 'is', object: 'deletable', confidence: 0.5, source_memory_id: null });
       expect(deleteRelation(rel.id)).toBe(true);
       expect(deleteRelation(rel.id)).toBe(false);
+    });
+
+    it('should canonicalize equivalent product entities during relation upsert', () => {
+      const created = upsertRelation({
+        subject: '用户',
+        predicate: 'prefers',
+        object: '比亚迪DM-i',
+        confidence: 0.9,
+        source_memory_id: null,
+        agent_id: 'test',
+        source: 'test',
+      });
+      const updated = upsertRelation({
+        subject: '用户',
+        predicate: 'prefers',
+        object: '比亚迪DM-i混动车',
+        confidence: 0.85,
+        source_memory_id: null,
+        agent_id: 'test',
+        source: 'test',
+      });
+
+      expect(created.action).toBe('created');
+      expect(updated.action).toBe('updated');
+
+      const list = listRelations({ subject: '用户', agent_id: 'test' });
+      const dmIRelations = list.filter(r => r.object === '比亚迪DM-i' && r.predicate === 'prefers');
+      expect(dmIRelations).toHaveLength(1);
+      expect(dmIRelations[0]!.extraction_count).toBeGreaterThanOrEqual(2);
     });
   });
 
