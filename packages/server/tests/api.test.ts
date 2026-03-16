@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import fs from 'node:fs';
 import { loadConfig } from '../src/utils/config.js';
 import { initDatabase, closeDatabase } from '../src/db/index.js';
 import { CortexApp } from '../src/app.js';
@@ -13,9 +14,27 @@ describe('API Integration', () => {
   beforeAll(async () => {
     const config = loadConfig({
       storage: { dbPath: ':memory:', walMode: false },
-      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
-      embedding: { provider: 'none', dimensions: 4 },
+      llm: {
+        extraction: { provider: 'none', timeoutMs: 1111 },
+        lifecycle: { provider: 'none', timeoutMs: 2222 },
+      },
+      embedding: { provider: 'none', dimensions: 4, timeoutMs: 3333 },
       vectorBackend: { provider: 'sqlite-vec' },
+      gate: {
+        queryExpansionTimeoutMs: 5555,
+        rerankerTimeoutMs: 6666,
+        relationInjection: true,
+        relationTimeoutMs: 7777,
+      },
+      search: {
+        reranker: {
+          enabled: false,
+          provider: 'none',
+          timeoutMs: 4444,
+          topN: 10,
+          weight: 0.5,
+        },
+      },
       markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
     });
     initDatabase(':memory:');
@@ -33,6 +52,7 @@ describe('API Integration', () => {
     await app.close();
     await cortex.shutdown();
     closeDatabase();
+    fs.rmSync(new URL('../cortex.json', import.meta.url), { force: true });
   });
 
   describe('GET /api/v1/health', () => {
@@ -173,11 +193,40 @@ describe('API Integration', () => {
   });
 
   describe('GET /api/v1/config', () => {
-    it('should return config', async () => {
+    it('should return config with timeout fields', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/config' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.port).toBeDefined();
+      expect(body.llm.extraction.timeoutMs).toBe(1111);
+      expect(body.llm.lifecycle.timeoutMs).toBe(2222);
+      expect(body.embedding.timeoutMs).toBe(3333);
+      expect(body.search.reranker.timeoutMs).toBe(4444);
+      expect(body.gate.queryExpansionTimeoutMs).toBe(5555);
+      expect(body.gate.rerankerTimeoutMs).toBe(6666);
+      expect(body.gate.relationInjection).toBe(true);
+      expect(body.gate.relationTimeoutMs).toBe(7777);
+    });
+  });
+
+  describe('PATCH /api/v1/config', () => {
+    it('should reload providers when timeout changes', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/config',
+        payload: {
+          llm: {
+            extraction: {
+              timeoutMs: 9999,
+            },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.ok).toBe(true);
+      expect(body.reloaded_providers).toContain('llm.extraction');
+      expect(body.config.llm.extraction.timeoutMs).toBe(9999);
     });
   });
 });

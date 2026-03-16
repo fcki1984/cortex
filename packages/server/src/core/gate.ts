@@ -91,7 +91,7 @@ export class MemoryGate {
       ? Promise.race([
           expandQuery(query, this.llm, this.config.queryExpansion),
           new Promise<string[]>((_, reject) =>
-            setTimeout(() => reject(new Error('Query expansion timeout')), 5000)
+            setTimeout(() => reject(new Error('Query expansion timeout')), this.config.queryExpansionTimeoutMs ?? 5000)
           ),
         ])
         .then(async (queries) => {
@@ -167,7 +167,7 @@ export class MemoryGate {
         const reranked = await Promise.race([
           this.reranker.rerank(query, signalResults, 15),
           new Promise<SearchResult[]>((_, reject) =>
-            setTimeout(() => reject(new Error('Reranker timeout')), 8000)
+            setTimeout(() => reject(new Error('Reranker timeout')), this.config.rerankerTimeoutMs ?? 8000)
           ),
         ]);
         const rw = this.rerankerWeight;
@@ -287,127 +287,16 @@ export class MemoryGate {
     let relationsCount = 0;
     if (relationInjection) {
       try {
-      // Extract entities from query only
-      const queryEntities = [...new Set(extractEntityTokens(query))];
-
-      // Separate "context keywords" from "entity subjects" in the query.
-      // For "天哥的服务器": entities=["天哥","服务器"], but "天哥" is a subject entity
-      // and "服务器" is context describing what we want about 天哥.
-      // We use context keywords to filter relations by topic relevance.
-      // Chinese stop particles that should not be context keywords:
-      const stopWords = new Set(['的', '了', '在', '是', '有', '我', '你', '他', '她', '它', '们', '吗', '吧', '呢', '啊', '哦', '嗯', '这', '那', '什么', '怎么', '哪', '哪里', '为什么', 'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which']);
-
-      if (queryEntities.length > 0) {
-        const useNeo4j = !!getDriver();
-
-        // Collect all candidate relation lines with their raw text for filtering
-        type RelCandidate = { line: string; text: string };
-        const candidates: RelCandidate[] = [];
-
-        if (useNeo4j) {
-          // Traverse top 3 query entities
-          for (const entity of queryEntities.slice(0, 3)) {
-            try {
-              const traversed = await traverseRelations(entity, {
-                maxHops: 2,
-                minConfidence: 0.6,
-                limit: 8,
-                agentId: req.agent_id,
-              });
-              for (const t of traversed) {
-                if (t.hops <= 2) {
-                  const pathText = t.path.slice(1).join(' → ');
-                  candidates.push({
-                    line: `${entity} → ${pathText} (${t.hops}hop)`,
-                    text: `${entity} ${pathText}`,
-                  });
-                }
-              }
-            } catch (e: any) {
-              log.debug({ entity, error: e.message }, 'Traverse failed for entity');
-            }
-          }
-
-          // Direct relations
-          try {
-            const directRels = await neo4jListRelations({
-              agentId: req.agent_id,
-              limit: 15,
-              includeExpired: false,
-            });
-            const entityRels = directRels.filter(r =>
-              queryEntities.some(e =>
-                r.subject.toLowerCase().includes(e.toLowerCase()) ||
-                r.object.toLowerCase().includes(e.toLowerCase())
-              )
-            );
-            for (const r of entityRels) {
-              const line = `${r.subject} --${r.predicate}--> ${r.object} (${r.confidence.toFixed(2)})`;
-              if (!candidates.some(c => c.line === line)) {
-                candidates.push({
-                  line,
-                  text: `${r.subject} ${r.predicate} ${r.object}`,
-                });
-              }
-            }
-          } catch (e: any) {
-            log.debug({ error: e.message }, 'Failed to fetch direct relations');
-          }
-        } else {
-          // SQLite fallback
-          const relations = findRelatedRelations(queryEntities, req.agent_id);
-          for (const r of relations) {
-            candidates.push({
-              line: `${r.subject} --${r.predicate}--> ${r.object} (${r.confidence.toFixed(2)})`,
-              text: `${r.subject} ${r.predicate} ${r.object}`,
-            });
-          }
+        const relationBlock = await Promise.race([
+          this.buildRelationBlock(query, req.agent_id),
+          new Promise<{ block: string; count: number }>((_, reject) =>
+            setTimeout(() => reject(new Error('Relation injection timeout')), this.config.relationTimeoutMs ?? 5000)
+          ),
+        ]);
+        if (relationBlock.count > 0) {
+          relationsCount = relationBlock.count;
+          context = context ? `${context}\n${relationBlock.block}` : relationBlock.block;
         }
-
-        // Context-keyword relevance filter:
-        // If query has context keywords beyond entity names (e.g. "服务器" in "天哥的服务器"),
-        // only keep relations whose text matches at least one context keyword.
-        // If query IS just entity names (e.g. "天哥"), show top relations unfiltered.
-        const contextKeywords = queryEntities.filter(t => !stopWords.has(t));
-        // Determine which tokens are "subject entities" (appear as relation subjects)
-        // vs "context keywords" (describe the topic we care about)
-        const subjectEntities = new Set<string>();
-        const topicKeywords: string[] = [];
-        for (const kw of contextKeywords) {
-          const isSubject = candidates.some(c =>
-            c.text.toLowerCase().startsWith(kw.toLowerCase()) ||
-            c.text.toLowerCase().includes(kw.toLowerCase() + ' ')
-          );
-          if (isSubject && candidates.filter(c => c.text.toLowerCase().includes(kw.toLowerCase())).length > 3) {
-            // This entity appears as subject in many relations — it's a broad entity
-            subjectEntities.add(kw);
-          } else {
-            topicKeywords.push(kw);
-          }
-        }
-
-        let filtered: string[];
-        if (topicKeywords.length > 0 && candidates.length > 0) {
-          // Has topic context — filter relations by topic relevance
-          filtered = candidates
-            .filter(c => topicKeywords.some(kw =>
-              c.text.toLowerCase().includes(kw.toLowerCase())
-            ))
-            .map(c => c.line);
-          log.debug({ topicKeywords, subjectEntities: [...subjectEntities], before: candidates.length, after: filtered.length }, 'Relation topic filter');
-        } else {
-          // Pure entity query — show all (capped)
-          filtered = candidates.map(c => c.line);
-        }
-
-        const cappedLines = filtered.slice(0, 5);
-        if (cappedLines.length > 0) {
-          relationsCount = cappedLines.length;
-          const relBlock = `<cortex_relations>\n${cappedLines.join('\n')}\n</cortex_relations>`;
-          context = context ? `${context}\n${relBlock}` : relBlock;
-          log.debug({ count: cappedLines.length, source: useNeo4j ? 'neo4j' : 'sqlite' }, 'Relations injected');
-        }
-      }
       } catch (e: any) {
         log.warn({ error: e.message }, 'Relation injection failed entirely, returning search-only results');
         // relationsCount stays 0, context stays as-is
@@ -428,6 +317,115 @@ export class MemoryGate {
         skipped: false,
         latency_ms: latency,
       },
+    };
+  }
+
+  private async buildRelationBlock(query: string, agentId?: string): Promise<{ block: string; count: number }> {
+    const queryEntities = [...new Set(extractEntityTokens(query))];
+    const stopWords = new Set(['的', '了', '在', '是', '有', '我', '你', '他', '她', '它', '们', '吗', '吧', '呢', '啊', '哦', '嗯', '这', '那', '什么', '怎么', '哪', '哪里', '为什么', 'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which']);
+
+    if (queryEntities.length === 0) {
+      return { block: '', count: 0 };
+    }
+
+    const useNeo4j = !!getDriver();
+    type RelCandidate = { line: string; text: string };
+    const candidates: RelCandidate[] = [];
+
+    if (useNeo4j) {
+      for (const entity of queryEntities.slice(0, 3)) {
+        try {
+          const traversed = await traverseRelations(entity, {
+            maxHops: 2,
+            minConfidence: 0.6,
+            limit: 8,
+            agentId,
+          });
+          for (const t of traversed) {
+            if (t.hops <= 2) {
+              const pathText = t.path.slice(1).join(' → ');
+              candidates.push({
+                line: `${entity} → ${pathText} (${t.hops}hop)`,
+                text: `${entity} ${pathText}`,
+              });
+            }
+          }
+        } catch (e: any) {
+          log.debug({ entity, error: e.message }, 'Traverse failed for entity');
+        }
+      }
+
+      try {
+        const directRels = await neo4jListRelations({
+          agentId,
+          limit: 15,
+          includeExpired: false,
+        });
+        const entityRels = directRels.filter(r =>
+          queryEntities.some(e =>
+            r.subject.toLowerCase().includes(e.toLowerCase()) ||
+            r.object.toLowerCase().includes(e.toLowerCase())
+          )
+        );
+        for (const r of entityRels) {
+          const line = `${r.subject} --${r.predicate}--> ${r.object} (${r.confidence.toFixed(2)})`;
+          if (!candidates.some(c => c.line === line)) {
+            candidates.push({
+              line,
+              text: `${r.subject} ${r.predicate} ${r.object}`,
+            });
+          }
+        }
+      } catch (e: any) {
+        log.debug({ error: e.message }, 'Failed to fetch direct relations');
+      }
+    } else {
+      const relations = findRelatedRelations(queryEntities, agentId);
+      for (const r of relations) {
+        candidates.push({
+          line: `${r.subject} --${r.predicate}--> ${r.object} (${r.confidence.toFixed(2)})`,
+          text: `${r.subject} ${r.predicate} ${r.object}`,
+        });
+      }
+    }
+
+    const contextKeywords = queryEntities.filter(t => !stopWords.has(t));
+    const subjectEntities = new Set<string>();
+    const topicKeywords: string[] = [];
+
+    for (const kw of contextKeywords) {
+      const isSubject = candidates.some(c =>
+        c.text.toLowerCase().startsWith(kw.toLowerCase()) ||
+        c.text.toLowerCase().includes(`${kw.toLowerCase()} `)
+      );
+      if (isSubject && candidates.filter(c => c.text.toLowerCase().includes(kw.toLowerCase())).length > 3) {
+        subjectEntities.add(kw);
+      } else {
+        topicKeywords.push(kw);
+      }
+    }
+
+    let filtered: string[];
+    if (topicKeywords.length > 0 && candidates.length > 0) {
+      filtered = candidates
+        .filter(c => topicKeywords.some(kw =>
+          c.text.toLowerCase().includes(kw.toLowerCase())
+        ))
+        .map(c => c.line);
+      log.debug({ topicKeywords, subjectEntities: [...subjectEntities], before: candidates.length, after: filtered.length }, 'Relation topic filter');
+    } else {
+      filtered = candidates.map(c => c.line);
+    }
+
+    const cappedLines = filtered.slice(0, 5);
+    if (cappedLines.length === 0) {
+      return { block: '', count: 0 };
+    }
+
+    log.debug({ count: cappedLines.length, source: useNeo4j ? 'neo4j' : 'sqlite' }, 'Relations injected');
+    return {
+      block: `<cortex_relations>\n${cappedLines.join('\n')}\n</cortex_relations>`,
+      count: cappedLines.length,
     };
   }
 }

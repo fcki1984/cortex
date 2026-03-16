@@ -1,16 +1,20 @@
 import type { LLMProvider, LLMCompletionOpts } from './interface.js';
 import { createLogger } from '../utils/logger.js';
+import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('llm-ollama');
+const DEFAULT_TIMEOUT_MS = 60000;
 
 export class OllamaLLMProvider implements LLMProvider {
   readonly name = 'ollama';
   private model: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(opts: { model?: string; baseUrl?: string }) {
+  constructor(opts: { model?: string; baseUrl?: string; timeoutMs?: number }) {
     this.model = opts.model || 'qwen2.5:3b';
     this.baseUrl = opts.baseUrl || 'http://localhost:11434';
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async complete(prompt: string, opts?: LLMCompletionOpts): Promise<string> {
@@ -26,7 +30,7 @@ export class OllamaLLMProvider implements LLMProvider {
           num_predict: opts?.maxTokens || 500,
         },
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
     });
 
     if (!res.ok) {

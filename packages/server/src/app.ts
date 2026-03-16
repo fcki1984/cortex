@@ -114,12 +114,14 @@ export class CortexApp {
 
 /** Compare old vs new provider config to decide if provider needs recreation */
 function hasProviderChanged(
-  oldCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string },
-  newCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string },
+  oldCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number; dimensions?: number },
+  newCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number; dimensions?: number },
 ): boolean {
   if (newCfg.provider !== oldCfg.provider) return true;
   if (newCfg.model !== oldCfg.model) return true;
+  if (newCfg.dimensions !== oldCfg.dimensions) return true;
   if (newCfg.baseUrl !== oldCfg.baseUrl) return true;
+  if (newCfg.timeoutMs !== oldCfg.timeoutMs) return true;
   // Only compare apiKey if the new config actually provides one (non-empty)
   if (newCfg.apiKey && newCfg.apiKey !== oldCfg.apiKey) return true;
   return false;

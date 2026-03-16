@@ -45,7 +45,7 @@ export class NullLLMProvider implements LLMProvider {
   async complete(): Promise<string> { return ''; }
 }
 
-export function createLLMProvider(config: { provider: string; model?: string; apiKey?: string; baseUrl?: string }): LLMProvider {
+export function createLLMProvider(config: { provider: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number }): LLMProvider {
   switch (config.provider) {
     case 'openai':
       return new OpenAILLMProvider(config);
@@ -74,8 +74,8 @@ export function createLLMProvider(config: { provider: string; model?: string; ap
 }
 
 export function createCascadeLLM(
-  primary: { provider: string; model?: string; apiKey?: string; baseUrl?: string },
-  fallback?: { provider: string; model?: string; apiKey?: string; baseUrl?: string }
+  primary: { provider: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+  fallback?: { provider: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number }
 ): CascadeLLM {
   const providers: LLMProvider[] = [createLLMProvider(primary)];
   if (fallback && fallback.provider !== 'none') {

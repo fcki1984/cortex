@@ -56,6 +56,7 @@ export function createEmbeddingProvider(config: {
   dimensions?: number;
   apiKey?: string;
   baseUrl?: string;
+  timeoutMs?: number;
 }): EmbeddingProvider {
   switch (config.provider) {
     case 'openai':
@@ -80,8 +81,8 @@ export function createEmbeddingProvider(config: {
 }
 
 export function createCascadeEmbedding(
-  primary: { provider: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string },
-  fallback?: { provider: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string }
+  primary: { provider: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+  fallback?: { provider: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string; timeoutMs?: number }
 ): CascadeEmbedding {
   const providers: EmbeddingProvider[] = [createEmbeddingProvider(primary)];
   if (fallback && fallback.provider !== 'none') {

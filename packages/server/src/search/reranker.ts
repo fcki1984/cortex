@@ -1,8 +1,10 @@
 import { createLogger } from '../utils/logger.js';
 import type { SearchResult } from './hybrid.js';
 import type { LLMProvider } from '../llm/interface.js';
+import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('reranker');
+const DEFAULT_TIMEOUT_MS = 10000;
 
 export interface RerankerConfig {
   enabled: boolean;
@@ -11,6 +13,7 @@ export interface RerankerConfig {
   model?: string;
   topN?: number;
   baseUrl?: string;
+  timeoutMs?: number;
 }
 
 export interface Reranker {
@@ -24,11 +27,13 @@ export class CohereReranker implements Reranker {
   private apiKey: string;
   private model: string;
   private defaultTopN: number;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; topN?: number }) {
+  constructor(opts: { apiKey?: string; model?: string; topN?: number; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.COHERE_API_KEY || '';
     this.model = opts.model || 'rerank-v3.5';
     this.defaultTopN = opts.topN || 10;
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async rerank(query: string, results: SearchResult[], topN?: number): Promise<SearchResult[]> {
@@ -56,7 +61,7 @@ export class CohereReranker implements Reranker {
           top_n: Math.min(n, results.length),
           return_documents: false,
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
       });
 
       if (!res.ok) {
@@ -89,12 +94,14 @@ export class CohereReranker implements Reranker {
  */
 export class LLMReranker implements Reranker {
   private defaultTopN: number;
+  private timeoutMs: number;
 
   constructor(
     private llm: LLMProvider,
-    opts?: { topN?: number },
+    opts?: { topN?: number; timeoutMs?: number },
   ) {
     this.defaultTopN = opts?.topN || 10;
+    this.timeoutMs = resolveTimeoutMs(opts?.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async rerank(query: string, results: SearchResult[], topN?: number): Promise<SearchResult[]> {
@@ -107,8 +114,9 @@ export class LLMReranker implements Reranker {
     try {
       const documents = candidates.map((r, i) => `[${i}] (sim=${r.vectorScore.toFixed(3)}) ${r.content}`).join('\n');
 
-      const response = await this.llm.complete(
-        `Rate how useful each memory would be if injected into an AI assistant's context to help answer the query. Output ONLY a JSON array of objects with "index" and "score" (0.0 to 1.0), sorted by score descending.
+      const response = await Promise.race([
+        this.llm.complete(
+          `Rate how useful each memory would be if injected into an AI assistant's context to help answer the query. Output ONLY a JSON array of objects with "index" and "score" (0.0 to 1.0), sorted by score descending.
 
 Scoring guide:
 - 0.9-1.0: Directly answers or critically constrains the response
@@ -124,12 +132,16 @@ ${documents}
 
 Output format: [{"index": 0, "score": 0.95}, {"index": 2, "score": 0.7}, ...]
 Output ONLY valid JSON, no explanation.`,
-        {
-          maxTokens: 500,
-          temperature: 0,
-          systemPrompt: 'You are a relevance scoring engine. Output only valid JSON.',
-        },
-      );
+          {
+            maxTokens: 500,
+            temperature: 0,
+            systemPrompt: 'You are a relevance scoring engine. Output only valid JSON.',
+          },
+        ),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('LLM rerank timeout')), this.timeoutMs)
+        ),
+      ]);
 
       // Parse JSON from response (handle markdown code blocks)
       const jsonStr = response.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim();
@@ -160,11 +172,13 @@ export class VoyageReranker implements Reranker {
   private apiKey: string;
   private model: string;
   private defaultTopN: number;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; topN?: number }) {
+  constructor(opts: { apiKey?: string; model?: string; topN?: number; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.VOYAGE_API_KEY || '';
     this.model = opts.model || 'rerank-2.5';
     this.defaultTopN = opts.topN || 10;
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async rerank(query: string, results: SearchResult[], topN?: number): Promise<SearchResult[]> {
@@ -188,7 +202,7 @@ export class VoyageReranker implements Reranker {
           documents: results.map(r => r.content),
           top_k: Math.min(n, results.length),
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
       });
 
       if (!res.ok) {
@@ -220,11 +234,13 @@ export class JinaReranker implements Reranker {
   private apiKey: string;
   private model: string;
   private defaultTopN: number;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; topN?: number }) {
+  constructor(opts: { apiKey?: string; model?: string; topN?: number; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.JINA_API_KEY || '';
     this.model = opts.model || 'jina-reranker-v2-base-multilingual';
     this.defaultTopN = opts.topN || 10;
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async rerank(query: string, results: SearchResult[], topN?: number): Promise<SearchResult[]> {
@@ -248,7 +264,7 @@ export class JinaReranker implements Reranker {
           documents: results.map(r => r.content),
           top_n: Math.min(n, results.length),
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
       });
 
       if (!res.ok) {
@@ -281,12 +297,14 @@ export class SiliconFlowReranker implements Reranker {
   private model: string;
   private defaultTopN: number;
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; topN?: number; baseUrl?: string }) {
+  constructor(opts: { apiKey?: string; model?: string; topN?: number; baseUrl?: string; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.SILICONFLOW_API_KEY || '';
     this.model = opts.model || 'BAAI/bge-reranker-v2-m3';
     this.defaultTopN = opts.topN || 10;
     this.baseUrl = opts.baseUrl || 'https://api.siliconflow.cn/v1';
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async rerank(query: string, results: SearchResult[], topN?: number): Promise<SearchResult[]> {
@@ -310,7 +328,7 @@ export class SiliconFlowReranker implements Reranker {
           documents: results.map(r => r.content),
           top_n: Math.min(n, results.length),
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
       });
 
       if (!res.ok) {
@@ -354,18 +372,21 @@ export function createReranker(config?: RerankerConfig, llm?: LLMProvider): Rera
         apiKey: config.apiKey,
         model: config.model,
         topN: config.topN,
+        timeoutMs: config.timeoutMs,
       });
     case 'voyage':
       return new VoyageReranker({
         apiKey: config.apiKey,
         model: config.model || 'rerank-2.5',
         topN: config.topN,
+        timeoutMs: config.timeoutMs,
       });
     case 'jina':
       return new JinaReranker({
         apiKey: config.apiKey,
         model: config.model || 'jina-reranker-v2-base-multilingual',
         topN: config.topN,
+        timeoutMs: config.timeoutMs,
       });
     case 'siliconflow':
       return new SiliconFlowReranker({
@@ -373,13 +394,14 @@ export function createReranker(config?: RerankerConfig, llm?: LLMProvider): Rera
         model: config.model || 'BAAI/bge-reranker-v2-m3',
         topN: config.topN,
         baseUrl: config.baseUrl,
+        timeoutMs: config.timeoutMs,
       });
     case 'llm':
       if (!llm) {
         log.warn('LLM reranker requested but no LLM provider available, falling back to none');
         return new NullReranker();
       }
-      return new LLMReranker(llm, { topN: config.topN });
+      return new LLMReranker(llm, { topN: config.topN, timeoutMs: config.timeoutMs });
     default:
       return new NullReranker();
   }

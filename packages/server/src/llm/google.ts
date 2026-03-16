@@ -1,18 +1,22 @@
 import type { LLMProvider, LLMCompletionOpts } from './interface.js';
 import { createLogger } from '../utils/logger.js';
+import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('llm-google');
+const DEFAULT_TIMEOUT_MS = 30000;
 
 export class GoogleLLMProvider implements LLMProvider {
   readonly name = 'google';
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(opts: { apiKey?: string; model?: string; baseUrl?: string }) {
+  constructor(opts: { apiKey?: string; model?: string; baseUrl?: string; timeoutMs?: number }) {
     this.apiKey = opts.apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
     this.model = opts.model || 'gemini-2.0-flash';
     this.baseUrl = (opts.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    this.timeoutMs = resolveTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   }
 
   async complete(prompt: string, opts?: LLMCompletionOpts): Promise<string> {
@@ -35,7 +39,7 @@ export class GoogleLLMProvider implements LLMProvider {
             temperature: opts?.temperature ?? 0.3,
           },
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: createTimeoutSignal(this.timeoutMs, DEFAULT_TIMEOUT_MS),
       },
     );
 
