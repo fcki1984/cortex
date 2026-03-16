@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import fs from 'node:fs';
 import { loadConfig } from '../src/utils/config.js';
 import { initDatabase, closeDatabase } from '../src/db/index.js';
 import { CortexApp } from '../src/app.js';
@@ -51,6 +52,7 @@ describe('API Integration', () => {
     await app.close();
     await cortex.shutdown();
     closeDatabase();
+    fs.rmSync(new URL('../cortex.json', import.meta.url), { force: true });
   });
 
   describe('GET /api/v1/health', () => {
