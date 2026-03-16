@@ -21,29 +21,36 @@ export default function GateSection({
       {sectionHeader(t('settings.gateTitle'), 'gate')}
       {editing ? (
         <div style={{ padding: '4px 0' }}>
-          {renderNumberField(`📌 ${t('settings.fixedBudget')}`, t('settings.fixedBudgetDesc'), 'fixedInjectionTokens', 50)}
-          {renderNumberField(`💉 ${t('settings.memoryBudget')}`, t('settings.memoryBudgetDesc'), 'maxInjectionTokens', 100)}
-          {renderToggleField(`🕸️ ${t('settings.relationInjection')}`, t('settings.relationInjectionDesc'), 'relationInjection')}
-          {renderNumberField(`🔗 ${t('settings.relationBudget')}`, t('settings.relationBudgetDesc'), 'relationBudget', 0)}
-          {renderNumberField(`🔍 ${t('settings.searchCandidates')}`, t('settings.searchCandidatesDesc'), 'searchLimit', 5, 50)}
+          {renderNumberField(`Persona ${t('settings.personaBudget')}`, t('settings.personaBudgetDesc'), 'fixedInjectionTokens', 50)}
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>{t('settings.ruleLayerTitle')}</label>
+            {renderToggleField(t('settings.ruleLayerEnabled'), t('settings.ruleLayerEnabledDesc'), 'ruleInjection.enabled')}
+            {renderNumberField(t('settings.ruleLayerBudget'), t('settings.ruleLayerBudgetDesc'), 'ruleInjection.maxTokens', 50)}
+          </div>
+
+          {renderNumberField(`Search ${t('settings.memoryBudget')}`, t('settings.memoryBudgetDesc'), 'maxInjectionTokens', 100)}
+          {renderToggleField(t('settings.relationInjection'), t('settings.relationInjectionDesc'), 'relationInjection')}
+          {renderNumberField(t('settings.relationBudget'), t('settings.relationBudgetDesc'), 'relationBudget', 0)}
+          {renderNumberField(t('settings.searchCandidates'), t('settings.searchCandidatesDesc'), 'searchLimit', 5, 50)}
           {renderToggleField(t('settings.skipSmallTalk'), t('settings.skipSmallTalkDesc'), 'skipSmallTalk')}
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
-            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>✂️ {t('settings.cliffFilter')}</label>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>{t('settings.cliffFilter')}</label>
             {renderNumberField(t('settings.cliffAbsolute'), t('settings.cliffAbsoluteDesc'), 'cliffAbsolute', 0.1, 0.9)}
             {renderNumberField(t('settings.cliffGap'), t('settings.cliffGapDesc'), 'cliffGap', 0.1, 0.9)}
             {renderNumberField(t('settings.cliffFloor'), t('settings.cliffFloorDesc'), 'cliffFloor', 0, 0.5)}
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
-            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>⏱️ {t('settings.recallTimeouts')}</label>
-            {renderNumberField(`🔄 ${t('settings.queryExpansionTimeoutMs')}`, t('settings.queryExpansionTimeoutMsDesc'), 'queryExpansionTimeoutMs', 500, 30000)}
-            {renderNumberField(`🎯 ${t('settings.rerankerTimeoutMs')}`, t('settings.rerankerTimeoutMsDesc'), 'rerankerTimeoutMs', 500, 30000)}
-            {renderNumberField(`🕸️ ${t('settings.relationTimeoutMs')}`, t('settings.relationTimeoutMsDesc'), 'relationTimeoutMs', 500, 30000)}
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>{t('settings.recallTimeouts')}</label>
+            {renderNumberField(t('settings.queryExpansionTimeoutMs'), t('settings.queryExpansionTimeoutMsDesc'), 'queryExpansionTimeoutMs', 500, 30000)}
+            {renderNumberField(t('settings.rerankerTimeoutMs'), t('settings.rerankerTimeoutMsDesc'), 'rerankerTimeoutMs', 500, 30000)}
+            {renderNumberField(t('settings.relationTimeoutMs'), t('settings.relationTimeoutMsDesc'), 'relationTimeoutMs', 500, 30000)}
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
-            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>🧭 {t('settings.relevanceGateTitle')}</label>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>{t('settings.relevanceGateTitle')}</label>
             {renderToggleField(t('settings.relevanceGateEnabled'), t('settings.relevanceGateEnabledDesc'), 'relevanceGate.enabled')}
             {renderNumberField(t('settings.relevanceGateInspectTopK'), t('settings.relevanceGateInspectTopKDesc'), 'relevanceGate.inspectTopK', 1, 10)}
             {renderNumberField(t('settings.relevanceGateMinSemanticScore'), t('settings.relevanceGateMinSemanticScoreDesc'), 'relevanceGate.minSemanticScore', 0, 1)}
@@ -51,7 +58,7 @@ export default function GateSection({
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
-            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>🔄 {t('settings.queryExpansion')}</label>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>{t('settings.queryExpansion')}</label>
             {renderToggleField(t('settings.queryExpansion'), t('settings.queryExpansionDesc'), 'queryExpansion.enabled')}
             {draft?.queryExpansion?.enabled && (
               <div style={{ marginLeft: 16 }}>
@@ -60,7 +67,9 @@ export default function GateSection({
                   type="number"
                   value={draft?.queryExpansion?.maxVariants ?? 3}
                   onChange={e => setDraft((d: any) => ({ ...d, queryExpansion: { ...d.queryExpansion, maxVariants: Number(e.target.value) } }))}
-                  min={2} max={5} style={{ width: 80 }}
+                  min={2}
+                  max={5}
+                  style={{ width: 80 }}
                 />
               </div>
             )}
@@ -69,16 +78,21 @@ export default function GateSection({
       ) : (
         <table>
           <tbody>
-            {displayRow(`📌 ${t('settings.fixedBudget')}`, `${config.gate?.fixedInjectionTokens ?? 500} tokens`, t('settings.fixedBudgetDesc'))}
-            {displayRow(`💉 ${t('settings.memoryBudget')}`, `${config.gate?.maxInjectionTokens ?? 1000} tokens`, t('settings.memoryBudgetDesc'))}
-            {displayRow(`🕸️ ${t('settings.relationInjection')}`, config.gate?.relationInjection ? t('common.on') : t('common.off'), t('settings.relationInjectionDesc'))}
-            {displayRow(`🔗 ${t('settings.relationBudget')}`, `${config.gate?.relationBudget ?? 100} tokens`, t('settings.relationBudgetDesc'))}
-            {displayRow(`🔍 ${t('settings.searchCandidates')}`, config.gate?.searchLimit ?? 30, t('settings.searchCandidatesDesc'))}
+            {displayRow(`Persona ${t('settings.personaBudget')}`, `${config.gate?.fixedInjectionTokens ?? 500} tokens`, t('settings.personaBudgetDesc'))}
+            {displayRow(
+              t('settings.ruleLayerTitle'),
+              `${config.gate?.ruleInjection?.enabled ? t('common.on') : t('common.off')} / ${t('settings.ruleLayerBudget')}: ${config.gate?.ruleInjection?.maxTokens ?? 500}`,
+              t('settings.ruleLayerEnabledDesc')
+            )}
+            {displayRow(`Search ${t('settings.memoryBudget')}`, `${config.gate?.maxInjectionTokens ?? 1000} tokens`, t('settings.memoryBudgetDesc'))}
+            {displayRow(t('settings.relationInjection'), config.gate?.relationInjection ? t('common.on') : t('common.off'), t('settings.relationInjectionDesc'))}
+            {displayRow(t('settings.relationBudget'), `${config.gate?.relationBudget ?? 100} tokens`, t('settings.relationBudgetDesc'))}
+            {displayRow(t('settings.searchCandidates'), config.gate?.searchLimit ?? 30, t('settings.searchCandidatesDesc'))}
             {displayRow(t('settings.skipSmallTalk'), config.gate?.skipSmallTalk ? t('common.on') : t('common.off'), t('settings.skipSmallTalkDesc'))}
-            {displayRow(`✂️ ${t('settings.cliffFilter')}`, `${t('settings.cliffAbsolute')}: ${config.gate?.cliffAbsolute ?? 0.4} · ${t('settings.cliffGap')}: ${config.gate?.cliffGap ?? 0.6} · ${t('settings.cliffFloor')}: ${config.gate?.cliffFloor ?? 0.05}`)}
-            {displayRow(`⏱️ ${t('settings.recallTimeouts')}`, `${t('settings.queryExpansionTimeoutMs')}: ${config.gate?.queryExpansionTimeoutMs ?? 5000}ms · ${t('settings.rerankerTimeoutMs')}: ${config.gate?.rerankerTimeoutMs ?? 8000}ms · ${t('settings.relationTimeoutMs')}: ${config.gate?.relationTimeoutMs ?? 5000}ms`)}
-            {displayRow(`🧭 ${t('settings.relevanceGateTitle')}`, `${config.gate?.relevanceGate?.enabled ? t('common.on') : t('common.off')} · topK: ${config.gate?.relevanceGate?.inspectTopK ?? 3} · semantic: ${config.gate?.relevanceGate?.minSemanticScore ?? 0.55} · fused: ${config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15}`, t('settings.relevanceGateEnabledDesc'))}
-            {displayRow(`🔄 ${t('settings.queryExpansion')}`, config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} variants)` : t('common.off'), t('settings.queryExpansionDesc'))}
+            {displayRow(t('settings.cliffFilter'), `${t('settings.cliffAbsolute')}: ${config.gate?.cliffAbsolute ?? 0.4} / ${t('settings.cliffGap')}: ${config.gate?.cliffGap ?? 0.6} / ${t('settings.cliffFloor')}: ${config.gate?.cliffFloor ?? 0.05}`)}
+            {displayRow(t('settings.recallTimeouts'), `${t('settings.queryExpansionTimeoutMs')}: ${config.gate?.queryExpansionTimeoutMs ?? 5000}ms / ${t('settings.rerankerTimeoutMs')}: ${config.gate?.rerankerTimeoutMs ?? 8000}ms / ${t('settings.relationTimeoutMs')}: ${config.gate?.relationTimeoutMs ?? 5000}ms`)}
+            {displayRow(t('settings.relevanceGateTitle'), `${config.gate?.relevanceGate?.enabled ? t('common.on') : t('common.off')} / topK: ${config.gate?.relevanceGate?.inspectTopK ?? 3} / semantic: ${config.gate?.relevanceGate?.minSemanticScore ?? 0.55} / fused: ${config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15}`, t('settings.relevanceGateEnabledDesc'))}
+            {displayRow(t('settings.queryExpansion'), config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} variants)` : t('common.off'), t('settings.queryExpansionDesc'))}
           </tbody>
         </table>
       )}

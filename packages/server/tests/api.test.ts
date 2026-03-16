@@ -21,6 +21,10 @@ describe('API Integration', () => {
       embedding: { provider: 'none', dimensions: 4, timeoutMs: 3333 },
       vectorBackend: { provider: 'sqlite-vec' },
       gate: {
+        ruleInjection: {
+          enabled: true,
+          maxTokens: 8888,
+        },
         queryExpansionTimeoutMs: 5555,
         rerankerTimeoutMs: 6666,
         relationInjection: true,
@@ -212,6 +216,8 @@ describe('API Integration', () => {
       expect(body.gate.rerankerTimeoutMs).toBe(6666);
       expect(body.gate.relationInjection).toBe(true);
       expect(body.gate.relationTimeoutMs).toBe(7777);
+      expect(body.gate.ruleInjection.enabled).toBe(true);
+      expect(body.gate.ruleInjection.maxTokens).toBe(8888);
       expect(body.gate.relevanceGate.enabled).toBe(true);
       expect(body.gate.relevanceGate.inspectTopK).toBe(4);
       expect(body.gate.relevanceGate.minSemanticScore).toBe(0.66);
@@ -261,6 +267,26 @@ describe('API Integration', () => {
       expect(body.config.gate.relevanceGate.inspectTopK).toBe(2);
       expect(body.config.gate.relevanceGate.minSemanticScore).toBe(0.71);
       expect(body.config.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.19);
+    });
+
+    it('should persist rule layer settings', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/config',
+        payload: {
+          gate: {
+            ruleInjection: {
+              enabled: false,
+              maxTokens: 321,
+            },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.ok).toBe(true);
+      expect(body.config.gate.ruleInjection.enabled).toBe(false);
+      expect(body.config.gate.ruleInjection.maxTokens).toBe(321);
     });
   });
 });

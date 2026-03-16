@@ -154,6 +154,10 @@ export default function Settings() {
       }),
       gate: () => ({
         fixedInjectionTokens: config.gate?.fixedInjectionTokens ?? 500,
+        ruleInjection: {
+          enabled: config.gate?.ruleInjection?.enabled ?? true,
+          maxTokens: config.gate?.ruleInjection?.maxTokens ?? 500,
+        },
         maxInjectionTokens: config.gate?.maxInjectionTokens ?? 1000,
         relationInjection: config.gate?.relationInjection ?? true,
         relationBudget: config.gate?.relationBudget ?? 100,
@@ -266,6 +270,8 @@ export default function Settings() {
     if (section === 'gate') {
       const fit = Number(draft.fixedInjectionTokens);
       if (isNaN(fit) || fit < 50) errors.push(t('settings.validationFixedBudgetRange'));
+      const rit = Number(draft.ruleInjection?.maxTokens);
+      if (isNaN(rit) || rit < 50) errors.push(t('settings.validationFixedBudgetRange'));
       const mit = Number(draft.maxInjectionTokens);
       if (isNaN(mit) || mit < 100) errors.push(t('settings.validationMemoryBudgetRange'));
       const rb = Number(draft.relationBudget);
@@ -394,6 +400,10 @@ export default function Settings() {
       } else if (section === 'gate') {
         payload.gate = {
           fixedInjectionTokens: Number(draft.fixedInjectionTokens),
+          ruleInjection: {
+            enabled: draft.ruleInjection?.enabled ?? true,
+            maxTokens: Number(draft.ruleInjection?.maxTokens ?? 500),
+          },
           maxInjectionTokens: Number(draft.maxInjectionTokens),
           relationInjection: draft.relationInjection,
           relationBudget: Number(draft.relationBudget),

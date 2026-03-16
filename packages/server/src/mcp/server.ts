@@ -36,7 +36,7 @@ export interface MCPServerDeps {
 const TOOLS: MCPTool[] = [
   {
     name: 'cortex_recall',
-    description: 'Search memory for relevant context including user facts, preferences, constraints, agent observations, and persona. Results are priority-ranked: constraints and agent persona are injected first.',
+    description: 'Search memory for relevant context including user facts, preferences, topic memories, fixed agent persona, and fixed current-agent rules. Persona and rule layers are injected separately from normal search-ranked memories.',
     inputSchema: {
       type: 'object',
       properties: {

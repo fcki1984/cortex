@@ -309,4 +309,127 @@ describe('MemoryGate', () => {
     expect(result.meta.relevance_gate.best_vector_score).toBe(0.8);
     expect(result.meta.relevance_gate.best_fused_score).toBe(0.2);
   });
+
+  it('should keep fixed rule injection when low relevance suppresses search context', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Use natural and formal Chinese',
+      agent_id: 'rule-test',
+      importance: 1,
+    });
+    insertMemory({
+      layer: 'core',
+      category: 'policy',
+      content: 'Clarify user intent before answering ambiguous requests',
+      agent_id: 'rule-test',
+      importance: 0.9,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'proxy traffic residential plan', 0.9),
+        agent_id: 'rule-test',
+        vectorScore: 0.2,
+        fusedScore: 0.1,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: true,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+        ruleInjection: { enabled: true, maxTokens: 200 },
+      },
+    });
+    const ruleGate = new MemoryGate(searchEngine, config.gate) as any;
+    ruleGate.buildRelationBlock = vi.fn().mockResolvedValue({ block: '', count: 0 });
+
+    const result = await ruleGate.recall({ query: 'beef stew recipe', agent_id: 'rule-test' });
+
+    expect(result.meta.suppressed).toBe(true);
+    expect(result.context).toContain('Use natural and formal Chinese');
+    expect(result.context).toContain('Clarify user intent before answering ambiguous requests');
+    expect(result.context).not.toContain('proxy traffic residential plan');
+    expect(result.meta.rule_injected_count).toBe(2);
+    expect(result.meta.search_injected_count).toBe(0);
+    expect(ruleGate.buildRelationBlock).not.toHaveBeenCalled();
+  });
+
+  it('should include rule layer and relevant search memories together for related queries', async () => {
+    insertMemory({
+      layer: 'core',
+      category: 'constraint',
+      content: 'Use natural and formal Chinese',
+      agent_id: 'rule-related-test',
+      importance: 1,
+    });
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'Recommend affordable BYD hybrid models within a 160k budget', 0.9),
+        agent_id: 'rule-related-test',
+        vectorScore: 0.9,
+        fusedScore: 0.7,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+        ruleInjection: { enabled: true, maxTokens: 120 },
+      },
+    });
+    const ruleGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await ruleGate.recall({ query: 'BYD hybrid budget recommendation', agent_id: 'rule-related-test' });
+
+    expect(result.meta.suppressed).toBe(false);
+    expect(result.context).toContain('Use natural and formal Chinese');
+    expect(result.context).toContain('Recommend affordable BYD hybrid models within a 160k budget');
+    expect(result.meta.rule_injected_count).toBe(1);
+    expect(result.meta.search_injected_count).toBe(1);
+  });
+
+  it('should fall back to normal search injection when rule layer is disabled', async () => {
+    const searchEngine = createStubSearchEngine([
+      {
+        ...createSearchResult('1', 'Always clarify user intent before answering', 0.9),
+        agent_id: 'rule-disabled-test',
+        category: 'constraint',
+        vectorScore: 0.8,
+        fusedScore: 0.6,
+      },
+    ]);
+    const config = loadConfig({
+      storage: { dbPath: ':memory:', walMode: false },
+      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
+      embedding: { provider: 'none', dimensions: 4 },
+      vectorBackend: { provider: 'sqlite-vec' },
+      markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
+      gate: {
+        skipSmallTalk: false,
+        relationInjection: false,
+        queryExpansion: { enabled: false, maxVariants: 3 },
+        ruleInjection: { enabled: false, maxTokens: 120 },
+      },
+    });
+    const ruleGate = new MemoryGate(searchEngine, config.gate);
+
+    const result = await ruleGate.recall({ query: 'clarify user intent before answering', agent_id: 'rule-disabled-test' });
+
+    expect(result.meta.suppressed).toBe(false);
+    expect(result.context).toContain('Always clarify user intent before answering');
+    expect(result.meta.rule_injected_count).toBe(0);
+    expect(result.meta.search_injected_count).toBe(1);
+  });
 });

@@ -50,6 +50,10 @@ export interface SearchDebug {
   };
 }
 
+export interface FormatForInjectionOptions {
+  priorityCategories?: string[];
+}
+
 const LAYER_WEIGHTS: Record<string, number> = {
   core: 1.0,
   working: 0.8,
@@ -295,14 +299,14 @@ export class HybridSearchEngine {
 
   /**
    * Format search results for injection into agent context.
-   * Priority categories (constraint, agent_persona) are injected first to ensure
-   * critical rules and persona are never truncated.
+   * Priority categories can be overridden per injection layer to control which
+   * memories consume budget first.
    */
-  formatForInjection(results: SearchResult[], maxTokens: number): string {
+  formatForInjection(results: SearchResult[], maxTokens: number, options?: FormatForInjectionOptions): string {
     if (results.length === 0) return '';
 
     // Separate priority categories from regular results
-    const PRIORITY_CATEGORIES = new Set(['constraint', 'agent_persona', 'correction', 'policy']);
+    const PRIORITY_CATEGORIES = new Set(options?.priorityCategories ?? ['constraint', 'agent_persona', 'correction', 'policy']);
     const priorityResults = results.filter(r => PRIORITY_CATEGORIES.has(r.category));
     const regularResults = results.filter(r => !PRIORITY_CATEGORIES.has(r.category));
 

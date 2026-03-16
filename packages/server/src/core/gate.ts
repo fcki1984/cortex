@@ -27,6 +27,9 @@ export interface RecallResponse {
     query: string;
     total_found: number;
     injected_count: number;
+    persona_injected_count: number;
+    rule_injected_count: number;
+    search_injected_count: number;
     relations_count: number;
     skipped: boolean;
     reason?: string;
@@ -53,9 +56,9 @@ interface RelevanceGateDecision {
 }
 
 const GATE_STOP_WORDS = new Set([
-  '\u7684', '\u4e86', '\u5728', '\u662f', '\u6709', '\u6211', '\u4f60', '\u4ed6', '\u5979', '\u5b83', '\u4eec',
-  '\u5417', '\u5427', '\u5462', '\u554a', '\u54e6', '\u55ef', '\u8fd9', '\u90a3', '\u4ec0\u4e48', '\u600e\u4e48',
-  '\u54ea', '\u54ea\u91cc', '\u4e3a\u4ec0\u4e48',
+  '的', '了', '在', '是', '有', '我', '你', '他', '她', '它', '们',
+  '吗', '吧', '呢', '啊', '哦', '嗯', '这', '那', '什么', '怎么',
+  '哪', '哪里', '为什么',
   'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'what', 'how', 'where', 'who', 'which',
 ]);
 
@@ -76,6 +79,24 @@ function countInjectedLines(context: string): number {
   return context ? context.split('\n').filter(line => line.startsWith('[')).length : 0;
 }
 
+function unwrapMemoryBlock(block: string): string {
+  return block
+    .replace(/^<cortex_memory>\s*/, '')
+    .replace(/\s*<\/cortex_memory>$/, '')
+    .trim();
+}
+
+function mergeMemoryBlocks(blocks: string[]): string {
+  const nonEmpty = blocks.filter(Boolean);
+  if (nonEmpty.length === 0) return '';
+  if (nonEmpty.length === 1) return nonEmpty[0]!;
+
+  const bodies = nonEmpty.map(unwrapMemoryBlock).filter(Boolean);
+  if (bodies.length === 0) return '';
+
+  return ['<cortex_memory>', ...bodies, '</cortex_memory>'].join('\n');
+}
+
 export class MemoryGate {
   private rerankerWeight: number;
 
@@ -93,7 +114,6 @@ export class MemoryGate {
     const start = Date.now();
     const query = stripInjectedContent(req.query);
 
-    // Skip small talk (unless skip_filters is set, e.g. Dashboard search test)
     if (this.config.skipSmallTalk && !req.skip_filters && isSmallTalk(query)) {
       return {
         context: '',
@@ -102,6 +122,9 @@ export class MemoryGate {
           query: req.query,
           total_found: 0,
           injected_count: 0,
+          persona_injected_count: 0,
+          rule_injected_count: 0,
+          search_injected_count: 0,
           relations_count: 0,
           skipped: true,
           reason: 'small_talk',
@@ -112,25 +135,19 @@ export class MemoryGate {
       };
     }
 
-    const relationBudget = this.config.relationBudget ?? 100;
     const relationInjection = this.config.relationInjection !== false;
     const memoryBudget = req.max_tokens || this.config.maxInjectionTokens;
+    const ruleInjectionEnabled = this.config.ruleInjection?.enabled !== false;
+    const ruleBudget = this.config.ruleInjection?.maxTokens ?? 500;
 
-    // Parallel: search original query AND expand simultaneously
-    // Before: expansion(2s) → embed+search(1.5s) × N → rerank (serial, ~7s)
-    // After:  expansion(2s) ──┐
-    //         embed+search(1.5s) ─┤→ merge → rerank (~4-5s)
-    //                          variant searches(1.5s parallel) ─┘
     const searchOpts = {
       layers: req.layers,
       agent_id: req.agent_id,
       limit: this.config.searchLimit || 30,
     };
 
-    // Start original query search immediately (no waiting for expansion)
     const originalSearchPromise = this.searchEngine.search({ query, ...searchOpts });
 
-    // Expansion runs in parallel with original search
     const variantResultsPromise: Promise<SearchResult[]> = (this.config.queryExpansion?.enabled && this.llm)
       ? Promise.race([
           expandQuery(query, this.llm, this.config.queryExpansion),
@@ -139,7 +156,6 @@ export class MemoryGate {
           ),
         ])
         .then(async (queries) => {
-          // Filter out original query, search all variants in parallel
           const variants = queries.filter(q => q !== query);
           if (variants.length === 0) return [];
           const variantSearches = await Promise.all(
@@ -158,7 +174,6 @@ export class MemoryGate {
       variantResultsPromise,
     ]);
 
-    // Merge results: original first, then variants
     const resultMap = new Map<string, SearchResult>();
     const hitCount = new Map<string, number>();
     for (const r of originalResult.results) {
@@ -173,29 +188,19 @@ export class MemoryGate {
       }
     }
 
-    // When multiple query variants are merged, keep the best per-variant scores as-is.
-    // Each variant's search results were already normalized in hybrid.ts.
-    // The merge uses rawVectorSim for comparison (see above), so the best variant's
-    // normalized scores win naturally. No re-normalization needed here.
     const merged = Array.from(resultMap.values());
 
-    // Boost score for memories hit by multiple query variants (diminishing returns)
-    // Also boost constraint memories with high importance to increase selection probability
     let results = merged
       .map(r => {
         const hits = hitCount.get(r.id) ?? 1;
-        // ln(1)=0, ln(2)≈0.69, ln(3)≈1.10, ln(5)≈1.61 → boost caps naturally
         let boost = hits > 1 ? 1 + 0.08 * Math.log(hits) : 1;
-        // Constraint category boost: important constraints get priority in search results
-        if (r.category === 'constraint' && r.importance >= 0.7) {
+        if (!ruleInjectionEnabled && r.category === 'constraint' && r.importance >= 0.7) {
           boost *= 1.5;
         }
         return { ...r, finalScore: r.finalScore * boost };
       })
       .sort((a, b) => b.finalScore - a.finalScore);
 
-    // Pre-filter: only send results with meaningful search signal to reranker
-    // Use rawVectorSim (pre-normalization) to avoid false negatives from normalization
     const signalResults = results.filter(r => r.rawVectorSim > 0 || r.vectorScore > 0 || r.textScore > 0);
     const zeroSignal = results.filter(r => r.rawVectorSim === 0 && r.vectorScore === 0 && r.textScore === 0);
     if (signalResults.length === 0 && results.length > 0) {
@@ -203,7 +208,6 @@ export class MemoryGate {
     }
 
     if (this.reranker && signalResults.length > 0) {
-      // Normalize original scores to 0-1 range for fair fusion
       const maxOriginal = Math.max(...signalResults.map(r => r.finalScore)) || 1;
       const originalScores = new Map(signalResults.map(r => [r.id, r.finalScore / maxOriginal]));
 
@@ -217,14 +221,11 @@ export class MemoryGate {
         const rw = this.rerankerWeight;
         const ow = 1 - rw;
 
-        // Fuse reranker score with original score
         results = reranked.map(r => ({
           ...r,
           finalScore: rw * r.finalScore + ow * (originalScores.get(r.id) ?? 0),
         })).sort((a, b) => b.finalScore - a.finalScore);
 
-        // Only append zero-signal results if we have very few signal results
-        // This prevents noise padding while allowing fallback for sparse queries
         if (results.length < 3 && zeroSignal.length > 0) {
           const padding = Math.min(3 - results.length, zeroSignal.length);
           for (let i = 0; i < padding; i++) {
@@ -236,17 +237,11 @@ export class MemoryGate {
         results = results.slice(0, 15);
       }
     } else if (signalResults.length === 0 && zeroSignal.length > 0) {
-      // No signal at all — return empty (don't inject random noise)
       results = [];
     } else {
       results = results.slice(0, 15);
     }
 
-    // Score cliff filter: drop results that are dramatically worse than the top
-    // Three checks (any one triggers cutoff):
-    //   1. Absolute: score < cliffAbsolute of #1 (too far from best match)
-    //   2. Gap: score < cliffGap of previous result (sudden drop)
-    //   3. Floor: score < cliffFloor (no meaningful signal)
     const cliffAbsolute = this.config.cliffAbsolute ?? 0.4;
     const cliffGap = this.config.cliffGap ?? 0.6;
     const cliffFloor = this.config.cliffFloor ?? 0.05;
@@ -260,7 +255,6 @@ export class MemoryGate {
             cutoff = i;
             break;
           }
-          // Gap detection: if this result is less than cliffGap of previous, it's a cliff
           if (results[i]!.finalScore < results[i - 1]!.finalScore * cliffGap) {
             cutoff = i;
             break;
@@ -273,66 +267,45 @@ export class MemoryGate {
       }
     }
 
-    // --- Fixed injection: agent_persona (independent token budget) ---
-    // These define who the agent IS and are always injected regardless of query.
-    // Uses fixedInjectionTokens budget, separate from search result budget.
-    const fixedBudget = this.config.fixedInjectionTokens ?? 500;
-    const fixedResults: SearchResult[] = [];
-    const existingIds = new Set(results.map(r => r.id));
+    const personaBudget = this.config.fixedInjectionTokens ?? 500;
+    const personaExtraction = this.extractFixedLayerResults(req.agent_id, ['agent_persona'], results);
+    results = personaExtraction.remainingResults;
 
-    const { items: personaMemories } = listMemories({
-      agent_id: req.agent_id,
-      category: 'agent_persona' as any,
-      limit: 50,
-      orderBy: 'importance',
-      orderDir: 'desc',
-    });
-    for (const pm of personaMemories) {
-      if (existingIds.has(pm.id)) {
-        // Already in search results — move to fixed bucket to use fixed budget
-        results = results.filter(r => r.id !== pm.id);
-      }
-      existingIds.add(pm.id);
-      fixedResults.push({
-        id: pm.id, content: pm.content, layer: pm.layer, category: pm.category,
-        agent_id: pm.agent_id,
-        importance: pm.importance, decay_score: pm.decay_score,
-        access_count: pm.access_count, created_at: pm.created_at,
-        textScore: 0, vectorScore: 0, rawVectorSim: 0, fusedScore: 0,
-        layerWeight: 1, recencyBoost: 1, accessBoost: 1,
-        finalScore: 0,
-      });
+    let ruleResults: SearchResult[] = [];
+    if (ruleInjectionEnabled) {
+      const ruleExtraction = this.extractFixedLayerResults(req.agent_id, ['constraint', 'policy'], results);
+      ruleResults = ruleExtraction.fixedResults;
+      results = ruleExtraction.remainingResults;
     }
 
-    // Constraints are NOT force-injected. If a constraint is relevant to the query,
-    // it will survive the cliff filter naturally in search results.
-    // Only agent_persona uses fixed injection (always-inject with independent budget).
     const relevanceGate = this.evaluateRelevanceGate(query, results);
 
-    // Format: fixed injection (persona) + search results use independent budgets
-    const fixedContext = fixedResults.length > 0
-      ? this.searchEngine.formatForInjection(fixedResults, fixedBudget)
+    const personaContext = personaExtraction.fixedResults.length > 0
+      ? this.searchEngine.formatForInjection(personaExtraction.fixedResults, personaBudget, {
+          priorityCategories: ['agent_persona'],
+        })
+      : '';
+    const ruleContext = ruleResults.length > 0
+      ? this.searchEngine.formatForInjection(ruleResults, ruleBudget, {
+          priorityCategories: ['constraint', 'policy'],
+        })
       : '';
     const searchContext = relevanceGate.suppressed
       ? ''
-      : this.searchEngine.formatForInjection(results, memoryBudget);
+      : this.searchEngine.formatForInjection(
+          results,
+          memoryBudget,
+          ruleInjectionEnabled ? { priorityCategories: ['correction'] } : undefined
+        );
 
-    // Merge: fixed block first, then search block
-    // Both use <cortex_memory> tags internally, merge into one block
-    let context = '';
-    if (fixedContext && searchContext) {
-      // Strip closing tag from fixed, opening tag from search, merge
-      const fixedBody = fixedContext.replace('</cortex_memory>', '').trimEnd();
-      const searchBody = searchContext.replace('<cortex_memory>', '').trimStart();
-      context = `${fixedBody}\n${searchBody}`;
-    } else {
-      context = fixedContext || searchContext;
-    }
-    const injectedCount = countInjectedLines(context);
+    let context = mergeMemoryBlocks([personaContext, ruleContext, searchContext]);
+    const personaInjectedCount = countInjectedLines(personaContext);
+    const ruleInjectedCount = countInjectedLines(ruleContext);
+    const searchInjectedCount = countInjectedLines(searchContext);
+    const injectedCount = personaInjectedCount + ruleInjectedCount + searchInjectedCount;
 
-    // Inject relevant relations (Neo4j multi-hop or SQLite fallback)
     let relationsCount = 0;
-    if (relationInjection && !relevanceGate.suppressed) {
+    if (relationInjection && !relevanceGate.suppressed && results.length > 0) {
       try {
         const relationBlock = await Promise.race([
           this.buildRelationBlock(query, req.agent_id),
@@ -346,7 +319,6 @@ export class MemoryGate {
         }
       } catch (e: any) {
         log.warn({ error: e.message }, 'Relation injection failed entirely, returning search-only results');
-        // relationsCount stays 0, context stays as-is
       }
     }
 
@@ -355,6 +327,9 @@ export class MemoryGate {
       query: query.slice(0, 50),
       results: results.length,
       injected: injectedCount,
+      persona_injected: personaInjectedCount,
+      rule_injected: ruleInjectedCount,
+      search_injected: searchInjectedCount,
       relations: relationsCount,
       suppressed: relevanceGate.suppressed,
       relevance_gate: relevanceGate,
@@ -368,6 +343,9 @@ export class MemoryGate {
         query,
         total_found: results.length,
         injected_count: injectedCount,
+        persona_injected_count: personaInjectedCount,
+        rule_injected_count: ruleInjectedCount,
+        search_injected_count: searchInjectedCount,
         relations_count: relationsCount,
         skipped: false,
         suppressed: relevanceGate.suppressed,
@@ -382,6 +360,65 @@ export class MemoryGate {
         latency_ms: latency,
       },
     };
+  }
+
+  private extractFixedLayerResults(
+    agentId: string | undefined,
+    categories: string[],
+    results: SearchResult[]
+  ): { fixedResults: SearchResult[]; remainingResults: SearchResult[] } {
+    const categorySet = new Set(categories);
+    const fixedMap = new Map<string, SearchResult>();
+    const remainingResults: SearchResult[] = [];
+
+    for (const result of results) {
+      if (categorySet.has(result.category)) {
+        fixedMap.set(result.id, result);
+      } else {
+        remainingResults.push(result);
+      }
+    }
+
+    for (const category of categories) {
+      const { items } = listMemories({
+        agent_id: agentId,
+        category: category as any,
+        limit: 50,
+        orderBy: 'importance',
+        orderDir: 'desc',
+      });
+
+      for (const memory of items) {
+        if (!fixedMap.has(memory.id)) {
+          fixedMap.set(memory.id, {
+            id: memory.id,
+            content: memory.content,
+            layer: memory.layer,
+            category: memory.category,
+            agent_id: memory.agent_id,
+            importance: memory.importance,
+            decay_score: memory.decay_score,
+            access_count: memory.access_count,
+            created_at: memory.created_at,
+            textScore: 0,
+            vectorScore: 0,
+            rawVectorSim: 0,
+            fusedScore: 0,
+            layerWeight: 1,
+            recencyBoost: 1,
+            accessBoost: 1,
+            finalScore: 0,
+          });
+        }
+      }
+    }
+
+    const fixedResults = Array.from(fixedMap.values()).sort((a, b) => {
+      if (b.importance !== a.importance) return b.importance - a.importance;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    return { fixedResults, remainingResults };
   }
 
   private evaluateRelevanceGate(query: string, results: SearchResult[]): RelevanceGateDecision {
@@ -445,9 +482,9 @@ export class MemoryGate {
           });
           for (const t of traversed) {
             if (t.hops <= 2) {
-              const pathText = t.path.slice(1).join(' → ');
+              const pathText = t.path.slice(1).join(' -> ');
               candidates.push({
-                line: `${entity} → ${pathText} (${t.hops}hop)`,
+                line: `${entity} -> ${pathText} (${t.hops}hop)`,
                 text: `${entity} ${pathText}`,
               });
             }
