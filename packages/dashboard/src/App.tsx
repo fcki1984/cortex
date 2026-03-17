@@ -10,7 +10,7 @@ import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
 import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
-import { search, checkAuth, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, triggerUpdate } from './api/client.js';
+import { listRecordsV2, checkAuth, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, triggerUpdate } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
 
@@ -251,8 +251,8 @@ function GlobalSearch() {
     setLoading(true);
     setError('');
     try {
-      const res = await search({ query, limit: 8, debug: false });
-      setResults(res.results || []);
+      const res = await listRecordsV2({ query, limit: '8' });
+      setResults(res.items || []);
       setOpen(true);
     } catch (e: any) {
       setError(e.message || 'Unknown error');
@@ -307,8 +307,8 @@ function GlobalSearch() {
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >
                 <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-                  <span className={`badge ${r.layer}`} style={{ fontSize: 10 }}>{r.layer}</span>
-                  <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: 10 }}>{r.category}</span>
+                  <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontSize: 10 }}>{r.kind}</span>
+                  <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: 10 }}>{r.source_type}</span>
                 </div>
                 <div style={{ color: 'var(--text)', lineHeight: 1.4 }}>{r.content?.slice(0, 120)}{r.content?.length > 120 ? '...' : ''}</div>
               </div>

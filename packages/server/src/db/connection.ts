@@ -491,6 +491,133 @@ const migrations = [
       );
     `,
   },
+  {
+    name: '013_records_v2',
+    sql: `
+      CREATE TABLE IF NOT EXISTS record_registry (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('profile_rule', 'fact_slot', 'task_state', 'session_note')),
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        source_type TEXT NOT NULL CHECK (source_type IN ('user_explicit', 'user_confirmed', 'assistant_inferred', 'system_derived')),
+        searchable_text TEXT NOT NULL,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        priority REAL NOT NULL DEFAULT 0.5,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_record_registry_agent ON record_registry(agent_id, kind, is_active);
+      CREATE INDEX IF NOT EXISTS idx_record_registry_kind ON record_registry(kind, is_active);
+      CREATE INDEX IF NOT EXISTS idx_record_registry_updated ON record_registry(updated_at DESC);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS record_registry_fts USING fts5(
+        searchable_text,
+        kind,
+        tags,
+        content=record_registry,
+        content_rowid=rowid,
+        tokenize='unicode61'
+      );
+
+      CREATE TABLE IF NOT EXISTS profile_rules (
+        id TEXT PRIMARY KEY REFERENCES record_registry(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        owner_scope TEXT NOT NULL CHECK (owner_scope IN ('user', 'agent')),
+        subject_key TEXT NOT NULL,
+        attribute_key TEXT NOT NULL,
+        value_text TEXT NOT NULL,
+        value_json TEXT,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        last_confirmed_at TEXT,
+        superseded_by TEXT,
+        metadata TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_rules_active
+        ON profile_rules(agent_id, owner_scope, subject_key, attribute_key)
+        WHERE superseded_by IS NULL;
+
+      CREATE TABLE IF NOT EXISTS fact_slots (
+        id TEXT PRIMARY KEY REFERENCES record_registry(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        entity_key TEXT NOT NULL,
+        attribute_key TEXT NOT NULL,
+        value_text TEXT NOT NULL,
+        value_json TEXT,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        valid_from TEXT,
+        valid_to TEXT,
+        superseded_by TEXT,
+        metadata TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_slots_active
+        ON fact_slots(agent_id, entity_key, attribute_key)
+        WHERE superseded_by IS NULL AND valid_to IS NULL;
+
+      CREATE TABLE IF NOT EXISTS task_states (
+        id TEXT PRIMARY KEY REFERENCES record_registry(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        subject_key TEXT NOT NULL,
+        state_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        last_confirmed_at TEXT,
+        valid_to TEXT,
+        superseded_by TEXT,
+        metadata TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_task_states_active
+        ON task_states(agent_id, subject_key, state_key)
+        WHERE superseded_by IS NULL AND valid_to IS NULL;
+
+      CREATE TABLE IF NOT EXISTS session_notes (
+        id TEXT PRIMARY KEY REFERENCES record_registry(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        session_id TEXT,
+        summary TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.7,
+        expires_at TEXT,
+        superseded_by TEXT,
+        metadata TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_notes_agent ON session_notes(agent_id, session_id);
+
+      CREATE TABLE IF NOT EXISTS conversation_refs (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        session_id TEXT,
+        user_message TEXT NOT NULL,
+        assistant_message TEXT NOT NULL,
+        messages_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversation_refs_agent ON conversation_refs(agent_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS record_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        source_type TEXT NOT NULL CHECK (source_type IN ('user_explicit', 'user_confirmed', 'assistant_inferred', 'system_derived')),
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+        content TEXT NOT NULL,
+        conversation_ref_id TEXT REFERENCES conversation_refs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_record_evidence_record ON record_evidence(record_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS record_vectors_v2 (
+        record_id TEXT PRIMARY KEY REFERENCES record_registry(id) ON DELETE CASCADE,
+        embedding TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS legacy_record_map (
+        legacy_memory_id TEXT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+        record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
+        migrated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

@@ -26,8 +26,8 @@ interface MCPToolResult {
 
 export interface MCPServerDeps {
   recall: (query: string, agentId?: string, maxResults?: number) => Promise<any>;
-  remember: (content: string, category?: string, importance?: number, agentId?: string) => Promise<any>;
-  forget: (memoryId: string, reason?: string) => Promise<any>;
+  remember: (content: string, kind?: string, priority?: number, agentId?: string, sourceType?: string, tags?: string[]) => Promise<any>;
+  forget: (recordId: string, reason?: string) => Promise<any>;
   search: (query: string, debug?: boolean) => Promise<any>;
   stats: () => Promise<any>;
   listRelations: (subject?: string, object?: string, limit?: number) => Promise<any>;
@@ -36,7 +36,7 @@ export interface MCPServerDeps {
 const TOOLS: MCPTool[] = [
   {
     name: 'cortex_recall',
-    description: 'Search memory for relevant context including user facts, preferences, constraints, agent observations, and persona. Results are priority-ranked: constraints and agent persona are injected first.',
+    description: 'Search Cortex V2 records and return structured recall blocks: rules/persona first, then direct facts, task state, and at most one session note.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -49,24 +49,29 @@ const TOOLS: MCPTool[] = [
   },
   {
     name: 'cortex_remember',
-    description: 'Store a memory: user facts/preferences, constraints (hard rules), policies (strategies), or agent self-observations (improvement, user habits, relationship, persona)',
+    description: 'Create or update a Cortex V2 record. Prefer profile_rule/fact_slot/task_state for durable information and session_note for non-stable context.',
     inputSchema: {
       type: 'object',
       properties: {
         content: { type: 'string', description: 'What to remember' },
-        category: {
+        kind: {
           type: 'string',
-          enum: [
-            'identity', 'preference', 'decision', 'fact', 'entity',
-            'correction', 'todo', 'skill', 'relationship', 'goal',
-            'insight', 'project_state',
-            'constraint', 'policy',
-            'agent_self_improvement', 'agent_user_habit', 'agent_relationship', 'agent_persona',
-          ],
-          description: 'Memory category',
-          default: 'fact',
+          enum: ['profile_rule', 'fact_slot', 'task_state', 'session_note'],
+          description: 'Record kind',
+          default: 'fact_slot',
         },
-        importance: { type: 'number', minimum: 0, maximum: 1, description: 'How important (0-1)', default: 0.7 },
+        source_type: {
+          type: 'string',
+          enum: ['user_explicit', 'user_confirmed', 'assistant_inferred', 'system_derived'],
+          description: 'Evidence source level',
+          default: 'user_confirmed',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags',
+        },
+        priority: { type: 'number', minimum: 0, maximum: 1, description: 'How important (0-1)', default: 0.8 },
         agent_id: { type: 'string', default: 'mcp' },
       },
       required: ['content'],
@@ -78,10 +83,10 @@ const TOOLS: MCPTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        memory_id: { type: 'string', description: 'ID of the memory to remove' },
+        record_id: { type: 'string', description: 'ID of the record to remove' },
         reason: { type: 'string', description: 'Why this memory should be removed' },
       },
-      required: ['memory_id'],
+      required: ['record_id'],
     },
   },
   {
@@ -143,15 +148,17 @@ export class MCPServer {
         case 'cortex_remember': {
           const result = await this.deps.remember(
             call.arguments.content,
-            call.arguments.category,
-            call.arguments.importance,
+            call.arguments.kind,
+            call.arguments.priority,
             call.arguments.agent_id,
+            call.arguments.source_type,
+            call.arguments.tags,
           );
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
         case 'cortex_forget': {
-          const result = await this.deps.forget(call.arguments.memory_id, call.arguments.reason);
+          const result = await this.deps.forget(call.arguments.record_id, call.arguments.reason);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 

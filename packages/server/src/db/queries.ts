@@ -538,11 +538,38 @@ export function getStats(agentId?: string): Record<string, any> {
 
   const totalRelations = (db.prepare('SELECT COUNT(*) as cnt FROM relations').get() as any).cnt;
   const totalAccessLogs = (db.prepare('SELECT COUNT(*) as cnt FROM access_log').get() as any).cnt;
+  const recordAgentFilter = agentId ? ' WHERE agent_id = ? AND is_active = 1' : ' WHERE is_active = 1';
+  const totalRecords = (() => {
+    try {
+      return (db.prepare(`SELECT COUNT(*) as cnt FROM record_registry${recordAgentFilter}`).get(...params) as any).cnt;
+    } catch {
+      return 0;
+    }
+  })();
+  const recordKinds = (() => {
+    try {
+      const rows = db.prepare(`SELECT kind, COUNT(*) as cnt FROM record_registry${recordAgentFilter} GROUP BY kind`).all(...params) as { kind: string; cnt: number }[];
+      return Object.fromEntries(rows.map(row => [row.kind, row.cnt]));
+    } catch {
+      return {};
+    }
+  })();
+  const recordSources = (() => {
+    try {
+      const rows = db.prepare(`SELECT source_type, COUNT(*) as cnt FROM record_registry${recordAgentFilter} GROUP BY source_type`).all(...params) as { source_type: string; cnt: number }[];
+      return Object.fromEntries(rows.map(row => [row.source_type, row.cnt]));
+    } catch {
+      return {};
+    }
+  })();
 
   return {
     total_memories: totalMemories,
+    total_records: totalRecords,
     layers: Object.fromEntries(layerCounts.map(r => [r.layer, r.cnt])),
     categories: Object.fromEntries(categoryCounts.map(r => [r.category, r.cnt])),
+    record_kinds: recordKinds,
+    record_sources: recordSources,
     total_relations: totalRelations,
     total_access_logs: totalAccessLogs,
   };

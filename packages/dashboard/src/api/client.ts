@@ -1,4 +1,5 @@
 const BASE = '/api/v1';
+const BASE_V2 = '/api/v2';
 const TOKEN_KEY = 'cortex_auth_token';
 
 // ============ Token Management ============
@@ -50,6 +51,27 @@ async function request(path: string, opts?: RequestInit) {
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (res.status === 401 || res.status === 403) {
     // Token invalid or expired — clear and trigger re-login
+    clearStoredToken();
+    window.dispatchEvent(new CustomEvent('cortex:auth-expired'));
+    throw new Error(`API ${res.status}: Unauthorized`);
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
+async function requestV2(path: string, opts?: RequestInit) {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    ...opts?.headers as Record<string, string>,
+  };
+  if (opts?.body) headers['Content-Type'] = 'application/json';
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE_V2}${path}`, { ...opts, headers });
+  if (res.status === 401 || res.status === 403) {
     clearStoredToken();
     window.dispatchEvent(new CustomEvent('cortex:auth-expired'));
     throw new Error(`API ${res.status}: Unauthorized`);
@@ -209,3 +231,26 @@ export const testConnections = () =>
 // Search/Recall test
 export const testRecall = (query: string, agentId?: string) =>
   request('/recall', { method: 'POST', body: JSON.stringify({ query, agent_id: agentId, limit: 10, skip_filters: true }) });
+
+// V2 Records
+export const listRecordsV2 = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return requestV2(`/records${qs}`);
+};
+
+export const getRecordV2 = (id: string) => requestV2(`/records/${id}`);
+
+export const createRecordV2 = (data: any) =>
+  requestV2('/records', { method: 'POST', body: JSON.stringify(data) });
+
+export const updateRecordV2 = (id: string, data: any) =>
+  requestV2(`/records/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+
+export const deleteRecordV2 = (id: string) =>
+  requestV2(`/records/${id}`, { method: 'DELETE' });
+
+export const recallV2 = (data: any) =>
+  requestV2('/recall', { method: 'POST', body: JSON.stringify(data) });
+
+export const ingestV2 = (data: any) =>
+  requestV2('/ingest', { method: 'POST', body: JSON.stringify(data) });

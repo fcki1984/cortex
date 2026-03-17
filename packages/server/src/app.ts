@@ -14,6 +14,7 @@ import { createReranker } from './search/reranker.js';
 import type { VectorBackend } from './vector/interface.js';
 import type { LLMProvider } from './llm/interface.js';
 import type { EmbeddingProvider } from './embedding/interface.js';
+import { CortexRecordsV2 } from './v2/service.js';
 
 const log = createLogger('app');
 
@@ -24,6 +25,7 @@ export class CortexApp {
   lifecycle: LifecycleEngine;
   searchEngine: HybridSearchEngine;
   exporter: MarkdownExporter;
+  recordsV2: CortexRecordsV2;
   readonly vectorBackend: VectorBackend;
   llmExtraction: LLMProvider;
   llmLifecycle: LLMProvider;
@@ -45,6 +47,7 @@ export class CortexApp {
     this.flush = new MemoryFlush(this.llmExtraction, this.embeddingProvider, this.vectorBackend, config);
     this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, config);
     this.exporter = new MarkdownExporter(config);
+    this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
 
     log.info('CortexApp initialized');
   }
@@ -93,6 +96,7 @@ export class CortexApp {
       this.sieve = new MemorySieve(this.llmExtraction, this.embeddingProvider, this.vectorBackend, newConfig);
       this.flush = new MemoryFlush(this.llmExtraction, this.embeddingProvider, this.vectorBackend, newConfig);
       this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, newConfig);
+      this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
       log.info({ reloaded }, 'Rebuilt dependent engines');
     }
 
@@ -104,6 +108,8 @@ export class CortexApp {
     // Initialize vector backend
     await this.vectorBackend.initialize(this.embeddingProvider.dimensions || 1536);
     log.info('Vector backend initialized');
+    await this.recordsV2.initialize();
+    log.info('V2 records initialized');
   }
 
   async shutdown(): Promise<void> {

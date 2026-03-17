@@ -13,6 +13,9 @@ import { registerImportExportRoutes } from './import-export.js';
 import { registerAgentRoutes } from './agents.js';
 import { registerExtractionLogRoutes } from './extraction-logs.js';
 import { registerFeedbackRoutes } from './feedback.js';
+import { registerV2RecordRoutes } from './records-v2.js';
+import { registerV2IngestRoutes } from './ingest-v2.js';
+import { registerV2RecallRoutes } from './recall-v2.js';
 
 export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void {
   registerRecallRoutes(app, cortex);
@@ -28,4 +31,7 @@ export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void
   registerAgentRoutes(app);
   registerExtractionLogRoutes(app);
   registerFeedbackRoutes(app, cortex);
+  registerV2RecordRoutes(app, cortex);
+  registerV2IngestRoutes(app, cortex);
+  registerV2RecallRoutes(app, cortex);
 }
