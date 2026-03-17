@@ -28,9 +28,9 @@ export interface MCPServerDeps {
   recall: (query: string, agentId?: string, maxResults?: number) => Promise<any>;
   remember: (content: string, kind?: string, priority?: number, agentId?: string, sourceType?: string, tags?: string[]) => Promise<any>;
   forget: (recordId: string, reason?: string) => Promise<any>;
-  search: (query: string, debug?: boolean) => Promise<any>;
+  search: (query: string, debug?: boolean, agentId?: string) => Promise<any>;
   stats: () => Promise<any>;
-  listRelations: (subject?: string, object?: string, limit?: number) => Promise<any>;
+  listRelations: (subject?: string, object?: string, limit?: number, agentId?: string) => Promise<any>;
 }
 
 const TOOLS: MCPTool[] = [
@@ -163,7 +163,7 @@ export class MCPServer {
         }
 
         case 'cortex_search_debug': {
-          const result = await this.deps.search(call.arguments.query, true);
+          const result = await this.deps.search(call.arguments.query, true, call.arguments.agent_id);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
@@ -177,6 +177,7 @@ export class MCPServer {
             call.arguments.subject,
             call.arguments.object,
             call.arguments.limit,
+            call.arguments.agent_id,
           );
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }

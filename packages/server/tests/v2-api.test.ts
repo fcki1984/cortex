@@ -118,6 +118,28 @@ describe('API V2 Integration', () => {
     expect(body.records.every((item: any) => item.requested_kind && item.written_kind && item.normalization)).toBe(true);
   });
 
+  it('filters extraction logs by v2 channel', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '我喜欢简洁回答。',
+        assistant_message: '记住了',
+        agent_id: 'api-ingest-logs',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/extraction-logs?agent_id=api-ingest-logs&channel=v2&limit=5',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.payload);
+    expect(payload.items.length).toBeGreaterThan(0);
+    expect(payload.items.every((item: any) => item.channel === 'v2')).toBe(true);
+  });
+
   it('returns downgrade metadata for ambiguous manual writes', async () => {
     const created = await app.inject({
       method: 'POST',
@@ -136,6 +158,20 @@ describe('API V2 Integration', () => {
     expect(body.normalization).toBe('downgraded_to_session_note');
     expect(body.reason_code).toBe('insufficient_structure');
     expect(body.record.kind).toBe('session_note');
+  });
+
+  it('exposes MCP endpoint metadata on GET /mcp', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/mcp',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.payload);
+    expect(payload.endpoints.jsonrpc_post).toBe('/mcp');
+    expect(payload.endpoints.compat_jsonrpc_post).toBe('/mcp/message');
+    expect(payload.endpoints.sse).toBe('/mcp/sse');
+    expect(payload.endpoints.tools).toBe('/mcp/tools');
   });
 
   it('mirrors downgrade metadata through cortex_remember', async () => {
@@ -165,5 +201,33 @@ describe('API V2 Integration', () => {
     expect(parsed.written_kind).toBe('session_note');
     expect(parsed.reason_code).toBe('insufficient_structure');
     expect(parsed.record.kind).toBe('session_note');
+  });
+
+  it('accepts JSON-RPC tool calls on /mcp', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'cortex_remember',
+          arguments: {
+            agent_id: 'api-mcp-primary',
+            kind: 'fact_slot',
+            content: '最近也许会考虑换方案',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    const text = body.result?.content?.[0]?.text;
+    const parsed = JSON.parse(text);
+    expect(parsed.requested_kind).toBe('fact_slot');
+    expect(parsed.written_kind).toBe('session_note');
+    expect(parsed.reason_code).toBe('insufficient_structure');
   });
 });

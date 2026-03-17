@@ -11,7 +11,7 @@ export function registerExtractionLogRoutes(app: FastifyInstance): void {
           agent_id: { type: 'string' },
           limit: { type: 'integer', default: 50 },
           offset: { type: 'integer', default: 0 },
-          channel: { type: 'string', enum: ['fast', 'deep', 'flush', 'mcp'] },
+          channel: { type: 'string', enum: ['fast', 'deep', 'flush', 'mcp', 'v2'] },
           status: { type: 'string', enum: ['written', 'deduped', 'empty'] },
           from: { type: 'string' },
           to: { type: 'string' },

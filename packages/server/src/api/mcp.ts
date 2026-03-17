@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { MCPServer, type MCPServerDeps } from '../mcp/server.js';
-import { getStats, ensureAgent, listRelations } from '../db/index.js';
+import { ensureAgent, listRelations } from '../db/index.js';
+import { getV2Stats } from '../v2/store.js';
+import { observedRoute } from './observability.js';
 
 export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void {
   const deps: MCPServerDeps = {
@@ -48,21 +50,57 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
       return { status: 'forgotten', id: recordId, reason };
     },
 
-    search: async (query, debug) => {
-      const results = await cortex.recordsV2.search(query, { agent_id: 'mcp', limit: 10 });
+    search: async (query, debug, agentId) => {
+      const results = await cortex.recordsV2.search(query, { agent_id: agentId || 'mcp', limit: 10 });
       return { results, debug };
     },
 
     stats: async () => {
-      return getStats();
+      return getV2Stats();
     },
 
-    listRelations: async (subject, object, limit) => {
-      return listRelations({ subject, object, limit: limit || 20, agent_id: 'mcp' });
+    listRelations: async (subject, object, limit, agentId) => {
+      return listRelations({ subject, object, limit: limit || 20, agent_id: agentId || 'mcp' });
     },
   };
 
   const mcpServer = new MCPServer(deps);
+  const injectAgentId = (req: any, msg: any) => {
+    const agentIdFromHeader = req.headers['x-agent-id'] as string | undefined;
+    const agentIdFromToken = req.tokenInfo?.isMaster ? undefined : req.tokenInfo?.agentId;
+    const effectiveAgentId = agentIdFromHeader || agentIdFromToken;
+    if (effectiveAgentId && msg?.method === 'tools/call' && msg?.params?.arguments) {
+      if (!msg.params.arguments.agent_id || msg.params.arguments.agent_id === 'mcp') {
+        msg.params.arguments.agent_id = effectiveAgentId;
+      }
+    }
+  };
+  const handleJsonRpcMessage = async (req: any) => {
+    const msg = req.body as any;
+    injectAgentId(req, msg);
+    return mcpServer.handleMessage(msg);
+  };
+  const registerJsonRpcEndpoint = (route: '/mcp' | '/mcp/message') => {
+    app.post(route, observedRoute({
+      route,
+      method: 'POST',
+      timeoutMs: cortex.config.llm.extraction.timeoutMs || 15000,
+      metricPrefix: 'mcp_route',
+    }, handleJsonRpcMessage));
+  };
+
+  app.get('/mcp', async () => {
+    return {
+      name: 'cortex',
+      protocol: 'jsonrpc',
+      endpoints: {
+        jsonrpc_post: '/mcp',
+        compat_jsonrpc_post: '/mcp/message',
+        sse: '/mcp/sse',
+        tools: '/mcp/tools',
+      },
+    };
+  });
 
   // SSE endpoint for MCP over HTTP
   app.get('/mcp/sse', async (req, reply) => {
@@ -87,17 +125,8 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
   });
 
   // JSON-RPC endpoint for MCP tool calls
-  app.post('/mcp/message', async (req) => {
-    const msg = req.body as any;
-    // Inject x-agent-id header into tool call arguments if not already set
-    const agentIdFromHeader = (req.headers as any)['x-agent-id'] as string | undefined;
-    if (agentIdFromHeader && msg?.method === 'tools/call' && msg?.params?.arguments) {
-      if (!msg.params.arguments.agent_id || msg.params.arguments.agent_id === 'mcp') {
-        msg.params.arguments.agent_id = agentIdFromHeader;
-      }
-    }
-    return mcpServer.handleMessage(msg);
-  });
+  registerJsonRpcEndpoint('/mcp');
+  registerJsonRpcEndpoint('/mcp/message');
 
   // MCP tools list
   app.get('/mcp/tools', async () => {
