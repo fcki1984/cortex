@@ -54,7 +54,7 @@ export interface ExtractedRelation {
 }
 
 export interface ExtractionLogData {
-  channel: 'fast' | 'deep' | 'flush' | 'mcp';
+  channel: 'fast' | 'deep' | 'flush' | 'mcp' | 'v2';
   exchange_preview: string;
   raw_output: string;
   parsed_memories: ExtractedMemory[];

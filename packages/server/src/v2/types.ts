@@ -1,4 +1,12 @@
 export type RecordKind = 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note';
+export type RecordNormalization = 'durable' | 'downgraded_to_session_note';
+export type RecordReasonCode =
+  | 'assistant_only_evidence'
+  | 'unstable_attribute'
+  | 'ambiguous_subject'
+  | 'insufficient_structure'
+  | 'unsupported_kind'
+  | 'fallback_summary';
 
 export type SourceType =
   | 'user_explicit'
@@ -11,6 +19,10 @@ export interface BaseRecord {
   kind: RecordKind;
   agent_id: string;
   source_type: SourceType;
+  requested_kind: RecordKind;
+  written_kind: RecordKind;
+  normalization: RecordNormalization;
+  reason_code: RecordReasonCode | null;
   tags: string[];
   searchable_text: string;
   priority: number;
@@ -153,7 +165,18 @@ export interface RecordEvidence {
   created_at: string;
 }
 
-export interface RecordUpsertResult {
+export interface RecordWriteMeta {
+  requested_kind: RecordKind;
+  written_kind: RecordKind;
+  normalization: RecordNormalization;
+  reason_code: RecordReasonCode | null;
+}
+
+export interface NormalizedRecordCandidate extends RecordWriteMeta {
+  candidate: RecordCandidate;
+}
+
+export interface RecordUpsertResult extends RecordWriteMeta {
   decision: 'inserted' | 'superseded' | 'ignored' | 'updated';
   record: CortexRecord;
   previous_record_id?: string;

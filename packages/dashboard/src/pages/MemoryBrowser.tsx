@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import {
   createRecordV2,
   deleteRecordV2,
@@ -13,6 +12,10 @@ import { toLocal } from '../utils/time.js';
 interface RecordItem {
   id: string;
   kind: 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note';
+  requested_kind?: 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note';
+  written_kind?: 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note';
+  normalization?: 'durable' | 'downgraded_to_session_note';
+  reason_code?: string | null;
   source_type: string;
   content: string;
   tags: string[];
@@ -26,23 +29,20 @@ const KINDS = ['profile_rule', 'fact_slot', 'task_state', 'session_note'];
 const SOURCES = ['user_explicit', 'user_confirmed', 'assistant_inferred', 'system_derived'];
 
 export default function MemoryBrowser() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const searchParamsKey = searchParams.toString();
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
-  const [query, setQuery] = useState(() => searchParams.get('query') || '');
-  const [appliedQuery, setAppliedQuery] = useState(() => searchParams.get('query') || '');
-  const [kind, setKind] = useState(() => searchParams.get('kind') || '');
-  const [sourceType, setSourceType] = useState(() => searchParams.get('source_type') || '');
-  const [agentId, setAgentId] = useState(() => searchParams.get('agent_id') || '');
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState('');
+  const [sourceType, setSourceType] = useState('');
+  const [agentId, setAgentId] = useState('');
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RecordItem | null>(null);
   const [toast, setToast] = useState<string>('');
   const [draft, setDraft] = useState({
-    kind: 'fact_slot',
+    kind: 'session_note',
     content: '',
     source_type: 'user_confirmed',
     priority: 0.8,
@@ -51,22 +51,13 @@ export default function MemoryBrowser() {
   const limit = 20;
   const { t } = useI18n();
 
-  const syncParams = (next: { query?: string; kind?: string; sourceType?: string; agentId?: string }) => {
-    const params = new URLSearchParams();
-    if (next.query) params.set('query', next.query);
-    if (next.kind) params.set('kind', next.kind);
-    if (next.sourceType) params.set('source_type', next.sourceType);
-    if (next.agentId) params.set('agent_id', next.agentId);
-    setSearchParams(params, { replace: true });
-  };
-
   const load = async () => {
     setLoading(true);
     try {
       const res = await listRecordsV2({
         limit: String(limit),
         offset: String(page * limit),
-        query: appliedQuery || '',
+        query: query || '',
         kind: kind || '',
         source_type: sourceType || '',
         agent_id: agentId || '',
@@ -82,20 +73,7 @@ export default function MemoryBrowser() {
 
   useEffect(() => {
     load();
-  }, [page, kind, sourceType, agentId, appliedQuery]);
-
-  useEffect(() => {
-    const nextQuery = searchParams.get('query') || '';
-    const nextKind = searchParams.get('kind') || '';
-    const nextSourceType = searchParams.get('source_type') || '';
-    const nextAgentId = searchParams.get('agent_id') || '';
-    setQuery(prev => prev === nextQuery ? prev : nextQuery);
-    setAppliedQuery(prev => prev === nextQuery ? prev : nextQuery);
-    setKind(prev => prev === nextKind ? prev : nextKind);
-    setSourceType(prev => prev === nextSourceType ? prev : nextSourceType);
-    setAgentId(prev => prev === nextAgentId ? prev : nextAgentId);
-    setPage(0);
-  }, [searchParamsKey]);
+  }, [page, kind, sourceType, agentId]);
 
   useEffect(() => {
     listAgents().then((res: any) => setAgents(res.agents || [])).catch(() => {});
@@ -108,7 +86,7 @@ export default function MemoryBrowser() {
   }, [toast]);
 
   const handleCreate = async () => {
-    await createRecordV2({
+    const result = await createRecordV2({
       kind: draft.kind,
       content: draft.content,
       source_type: draft.source_type,
@@ -117,8 +95,11 @@ export default function MemoryBrowser() {
       agent_id: agentId || undefined,
     });
     setCreating(false);
-    setDraft({ kind: 'fact_slot', content: '', source_type: 'user_confirmed', priority: 0.8, tags: '' });
-    setToast('Record created');
+    setDraft({ kind: 'session_note', content: '', source_type: 'user_confirmed', priority: 0.8, tags: '' });
+    const requestedKind = result.requested_kind || draft.kind;
+    const writtenKind = result.written_kind || result.record?.kind || draft.kind;
+    const suffix = result.reason_code ? ` (${result.reason_code})` : '';
+    setToast(`Created ${requestedKind} -> ${writtenKind}${suffix}`);
     await load();
   };
 
@@ -170,69 +151,24 @@ export default function MemoryBrowser() {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              setPage(0);
-              setAppliedQuery(query);
-              syncParams({ query, kind, sourceType, agentId });
-            }
-          }}
+          onKeyDown={e => { if (e.key === 'Enter') { setPage(0); load(); } }}
           placeholder={t('memories.searchPlaceholder')}
           style={{ minWidth: 240 }}
         />
-        <button
-          className="btn primary"
-          onClick={() => {
-            setPage(0);
-            setAppliedQuery(query);
-            syncParams({ query, kind, sourceType, agentId });
-          }}
-        >{t('common.search')}</button>
-        <button
-          className="btn"
-          onClick={() => {
-            setQuery('');
-            setAppliedQuery('');
-            setPage(0);
-            syncParams({ query: '', kind, sourceType, agentId });
-          }}
-        >{t('common.clear')}</button>
+        <button className="btn primary" onClick={() => { setPage(0); load(); }}>{t('common.search')}</button>
+        <button className="btn" onClick={() => { setQuery(''); setPage(0); load(); }}>{t('common.clear')}</button>
       </div>
 
       <div className="toolbar" style={{ marginBottom: 16 }}>
-        <select
-          value={kind}
-          onChange={e => {
-            const nextKind = e.target.value;
-            setKind(nextKind);
-            setPage(0);
-            syncParams({ query: appliedQuery, kind: nextKind, sourceType, agentId });
-          }}
-        >
+        <select value={kind} onChange={e => { setKind(e.target.value); setPage(0); }}>
           <option value="">All kinds</option>
           {KINDS.map(item => <option key={item} value={item}>{item}</option>)}
         </select>
-        <select
-          value={sourceType}
-          onChange={e => {
-            const nextSourceType = e.target.value;
-            setSourceType(nextSourceType);
-            setPage(0);
-            syncParams({ query: appliedQuery, kind, sourceType: nextSourceType, agentId });
-          }}
-        >
+        <select value={sourceType} onChange={e => { setSourceType(e.target.value); setPage(0); }}>
           <option value="">All sources</option>
           {SOURCES.map(item => <option key={item} value={item}>{item}</option>)}
         </select>
-        <select
-          value={agentId}
-          onChange={e => {
-            const nextAgentId = e.target.value;
-            setAgentId(nextAgentId);
-            setPage(0);
-            syncParams({ query: appliedQuery, kind, sourceType, agentId: nextAgentId });
-          }}
-        >
+        <select value={agentId} onChange={e => { setAgentId(e.target.value); setPage(0); }}>
           <option value="">All agents</option>
           {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
         </select>
@@ -248,9 +184,11 @@ export default function MemoryBrowser() {
           <table style={{ width: '100%', fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left' }}>Kind</th>
+                <th style={{ textAlign: 'left' }}>Requested</th>
+                <th style={{ textAlign: 'left' }}>Written</th>
                 <th style={{ textAlign: 'left' }}>Source</th>
                 <th style={{ textAlign: 'left' }}>Content</th>
+                <th style={{ textAlign: 'left' }}>Normalization</th>
                 <th style={{ textAlign: 'left' }}>Tags</th>
                 <th style={{ textAlign: 'left' }}>Agent</th>
                 <th style={{ textAlign: 'left' }}>Updated</th>
@@ -261,7 +199,14 @@ export default function MemoryBrowser() {
               {records.map(record => (
                 <tr key={record.id} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 8px 10px 0' }}>
-                    <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>{record.kind}</span>
+                    <span className="badge" style={{ background: 'rgba(96,165,250,0.16)', color: '#93c5fd' }}>
+                      {record.requested_kind || record.kind}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 8px' }}>
+                    <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>
+                      {record.written_kind || record.kind}
+                    </span>
                   </td>
                   <td style={{ padding: '10px 8px' }}>{record.source_type}</td>
                   <td style={{ padding: '10px 8px', maxWidth: 420 }}>
@@ -270,6 +215,12 @@ export default function MemoryBrowser() {
                     </div>
                     <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>
                       {record.id}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 8px' }}>
+                    <div>{record.normalization || 'durable'}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>
+                      {record.reason_code || '—'}
                     </div>
                   </td>
                   <td style={{ padding: '10px 8px' }}>{record.tags.join(', ') || '—'}</td>
@@ -283,7 +234,7 @@ export default function MemoryBrowser() {
               ))}
               {records.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
                     {t('common.noData')}
                   </td>
                 </tr>
@@ -320,6 +271,9 @@ export default function MemoryBrowser() {
               >
                 {KINDS.map(item => <option key={item} value={item}>{item}</option>)}
               </select>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                Durable kinds require stable keys and clear user-confirmed semantics. Ambiguous text will be written as <code>session_note</code>.
+              </div>
             </div>
             <div className="form-group">
               <label>Source type</label>

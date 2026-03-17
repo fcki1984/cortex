@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
-import { normalizeEntity, extractEntityTokens } from '../utils/helpers.js';
+import { normalizeEntity } from '../utils/helpers.js';
 import type { DetectedSignal } from '../signals/index.js';
 import type { Memory, MemoryCategory } from '../db/index.js';
 import type {
+  NormalizedRecordCandidate,
   RecordCandidate,
+  RecordKind,
+  RecordReasonCode,
   SessionNoteCandidate,
   SourceType,
   FactSlotCandidate,
@@ -11,289 +13,136 @@ import type {
   TaskStateCandidate,
 } from './types.js';
 
-const STOP_KEYS = new Set([
-  'the', 'and', 'for', 'with', 'that', 'this', 'have', 'from',
-  '用户', '自己', '一个', '这个', '那个', '已经', '以后', '之前',
+const PROFILE_RULE_KEYS = new Set([
+  'display_name',
+  'persona_boundary',
+  'persona_rule',
+  'persona_style',
+  'language_preference',
+  'response_length',
+  'response_style',
+  'risk_tolerance',
+  'solution_complexity',
 ]);
 
-function shortHash(text: string): string {
-  return createHash('md5').update(text).digest('hex').slice(0, 8);
-}
+const PROFILE_RULE_KEY_ALIASES: Record<string, string> = {
+  name: 'display_name',
+  preferred_name: 'display_name',
+  persona: 'persona_rule',
+  persona_response_style: 'persona_style',
+  preferred_language: 'language_preference',
+  reply_language: 'language_preference',
+  response_tone: 'response_style',
+  response_constraint: 'response_style',
+  brevity_preference: 'response_length',
+};
 
-export function normalizeKey(text: string, fallback = 'note'): string {
-  const normalized = normalizeEntity(text)
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/_+/g, '_');
-  return normalized || fallback;
-}
+const FACT_SLOT_KEYS = new Set([
+  'capability',
+  'location',
+  'occupation',
+  'organization',
+  'relationship',
+  'skill',
+]);
 
-function tokensToKey(text: string, fallback: string): string {
-  const tokens = extractEntityTokens(text)
-    .map(token => normalizeKey(token))
-    .filter(token => token && token.length >= 2 && !STOP_KEYS.has(token))
-    .slice(0, 3);
-  if (tokens.length === 0) return `${fallback}_${shortHash(text)}`;
-  return tokens.join('_');
-}
+const FACT_SLOT_KEY_ALIASES: Record<string, string> = {
+  lives_in: 'location',
+  residence: 'location',
+  works_at: 'organization',
+  company: 'organization',
+  role: 'occupation',
+  works_as: 'occupation',
+  employer: 'organization',
+};
 
-function canonicalizeUserNarration(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return trimmed;
+const TASK_STATE_KEYS = new Set([
+  'current_decision',
+  'current_goal',
+  'deployment_status',
+  'migration_status',
+  'open_todo',
+  'project_status',
+  'refactor_status',
+]);
 
-  const replacements: Array<[RegExp, string]> = [
-    [/^我的名字是/u, '用户的名字是'],
-    [/^我的名字叫/u, '用户的名字叫'],
-    [/^我叫/u, '用户叫'],
-    [/^我住在/u, '用户住在'],
-    [/^住在/u, '用户住在'],
-    [/^我在(.+?)(工作|上班)/u, '用户在$1$2'],
-    [/^在(.+?)(工作|上班)/u, '用户在$1$2'],
-    [/^我喜欢/u, '用户喜欢'],
-    [/^喜欢/u, '用户喜欢'],
-    [/^我偏好/u, '用户偏好'],
-    [/^偏好/u, '用户偏好'],
-    [/^我讨厌/u, '用户讨厌'],
-    [/^讨厌/u, '用户讨厌'],
-    [/^我不想/u, '用户不想'],
-    [/^不想/u, '用户不想'],
-    [/^我不要/u, '用户不要'],
-    [/^不要/u, '用户不要'],
-    [/^我希望/u, '用户希望'],
-    [/^希望/u, '用户希望'],
-    [/^我需要/u, '用户需要'],
-    [/^需要/u, '用户需要'],
-    [/^我是/u, '用户是'],
-    [/^I am\b/i, 'User is'],
-    [/^I'm\b/i, 'User is'],
-    [/^My name is\b/i, 'User name is'],
-    [/^Call me\b/i, 'User is called'],
-    [/^I live in\b/i, 'User lives in'],
-    [/^Live in\b/i, 'User lives in'],
-    [/^I work (?:at|in)\b/i, 'User works at'],
-    [/^Work (?:at|in)\b/i, 'User works at'],
-    [/^I prefer\b/i, 'User prefers'],
-    [/^Prefer\b/i, 'User prefers'],
-    [/^I like\b/i, 'User likes'],
-    [/^Like\b/i, 'User likes'],
-    [/^I love\b/i, 'User likes'],
-    [/^I hate\b/i, 'User dislikes'],
-    [/^I do not want\b/i, 'User does not want'],
-    [/^I don't want\b/i, 'User does not want'],
-    [/^I need\b/i, 'User needs'],
-    [/^I want\b/i, 'User wants'],
-  ];
+const TASK_STATE_KEY_ALIASES: Record<string, string> = {
+  decision: 'current_decision',
+  goal: 'current_goal',
+  todo: 'open_todo',
+  task_state: 'project_status',
+  project_state: 'project_status',
+  rewrite_status: 'refactor_status',
+};
 
-  for (const [pattern, replacement] of replacements) {
-    if (pattern.test(trimmed)) return trimmed.replace(pattern, replacement);
-  }
+const QUESTIONABLE_STRUCTURE_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|maybe|probably)/i;
+const USER_SUBJECT_RE = /(?:我|我的|用户|user\b|i\b|my\b)/i;
+const AGENT_SUBJECT_RE = /(?:agent\b|助手|assistant\b)/i;
 
-  return trimmed;
-}
+type ManualInput = {
+  kind?: string;
+  content: string;
+  source_type?: SourceType;
+  tags?: string[];
+  priority?: number;
+  subject_key?: string;
+  attribute_key?: string;
+  entity_key?: string;
+  state_key?: string;
+  owner_scope?: 'user' | 'agent';
+  status?: string;
+  session_id?: string;
+};
 
-function profileRuleKeyBase(content: string): string {
-  const trimmed = canonicalizeUserNarration(content).trim();
-  if (!trimmed) return trimmed;
-
-  const replacements: RegExp[] = [
-    /^用户(?:偏好|喜欢|希望|需要|想要|想|倾向|爱|比较喜欢)/u,
-    /^用户(?:不要|不想|拒绝|避免|禁止|必须|总是|永远不要|别)/u,
-    /^user\s+(?:prefers|likes|wants|needs|does\s+not\s+want|avoids|must|always)\b/i,
-  ];
-
-  let normalized = trimmed;
-  for (const pattern of replacements) {
-    normalized = normalized.replace(pattern, '').trim();
-  }
-
-  return normalized
-    .replace(/^[,:;，。；、\s]+/u, '')
-    .trim();
-}
-
-function profileAttributeFromContent(category: MemoryCategory | null, content: string): string | null {
-  const keyBase = profileRuleKeyBase(content) || content;
-
-  if (/我叫|我的名字|my name|call me|name is/i.test(content)) return 'display_name';
-  if (/住在|live in|lives in|位于|location|在.+工作|work at|work in/i.test(content)) return 'location';
-  if (/喜欢|偏好|prefer|like|讨厌|hate|不想|不要|风格|tone|格式|style/i.test(content)) {
-    return `preference_${tokensToKey(keyBase, 'rule')}`;
-  }
-  if (/禁止|必须|always|never|不要|别|constraint|rule|必须先/i.test(content)) {
-    return `constraint_${tokensToKey(keyBase, 'rule')}`;
-  }
-  if (/policy|策略|流程|优先|default/i.test(content)) return `policy_${tokensToKey(keyBase, 'rule')}`;
-  if (category === 'agent_persona') return `persona_${tokensToKey(content, 'persona')}`;
-  if (category === 'identity') return `identity_${tokensToKey(content, 'identity')}`;
-  return null;
-}
-
-function buildSessionNote(
-  agentId: string,
-  summary: string,
-  sourceType: SourceType,
-  tags: string[],
-  priority: number,
-): SessionNoteCandidate {
-  return {
-    kind: 'session_note',
-    agent_id: agentId,
-    summary,
-    source_type: sourceType,
-    tags,
-    priority,
-    confidence: Math.max(0.4, Math.min(priority, 0.95)),
-  };
-}
-
-function profileRuleFromCategory(
-  agentId: string,
-  category: MemoryCategory,
-  content: string,
-  priority: number,
-  sourceType: SourceType,
-): ProfileRuleCandidate | null {
-  const owner_scope = category === 'agent_persona' ? 'agent' : 'user';
-  const normalizedContent = owner_scope === 'user' ? canonicalizeUserNarration(content) : content.trim();
-  const attribute = profileAttributeFromContent(category, normalizedContent);
-  if (!attribute) return null;
-
-  return {
-    kind: 'profile_rule',
-    agent_id: agentId,
-    owner_scope,
-    subject_key: owner_scope === 'agent' ? 'agent' : 'user',
-    attribute_key: normalizeKey(attribute, `${category}_rule`),
-    value_text: normalizedContent,
-    source_type: sourceType,
-    priority,
-    confidence: Math.max(0.5, Math.min(priority, 0.98)),
-    tags: [category],
-  };
-}
-
-function factSlotFromCategory(
-  agentId: string,
-  category: MemoryCategory,
-  content: string,
-  priority: number,
-  sourceType: SourceType,
-): FactSlotCandidate | null {
-  const entityTokens = extractEntityTokens(content).filter(token => token.length >= 2);
-  const entityKey = entityTokens.length > 0 ? normalizeKey(entityTokens[0]!, 'user') : 'user';
-  let attributeKey = '';
-
-  if (/住在|live in|location|位于/i.test(content)) attributeKey = 'location';
-  else if (/工作|work at|works at|company|公司/i.test(content)) attributeKey = 'organization';
-  else if (/skill|熟悉|擅长|会|experience|uses/i.test(content)) attributeKey = category === 'skill' ? 'skill' : 'capability';
-  else if (/关系|朋友|同事|boss|partner|mentor/i.test(content)) attributeKey = 'relationship';
-  else if (/不是|更正|纠正|actually/i.test(content)) attributeKey = 'corrected_fact';
-  else if (category === 'fact' || category === 'entity') attributeKey = `${category}_${tokensToKey(content, category)}`;
-
-  if (!attributeKey) return null;
-
-  return {
-    kind: 'fact_slot',
-    agent_id: agentId,
-    entity_key: entityKey,
-    attribute_key: normalizeKey(attributeKey, category),
-    value_text: content,
-    source_type: sourceType,
-    priority,
-    confidence: Math.max(0.45, Math.min(priority, 0.95)),
-    tags: [category],
-  };
-}
-
-function taskStateFromCategory(
-  agentId: string,
-  category: MemoryCategory,
-  content: string,
-  priority: number,
-  sourceType: SourceType,
-): TaskStateCandidate | null {
-  if (!['decision', 'goal', 'project_state', 'todo'].includes(category)) return null;
-
-  const subjectKey = normalizeKey(extractEntityTokens(content)[0] || 'user', 'user');
-  const stateKey = normalizeKey(`${category}_${tokensToKey(content, category)}`, category);
-  const status = category === 'decision'
-    ? 'decided'
-    : category === 'goal'
-      ? 'planned'
-      : category === 'todo'
-        ? 'open'
-        : 'active';
-
-  return {
-    kind: 'task_state',
-    agent_id: agentId,
-    subject_key: subjectKey,
-    state_key: stateKey,
-    status,
-    summary: content,
-    source_type: sourceType,
-    priority,
-    confidence: Math.max(0.45, Math.min(priority, 0.95)),
-    tags: [category],
-  };
-}
-
-export function signalToCandidate(signal: DetectedSignal, agentId: string): RecordCandidate {
-  const sourceType: SourceType = signal.category === 'agent_persona' ? 'system_derived' : 'user_explicit';
-  const priority = signal.importance;
-
-  const profile = profileRuleFromCategory(agentId, signal.category, signal.content, priority, sourceType);
-  if (profile) return profile;
-
-  const fact = factSlotFromCategory(agentId, signal.category, signal.content, priority, sourceType);
-  if (fact) return fact;
-
-  const task = taskStateFromCategory(agentId, signal.category, signal.content, priority, sourceType);
-  if (task) return task;
-
-  return buildSessionNote(agentId, signal.content, sourceType, [signal.category], priority);
-}
-
-function legacySourceType(memory: Memory): SourceType {
-  if (memory.category.startsWith('agent_')) return 'system_derived';
-  if (memory.layer === 'core') return 'user_confirmed';
-  return 'user_explicit';
-}
-
-export function legacyMemoryToCandidate(memory: Memory): RecordCandidate {
-  const agentId = memory.agent_id || 'default';
-  const sourceType = legacySourceType(memory);
-  const priority = Math.max(memory.importance ?? 0.5, 0.4);
-  const tags = [memory.category, `legacy_${memory.layer}`];
-
-  const profile = profileRuleFromCategory(agentId, memory.category, memory.content, priority, sourceType);
-  if (profile) return { ...profile, tags };
-
-  const fact = factSlotFromCategory(agentId, memory.category, memory.content, priority, sourceType);
-  if (fact) return { ...fact, tags };
-
-  const task = taskStateFromCategory(agentId, memory.category, memory.content, priority, sourceType);
-  if (task) return { ...task, tags };
-
-  return buildSessionNote(agentId, memory.content, sourceType, tags, priority);
-}
-
-type PartialExtractedRecord = Partial<RecordCandidate> & {
+type PartialExtractedRecord = {
   kind?: string;
   confidence?: number;
   priority?: number;
   tags?: unknown;
   source_type?: string;
+  owner_scope?: 'user' | 'agent' | string;
+  subject_key?: string;
+  attribute_key?: string;
+  value_text?: string;
+  entity_key?: string;
+  state_key?: string;
+  summary?: string;
+  status?: string;
 };
 
-function parseSourceType(raw: string | undefined): SourceType {
-  if (raw === 'user_explicit' || raw === 'user_confirmed' || raw === 'assistant_inferred' || raw === 'system_derived') {
-    return raw;
-  }
-  return 'user_explicit';
+interface BaseNormalizationInput {
+  agentId: string;
+  content: string;
+  sourceType: SourceType;
+  tags: string[];
+  priority: number;
+  confidence: number;
+  sessionId?: string;
 }
 
-function parseTags(raw: unknown): string[] {
+interface ManualProfileRuleInput extends BaseNormalizationInput {
+  ownerScope?: 'user' | 'agent';
+  subjectKey?: string;
+  attributeKey?: string;
+}
+
+interface ManualFactSlotInput extends BaseNormalizationInput {
+  entityKey?: string;
+  attributeKey?: string;
+}
+
+interface ManualTaskStateInput extends BaseNormalizationInput {
+  subjectKey?: string;
+  stateKey?: string;
+  status?: string;
+}
+
+function clamp01(value: number, fallback: number): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) return fallback;
+  return Math.max(0, Math.min(value, 1));
+}
+
+function normalizeTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((tag): tag is string => typeof tag === 'string')
@@ -302,181 +151,490 @@ function parseTags(raw: unknown): string[] {
     .slice(0, 8);
 }
 
+function normalizeReasonCode(raw: RecordReasonCode | null | undefined): RecordReasonCode | null {
+  if (
+    raw === 'assistant_only_evidence' ||
+    raw === 'unstable_attribute' ||
+    raw === 'ambiguous_subject' ||
+    raw === 'insufficient_structure' ||
+    raw === 'unsupported_kind' ||
+    raw === 'fallback_summary'
+  ) {
+    return raw;
+  }
+  return null;
+}
+
+function normalizeKey(text: string, fallback = 'note'): string {
+  const normalized = normalizeEntity(text)
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
+  return normalized || fallback;
+}
+
+function isRecordKind(kind: string | undefined): kind is RecordKind {
+  return kind === 'profile_rule' || kind === 'fact_slot' || kind === 'task_state' || kind === 'session_note';
+}
+
+function outcome(candidate: RecordCandidate, requestedKind: RecordKind, reasonCode: RecordReasonCode | null = null): NormalizedRecordCandidate {
+  const writtenKind = candidate.kind;
+  return {
+    candidate,
+    requested_kind: requestedKind,
+    written_kind: writtenKind,
+    normalization: requestedKind !== 'session_note' && writtenKind === 'session_note'
+      ? 'downgraded_to_session_note'
+      : 'durable',
+    reason_code: normalizeReasonCode(reasonCode),
+  };
+}
+
+function buildSessionNote(
+  input: BaseNormalizationInput,
+  requestedKind: RecordKind,
+  reasonCode: RecordReasonCode | null,
+  summary = input.content,
+): NormalizedRecordCandidate {
+  return outcome(
+    {
+      kind: 'session_note',
+      agent_id: input.agentId,
+      session_id: input.sessionId,
+      summary,
+      source_type: input.sourceType,
+      tags: input.tags,
+      priority: input.priority,
+      confidence: input.confidence,
+    } satisfies SessionNoteCandidate,
+    requestedKind,
+    reasonCode,
+  );
+}
+
+function firstDefined<T>(...values: Array<T | null | undefined>): T | null {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
+function inferUserSubject(content: string): string | null {
+  return USER_SUBJECT_RE.test(content) ? 'user' : null;
+}
+
+function inferSubjectKey(content: string): string | null {
+  if (USER_SUBJECT_RE.test(content)) return 'user';
+  if (/\bcortex\b/i.test(content)) return 'cortex';
+  if (AGENT_SUBJECT_RE.test(content)) return 'agent';
+  return null;
+}
+
+function stableSubject(raw: string | undefined, fallbackContent: string): string | null {
+  if (raw?.trim()) return normalizeKey(raw, 'subject');
+  return inferSubjectKey(fallbackContent);
+}
+
+function stableEntity(raw: string | undefined, fallbackContent: string): string | null {
+  if (raw?.trim()) return normalizeKey(raw, 'entity');
+  return inferUserSubject(fallbackContent);
+}
+
+function normalizeProfileAttribute(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const normalized = normalizeKey(raw);
+  return PROFILE_RULE_KEYS.has(normalized) ? normalized : (PROFILE_RULE_KEY_ALIASES[normalized] || null);
+}
+
+function normalizeFactAttribute(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const normalized = normalizeKey(raw);
+  return FACT_SLOT_KEYS.has(normalized) ? normalized : (FACT_SLOT_KEY_ALIASES[normalized] || null);
+}
+
+function normalizeTaskStateKey(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const normalized = normalizeKey(raw);
+  return TASK_STATE_KEYS.has(normalized) ? normalized : (TASK_STATE_KEY_ALIASES[normalized] || null);
+}
+
+function inferProfileAttribute(content: string, ownerScope: 'user' | 'agent'): string | null {
+  if (ownerScope === 'agent') {
+    if (/(?:answer|respond|reply|回答|回复)/i.test(content) || /(?:style|tone|persona|风格|人设)/i.test(content)) {
+      return 'persona_style';
+    }
+    return 'persona_rule';
+  }
+
+  if (/我叫|我的名字|my name is|call me/i.test(content)) return 'display_name';
+  if (
+    /(?:请|用|prefer|preferably|answer|respond|reply|回答|回复).*(中文|英文|日文|english|chinese|japanese)/i.test(content) ||
+    /(中文|英文|日文|english|chinese|japanese).*(回答|回复|answer|respond)/i.test(content)
+  ) {
+    return 'language_preference';
+  }
+  if (
+    /(?:简洁|简短|精简|直接|concise|brief|short|direct).*(回答|回复|answer|response|解释)/i.test(content) ||
+    /(回答|回复|answer|response).*(简洁|简短|精简|直接|concise|brief|short|direct)/i.test(content)
+  ) {
+    return 'response_style';
+  }
+  if (
+    /(?:不要|别|avoid|no|not).*(长篇|冗长|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
+    /(?:详细|长篇|verbose|long).*(解释|说明|answer|response)/i.test(content)
+  ) {
+    return 'response_length';
+  }
+  if (
+    /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
+    /(?:复杂|complex).*(部署|方案|实现|deployment|solution|setup)/i.test(content)
+  ) {
+    return 'solution_complexity';
+  }
+  if (/(低风险|高风险|risk tolerance|risk profile)/i.test(content)) return 'risk_tolerance';
+  return null;
+}
+
+function inferFactAttribute(content: string): string | null {
+  if (/我住在|住在|live in|lives in|位于|来自|from/i.test(content)) return 'location';
+  if (/我在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
+  if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
+    return 'occupation';
+  }
+  if (/我会|擅长|熟悉|skill|capability|experienced in|good at/i.test(content)) return 'skill';
+  if (/朋友|同事|老板|导师|partner|friend|colleague|boss|mentor/i.test(content)) return 'relationship';
+  return null;
+}
+
+function inferTaskStateKey(content: string): string | null {
+  if (/重构|rewrite|refactor/i.test(content)) return 'refactor_status';
+  if (/部署|deploy|deployment/i.test(content)) return 'deployment_status';
+  if (/迁移|migrate|migration/i.test(content)) return 'migration_status';
+  if (/待办|todo|remind me|记得|别忘了/i.test(content)) return 'open_todo';
+  if (/决定|decided|final decision|choose|就这样吧/i.test(content)) return 'current_decision';
+  if (/目标|计划|goal|plan to|打算|想要/i.test(content)) return 'current_goal';
+  if (/项目|project|状态|status/i.test(content)) return 'project_status';
+  return null;
+}
+
+function inferTaskStatus(content: string, explicitStatus?: string): string {
+  if (explicitStatus?.trim()) return normalizeKey(explicitStatus, 'active');
+  if (/决定|decided|choose|定了/i.test(content)) return 'decided';
+  if (/待办|todo|remember to|别忘了/i.test(content)) return 'open';
+  if (/计划|goal|plan|打算/i.test(content)) return 'planned';
+  return 'active';
+}
+
+function reasonForMissingStructure(content: string, missing: 'attribute' | 'subject'): RecordReasonCode {
+  if (QUESTIONABLE_STRUCTURE_RE.test(content)) return 'insufficient_structure';
+  return missing === 'attribute' ? 'unstable_attribute' : 'ambiguous_subject';
+}
+
+function sourceAllowsProfileRule(sourceType: SourceType, ownerScope: 'user' | 'agent'): RecordReasonCode | null {
+  if (ownerScope === 'agent') {
+    return sourceType === 'system_derived' ? null : 'unsupported_kind';
+  }
+  if (sourceType === 'assistant_inferred') return 'assistant_only_evidence';
+  if (sourceType !== 'user_explicit' && sourceType !== 'user_confirmed') return 'unsupported_kind';
+  return null;
+}
+
+function sourceAllowsDurable(sourceType: SourceType): RecordReasonCode | null {
+  if (sourceType === 'assistant_inferred') return 'assistant_only_evidence';
+  if (sourceType !== 'user_explicit' && sourceType !== 'user_confirmed') return 'unsupported_kind';
+  return null;
+}
+
+function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: RecordKind): NormalizedRecordCandidate {
+  const ownerScope = input.ownerScope === 'agent' ? 'agent' : 'user';
+  const sourceReason = sourceAllowsProfileRule(input.sourceType, ownerScope);
+  if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+
+  const subjectKey = ownerScope === 'agent'
+    ? normalizeKey(input.subjectKey || 'agent', 'agent')
+    : stableSubject(input.subjectKey, input.content);
+  if (!subjectKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));
+
+  const attributeKey = firstDefined(
+    normalizeProfileAttribute(input.attributeKey),
+    inferProfileAttribute(input.content, ownerScope),
+  );
+  if (!attributeKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+
+  return outcome(
+    {
+      kind: 'profile_rule',
+      agent_id: input.agentId,
+      owner_scope: ownerScope,
+      subject_key: subjectKey,
+      attribute_key: attributeKey,
+      value_text: input.content,
+      source_type: input.sourceType,
+      tags: input.tags,
+      priority: input.priority,
+      confidence: input.confidence,
+    } satisfies ProfileRuleCandidate,
+    requestedKind,
+  );
+}
+
+function normalizeFactSlot(input: ManualFactSlotInput, requestedKind: RecordKind): NormalizedRecordCandidate {
+  const sourceReason = sourceAllowsDurable(input.sourceType);
+  if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+
+  const entityKey = stableEntity(input.entityKey, input.content);
+  if (!entityKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));
+
+  const attributeKey = firstDefined(
+    normalizeFactAttribute(input.attributeKey),
+    inferFactAttribute(input.content),
+  );
+  if (!attributeKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+
+  return outcome(
+    {
+      kind: 'fact_slot',
+      agent_id: input.agentId,
+      entity_key: entityKey,
+      attribute_key: attributeKey,
+      value_text: input.content,
+      source_type: input.sourceType,
+      tags: input.tags,
+      priority: input.priority,
+      confidence: input.confidence,
+    } satisfies FactSlotCandidate,
+    requestedKind,
+  );
+}
+
+function normalizeTaskState(input: ManualTaskStateInput, requestedKind: RecordKind): NormalizedRecordCandidate {
+  const sourceReason = sourceAllowsDurable(input.sourceType);
+  if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+
+  const subjectKey = stableSubject(input.subjectKey, input.content);
+  if (!subjectKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));
+
+  const stateKey = firstDefined(
+    normalizeTaskStateKey(input.stateKey),
+    inferTaskStateKey(input.content),
+  );
+  if (!stateKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+
+  return outcome(
+    {
+      kind: 'task_state',
+      agent_id: input.agentId,
+      subject_key: subjectKey,
+      state_key: stateKey,
+      status: inferTaskStatus(input.content, input.status),
+      summary: input.content,
+      source_type: input.sourceType,
+      tags: input.tags,
+      priority: input.priority,
+      confidence: input.confidence,
+    } satisfies TaskStateCandidate,
+    requestedKind,
+  );
+}
+
+function normalizeSessionNote(input: BaseNormalizationInput, requestedKind: RecordKind, reasonCode: RecordReasonCode | null = null): NormalizedRecordCandidate {
+  return buildSessionNote(input, requestedKind, reasonCode);
+}
+
+function normalizeByRequestedKind(
+  requestedKind: RecordKind,
+  input: BaseNormalizationInput & {
+    ownerScope?: 'user' | 'agent';
+    subjectKey?: string;
+    attributeKey?: string;
+    entityKey?: string;
+    stateKey?: string;
+    status?: string;
+  },
+): NormalizedRecordCandidate {
+  switch (requestedKind) {
+    case 'profile_rule':
+      return normalizeProfileRule({
+        ...input,
+        ownerScope: input.ownerScope,
+        subjectKey: input.subjectKey,
+        attributeKey: input.attributeKey,
+      }, requestedKind);
+    case 'fact_slot':
+      return normalizeFactSlot({
+        ...input,
+        entityKey: input.entityKey,
+        attributeKey: input.attributeKey,
+      }, requestedKind);
+    case 'task_state':
+      return normalizeTaskState({
+        ...input,
+        subjectKey: input.subjectKey,
+        stateKey: input.stateKey,
+        status: input.status,
+      }, requestedKind);
+    case 'session_note':
+    default:
+      return normalizeSessionNote(input, requestedKind);
+  }
+}
+
+function inferRequestedKindFromContent(content: string): RecordKind {
+  if (inferProfileAttribute(content, 'user')) return 'profile_rule';
+  if (inferFactAttribute(content)) return 'fact_slot';
+  if (inferTaskStateKey(content)) return 'task_state';
+  return 'session_note';
+}
+
+function legacySourceType(memory: Memory): SourceType {
+  if (memory.category.startsWith('agent_')) return 'system_derived';
+  if (memory.layer === 'core') return 'user_confirmed';
+  return 'user_explicit';
+}
+
+function requestedKindFromCategory(category: MemoryCategory, content: string): RecordKind {
+  if (category === 'preference' || category === 'constraint' || category === 'agent_persona') return 'profile_rule';
+  if (category === 'decision' || category === 'goal' || category === 'project_state' || category === 'todo') return 'task_state';
+  if (category === 'identity') {
+    return /我叫|名字|my name|call me/i.test(content) ? 'profile_rule' : 'fact_slot';
+  }
+  if (category === 'correction' || category === 'fact' || category === 'skill' || category === 'relationship') return 'fact_slot';
+  return 'session_note';
+}
+
+export function signalToCandidate(signal: DetectedSignal, agentId: string): NormalizedRecordCandidate {
+  const sourceType: SourceType = signal.category.startsWith('agent_')
+    ? 'assistant_inferred'
+    : signal.category === 'agent_persona'
+      ? 'system_derived'
+      : 'user_explicit';
+  const requestedKind = requestedKindFromCategory(signal.category, signal.content);
+  return normalizeByRequestedKind(requestedKind, {
+    agentId,
+    content: signal.content.trim(),
+    sourceType,
+    tags: [signal.category],
+    priority: clamp01(signal.importance, 0.7),
+    confidence: clamp01(signal.confidence, 0.85),
+    ownerScope: signal.category === 'agent_persona' ? 'agent' : 'user',
+  });
+}
+
+export function legacyMemoryToCandidate(memory: Memory): RecordCandidate {
+  const normalized = normalizeByRequestedKind(
+    requestedKindFromCategory(memory.category, memory.content),
+    {
+      agentId: memory.agent_id || 'default',
+      content: memory.content.trim(),
+      sourceType: legacySourceType(memory),
+      tags: [memory.category, `legacy_${memory.layer}`],
+      priority: clamp01(memory.importance ?? 0.6, 0.6),
+      confidence: clamp01(memory.importance ?? 0.75, 0.75),
+      ownerScope: memory.category === 'agent_persona' ? 'agent' : 'user',
+    },
+  );
+  return normalized.candidate;
+}
+
+function parseSourceType(raw: string | undefined): SourceType {
+  if (raw === 'user_explicit' || raw === 'user_confirmed' || raw === 'assistant_inferred' || raw === 'system_derived') {
+    return raw;
+  }
+  return 'user_explicit';
+}
+
+function contentFromExtracted(raw: PartialExtractedRecord): string {
+  if (typeof raw.value_text === 'string' && raw.value_text.trim()) return raw.value_text.trim();
+  if (typeof raw.summary === 'string' && raw.summary.trim()) return raw.summary.trim();
+  return '';
+}
+
 export function extractedRecordToCandidate(
   raw: PartialExtractedRecord,
   agentId: string,
   fallbackSessionId?: string,
-): RecordCandidate | null {
-  const kind = raw.kind;
-  const sourceType = parseSourceType(raw.source_type);
-  const priority = typeof raw.priority === 'number' ? Math.max(0, Math.min(raw.priority, 1)) : 0.7;
-  const confidence = typeof raw.confidence === 'number' ? Math.max(0, Math.min(raw.confidence, 1)) : 0.8;
-  const tags = parseTags(raw.tags);
+): NormalizedRecordCandidate | null {
+  const content = contentFromExtracted(raw);
+  if (!content) return null;
 
-  if (kind === 'profile_rule') {
-    const owner_scope = raw.owner_scope === 'agent' ? 'agent' : 'user';
-    const subject_key = typeof raw.subject_key === 'string' ? normalizeKey(raw.subject_key, owner_scope) : owner_scope;
-    const value_text = typeof raw.value_text === 'string'
-      ? (owner_scope === 'user' ? canonicalizeUserNarration(raw.value_text) : raw.value_text.trim())
-      : '';
-    const inferredAttribute = owner_scope === 'user' ? profileAttributeFromContent(null, value_text) : null;
-    const attribute_key = normalizeKey(
-      inferredAttribute || (typeof raw.attribute_key === 'string' ? raw.attribute_key : ''),
-      owner_scope === 'agent' ? 'persona_rule' : 'user_rule',
-    );
-    if (!attribute_key || !value_text) return null;
-    return {
-      kind,
-      agent_id: agentId,
-      owner_scope,
-      subject_key,
-      attribute_key,
-      value_text,
-      source_type: sourceType,
-      priority,
-      confidence,
-      tags,
-    };
+  const requestedKind = isRecordKind(raw.kind) ? raw.kind : 'session_note';
+  const invalidKind = raw.kind && !isRecordKind(raw.kind);
+  const base = {
+    agentId,
+    content,
+    sourceType: parseSourceType(raw.source_type),
+    tags: normalizeTags(raw.tags),
+    priority: clamp01(raw.priority ?? 0.7, 0.7),
+    confidence: clamp01(raw.confidence ?? 0.8, 0.8),
+    sessionId: fallbackSessionId,
+  };
+
+  if (invalidKind) {
+    return buildSessionNote(base, 'session_note', 'unsupported_kind');
   }
 
-  if (kind === 'fact_slot') {
-    const entity_key = typeof raw.entity_key === 'string' ? normalizeKey(raw.entity_key, 'user') : 'user';
-    const attribute_key = typeof raw.attribute_key === 'string' ? normalizeKey(raw.attribute_key) : '';
-    const value_text = typeof raw.value_text === 'string' ? raw.value_text.trim() : '';
-    if (!attribute_key || !value_text) return null;
-    return {
-      kind,
-      agent_id: agentId,
-      entity_key,
-      attribute_key,
-      value_text,
-      source_type: sourceType,
-      priority,
-      confidence,
-      tags,
-    };
+  if (requestedKind === 'profile_rule') {
+    return normalizeProfileRule({
+      ...base,
+      ownerScope: raw.owner_scope === 'agent' ? 'agent' : 'user',
+      subjectKey: typeof raw.subject_key === 'string' ? raw.subject_key : undefined,
+      attributeKey: typeof raw.attribute_key === 'string' ? raw.attribute_key : undefined,
+    }, requestedKind);
   }
 
-  if (kind === 'task_state') {
-    const subject_key = typeof raw.subject_key === 'string' ? normalizeKey(raw.subject_key, 'user') : 'user';
-    const state_key = typeof raw.state_key === 'string' ? normalizeKey(raw.state_key) : '';
-    const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
-    const status = typeof raw.status === 'string' ? normalizeKey(raw.status, 'active') : 'active';
-    if (!state_key || !summary) return null;
-    return {
-      kind,
-      agent_id: agentId,
-      subject_key,
-      state_key,
-      status,
-      summary,
-      source_type: sourceType,
-      priority,
-      confidence,
-      tags,
-    };
+  if (requestedKind === 'fact_slot') {
+    return normalizeFactSlot({
+      ...base,
+      entityKey: typeof raw.entity_key === 'string' ? raw.entity_key : undefined,
+      attributeKey: typeof raw.attribute_key === 'string' ? raw.attribute_key : undefined,
+    }, requestedKind);
   }
 
-  if (kind === 'session_note') {
-    const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
-    if (!summary) return null;
-    return {
-      kind,
-      agent_id: agentId,
-      session_id: fallbackSessionId,
-      summary,
-      source_type: sourceType,
-      priority,
-      confidence,
-      tags,
-    };
+  if (requestedKind === 'task_state') {
+    return normalizeTaskState({
+      ...base,
+      subjectKey: typeof raw.subject_key === 'string' ? raw.subject_key : undefined,
+      stateKey: typeof raw.state_key === 'string' ? raw.state_key : undefined,
+      status: typeof raw.status === 'string' ? raw.status : undefined,
+    }, requestedKind);
   }
 
-  return null;
+  return normalizeSessionNote(base, requestedKind);
 }
 
-export function normalizeManualInput(
-  agentId: string,
-  input: {
-    kind?: string;
-    content: string;
-    source_type?: SourceType;
-    tags?: string[];
-    priority?: number;
-    subject_key?: string;
-    attribute_key?: string;
-    entity_key?: string;
-    state_key?: string;
-    owner_scope?: 'user' | 'agent';
-    status?: string;
-    session_id?: string;
-  },
-): RecordCandidate {
+export function normalizeManualInput(agentId: string, input: ManualInput): NormalizedRecordCandidate {
   const content = input.content.trim();
   const sourceType = input.source_type || 'user_confirmed';
-  const priority = input.priority ?? 0.8;
-  const tags = input.tags || [];
+  const priority = clamp01(input.priority ?? 0.8, 0.8);
+  const tags = Array.isArray(input.tags) ? input.tags.filter(Boolean).slice(0, 8) : [];
 
-  switch (input.kind) {
-    case 'profile_rule': {
-      const ownerScope = input.owner_scope || 'user';
-      const normalizedContent = ownerScope === 'user' ? canonicalizeUserNarration(content) : content;
-      const inferredAttribute = ownerScope === 'user' ? profileAttributeFromContent(null, normalizedContent) : null;
-      return {
-        kind: 'profile_rule',
-        agent_id: agentId,
-        owner_scope: ownerScope,
-        subject_key: normalizeKey(input.subject_key || (ownerScope === 'agent' ? 'agent' : 'user'), 'user'),
-        attribute_key: normalizeKey(input.attribute_key || inferredAttribute || tokensToKey(normalizedContent, 'rule'), 'rule'),
-        value_text: normalizedContent,
-        source_type: sourceType,
-        priority,
-        confidence: 0.95,
-        tags,
-      };
-    }
-    case 'fact_slot': {
-      const entityKey = normalizeKey(input.entity_key || extractEntityTokens(content)[0] || 'user', 'user');
-      const factContent = entityKey === 'user' ? canonicalizeUserNarration(content) : content;
-      return {
-        kind: 'fact_slot',
-        agent_id: agentId,
-        entity_key: entityKey,
-        attribute_key: normalizeKey(input.attribute_key || tokensToKey(factContent, 'fact'), 'fact'),
-        value_text: factContent,
-        source_type: sourceType,
-        priority,
-        confidence: 0.95,
-        tags,
-      };
-    }
-    case 'task_state': {
-      const subjectKey = normalizeKey(input.subject_key || extractEntityTokens(content)[0] || 'user', 'user');
-      const summary = subjectKey === 'user' ? canonicalizeUserNarration(content) : content;
-      return {
-        kind: 'task_state',
-        agent_id: agentId,
-        subject_key: subjectKey,
-        state_key: normalizeKey(input.state_key || tokensToKey(summary, 'task'), 'task'),
-        status: normalizeKey(input.status || 'active', 'active'),
-        summary,
-        source_type: sourceType,
-        priority,
-        confidence: 0.95,
-        tags,
-      };
-    }
-    case 'session_note':
-    default:
-      return {
-        kind: 'session_note',
-        agent_id: agentId,
-        session_id: input.session_id,
-        summary: content,
-        source_type: sourceType,
-        priority,
-        confidence: 0.95,
-        tags,
-      };
+  const requestedKind = isRecordKind(input.kind)
+    ? input.kind
+    : input.kind
+      ? 'session_note'
+      : inferRequestedKindFromContent(content);
+
+  const base = {
+    agentId,
+    content,
+    sourceType,
+    tags,
+    priority,
+    confidence: 0.95,
+    sessionId: input.session_id,
+  };
+
+  if (input.kind && !isRecordKind(input.kind)) {
+    return buildSessionNote(base, 'session_note', 'unsupported_kind');
   }
+
+  return normalizeByRequestedKind(requestedKind, {
+    ...base,
+    ownerScope: input.owner_scope,
+    subjectKey: input.subject_key,
+    attributeKey: input.attribute_key,
+    entityKey: input.entity_key,
+    stateKey: input.state_key,
+    status: input.status,
+  });
 }

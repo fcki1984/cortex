@@ -28,9 +28,9 @@ import {
 } from './normalize.js';
 import type {
   CortexRecord,
+  NormalizedRecordCandidate,
   RecallOptions,
   RecallResponse,
-  RecordCandidate,
   RecordKind,
   RecordListOptions,
   RecordUpsertResult,
@@ -46,16 +46,17 @@ type SearchResult = CortexRecord & {
   final_score: number;
 };
 
-function dedupeKey(candidate: RecordCandidate): string {
-  switch (candidate.kind) {
+function dedupeKey(candidate: NormalizedRecordCandidate): string {
+  const record = candidate.candidate;
+  switch (record.kind) {
     case 'profile_rule':
-      return `${candidate.kind}:${candidate.agent_id}:${candidate.owner_scope}:${candidate.subject_key}:${candidate.attribute_key}`;
+      return `${record.kind}:${record.agent_id}:${record.owner_scope}:${record.subject_key}:${record.attribute_key}`;
     case 'fact_slot':
-      return `${candidate.kind}:${candidate.agent_id}:${candidate.entity_key}:${candidate.attribute_key}`;
+      return `${record.kind}:${record.agent_id}:${record.entity_key}:${record.attribute_key}`;
     case 'task_state':
-      return `${candidate.kind}:${candidate.agent_id}:${candidate.subject_key}:${candidate.state_key}`;
+      return `${record.kind}:${record.agent_id}:${record.subject_key}:${record.state_key}`;
     case 'session_note':
-      return `${candidate.kind}:${candidate.agent_id}:${candidate.session_id || ''}:${candidate.summary}`;
+      return `${record.kind}:${record.agent_id}:${record.session_id || ''}:${record.summary}`;
   }
 }
 
@@ -128,16 +129,6 @@ function sourceWeight(sourceType: SourceType): number {
   }
 }
 
-function hasLexicalEvidence(result: SearchResult): boolean {
-  return result.overlap > 0 || result.lexical_score >= 0.12;
-}
-
-function passesRecallAdmission(result: SearchResult): boolean {
-  if (!sourceAllowed(result)) return false;
-  if (result.kind === 'session_note') return result.overlap > 0 || result.lexical_score >= 0.18;
-  return hasLexicalEvidence(result);
-}
-
 function formatRuleLabel(record: CortexRecord): string {
   if (record.kind !== 'profile_rule') return 'Rule';
   if (record.owner_scope === 'agent') return 'Persona';
@@ -187,7 +178,7 @@ export class CortexRecordsV2 {
     },
     agentId: string,
     sessionId?: string,
-  ): Promise<RecordCandidate[]> {
+  ): Promise<NormalizedRecordCandidate[]> {
     if (!this.llm || typeof this.llm.complete !== 'function') return [];
 
     const segments = exchange.messages && exchange.messages.length > 0
@@ -203,7 +194,7 @@ export class CortexRecordsV2 {
     const parsed = parseJsonObject(raw);
     if (!parsed || !Array.isArray(parsed.records)) return [];
 
-    const records: RecordCandidate[] = [];
+    const records: NormalizedRecordCandidate[] = [];
     for (const item of parsed.records as Array<Record<string, unknown>>) {
       const candidate = extractedRecordToCandidate(item as never, agentId, sessionId);
       if (candidate) records.push(candidate);
@@ -220,7 +211,10 @@ export class CortexRecordsV2 {
   }): Promise<{
     records: Array<{
       record_id: string;
-      kind: RecordKind;
+      requested_kind: RecordKind;
+      written_kind: RecordKind;
+      normalization: RecordUpsertResult['normalization'];
+      reason_code: RecordUpsertResult['reason_code'];
       decision: RecordUpsertResult['decision'];
       source_type: SourceType;
       content: string;
@@ -253,11 +247,11 @@ export class CortexRecordsV2 {
     const deep = !isSmallTalk(user)
       ? await this.extractDeepCandidates(exchange, agentId, req.session_id).catch((error: Error) => {
           log.warn({ error: error.message }, 'V2 deep extraction failed');
-          return [] as RecordCandidate[];
+          return [] as NormalizedRecordCandidate[];
         })
       : [];
 
-    const merged = new Map<string, RecordCandidate>();
+    const merged = new Map<string, NormalizedRecordCandidate>();
     for (const candidate of [...fast, ...deep]) {
       merged.set(dedupeKey(candidate), candidate);
     }
@@ -271,7 +265,13 @@ export class CortexRecordsV2 {
         session_id: req.session_id,
         tags: ['fallback_note'],
       });
-      merged.set(dedupeKey(fallback), fallback);
+      merged.set(dedupeKey({
+        ...fallback,
+        reason_code: 'fallback_summary',
+      }), {
+        ...fallback,
+        reason_code: 'fallback_summary',
+      });
     }
 
     const evidence = [
@@ -281,24 +281,30 @@ export class CortexRecordsV2 {
 
     const results: Array<{
       record_id: string;
-      kind: RecordKind;
+      requested_kind: RecordKind;
+      written_kind: RecordKind;
+      normalization: RecordUpsertResult['normalization'];
+      reason_code: RecordUpsertResult['reason_code'];
       decision: RecordUpsertResult['decision'];
       source_type: SourceType;
       content: string;
     }> = [];
 
-    for (const candidate of merged.values()) {
+    for (const normalized of merged.values()) {
       const result = upsertRecord({
-        ...candidate,
+        ...normalized.candidate,
         evidence,
-      });
-      insertEvidence(result.record.id, agentId, candidate.source_type, evidence);
+      }, normalized);
+      insertEvidence(result.record.id, agentId, normalized.candidate.source_type, evidence);
       await this.indexRecord(result.record).catch((error: Error) => {
         log.debug({ id: result.record.id, error: error.message }, 'V2 vector indexing failed');
       });
       results.push({
         record_id: result.record.id,
-        kind: result.record.kind,
+        requested_kind: result.requested_kind,
+        written_kind: result.written_kind,
+        normalization: result.normalization,
+        reason_code: result.reason_code,
         decision: result.decision,
         source_type: result.record.source_type,
         content: result.record.content,
@@ -327,8 +333,8 @@ export class CortexRecordsV2 {
     status?: string;
     session_id?: string;
   }): Promise<RecordUpsertResult> {
-    const candidate = normalizeManualInput(input.agent_id || 'default', input);
-    const result = upsertRecord(candidate);
+    const normalized = normalizeManualInput(input.agent_id || 'default', input);
+    const result = upsertRecord(normalized.candidate, normalized);
     await this.indexRecord(result.record);
     return result;
   }
@@ -394,7 +400,13 @@ export class CortexRecordsV2 {
       })
       .filter((result): result is SearchResult => !!result);
 
-    const filtered = opts.recall_only ? results.filter(result => passesRecallAdmission(result)) : results;
+    const filtered = opts.recall_only
+      ? results.filter(result => {
+          if (!sourceAllowed(result)) return false;
+          if (result.kind === 'session_note') return result.final_score >= 0.18 || result.overlap > 0;
+          return result.overlap > 0 || result.vector_score >= 0.55 || result.lexical_score >= 0.12;
+        })
+      : results;
 
     return filtered
       .sort((a, b) => b.final_score - a.final_score)
@@ -426,7 +438,7 @@ export class CortexRecordsV2 {
     }
 
     const searchResults = await this.search(query, { agent_id: opts.agent_id, limit: 12, recall_only: true });
-    const relevancePassed = searchResults.some(result => hasLexicalEvidence(result));
+    const relevancePassed = searchResults.some(result => result.overlap > 0 || result.vector_score >= 0.62 || result.lexical_score >= 0.16);
 
     const rules = searchResults
       .filter((result): result is SearchResult & { kind: 'profile_rule' } => result.kind === 'profile_rule')

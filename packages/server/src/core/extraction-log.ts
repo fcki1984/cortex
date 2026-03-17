@@ -50,7 +50,7 @@ export function insertExtractionLog(
 interface LogFilterOpts {
   limit?: number;
   offset?: number;
-  channel?: 'fast' | 'deep' | 'flush' | 'mcp';
+  channel?: 'fast' | 'deep' | 'flush' | 'mcp' | 'v2';
   status?: 'written' | 'deduped' | 'empty';
   from?: string;
   to?: string;
@@ -160,7 +160,7 @@ export function getExtractionLogStats(
     GROUP BY channel
   `).all(...params) as any[];
 
-  const channelCounts: Record<string, number> = { fast: 0, deep: 0, flush: 0, mcp: 0 };
+  const channelCounts: Record<string, number> = { fast: 0, deep: 0, flush: 0, mcp: 0, v2: 0 };
   for (const ch of channels) {
     channelCounts[ch.channel] = ch.cnt;
   }

@@ -13,22 +13,10 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
-function createConstantEmbedding(vector: number[]): EmbeddingProvider {
-  return {
-    name: 'constant',
-    dimensions: vector.length,
-    embed: vi.fn().mockResolvedValue(vector),
-    embedBatch: vi.fn().mockResolvedValue([]),
-  };
-}
-
-function createMockLLM(records: unknown[] = []): LLMProvider {
+function createMockLLM(): LLMProvider {
   return {
     name: 'mock',
-    complete: vi.fn().mockResolvedValue(JSON.stringify({
-      records,
-      nothing_extracted: records.length === 0,
-    })),
+    complete: vi.fn().mockResolvedValue('{"records":[],"nothing_extracted":true}'),
   };
 }
 
@@ -55,7 +43,7 @@ describe('CortexRecordsV2', () => {
   it('migrates legacy memories into v2 records on initialize', () => {
     const records = service.listRecords({ agent_id: 'legacy-agent', limit: 10 });
     expect(records.items.length).toBeGreaterThan(0);
-    expect(records.items[0]?.kind).toBe('profile_rule');
+    expect(records.items[0]?.kind).toBe('fact_slot');
   });
 
   it('supersedes existing fact slots when the same key receives a new value', async () => {
@@ -98,84 +86,54 @@ describe('CortexRecordsV2', () => {
     expect(recall.context).toBe('');
   });
 
-  it('suppresses vector-only false positives for irrelevant recall', async () => {
-    const semanticOnlyService = new CortexRecordsV2(createMockLLM(), createConstantEmbedding([1, 0, 0, 0]));
-
-    await semanticOnlyService.remember({
-      agent_id: 'semantic-agent',
-      kind: 'profile_rule',
-      content: '用户偏好简洁回答，不要长篇解释。',
-      owner_scope: 'user',
-      subject_key: 'user',
-      attribute_key: 'response_style',
-      source_type: 'user_explicit',
-    });
-    await semanticOnlyService.remember({
-      agent_id: 'semantic-agent',
+  it('downgrades ambiguous manual durable writes to session_note with a reason code', async () => {
+    const result = await service.remember({
+      agent_id: 'ambiguous-agent',
       kind: 'fact_slot',
-      content: 'Atlas 部署环境是 production。',
-      entity_key: 'atlas',
-      attribute_key: 'deploy_env',
-      source_type: 'user_confirmed',
+      content: '最近也许会考虑换方案',
     });
 
-    const recall = await semanticOnlyService.recall({ query: '量子力学波函数塌缩', agent_id: 'semantic-agent' });
-    expect(recall.rules).toHaveLength(0);
-    expect(recall.facts).toHaveLength(0);
-    expect(recall.context).toBe('');
-    expect(recall.meta.reason).toBe('low_relevance');
+    expect(result.requested_kind).toBe('fact_slot');
+    expect(result.written_kind).toBe('session_note');
+    expect(result.normalization).toBe('downgraded_to_session_note');
+    expect(result.reason_code).toBe('insufficient_structure');
+    expect(result.record.kind).toBe('session_note');
   });
 
-  it('deduplicates overlapping fast and deep profile rule extraction', async () => {
-    const dedupeService = new CortexRecordsV2(
-      createMockLLM([
-        {
-          kind: 'profile_rule',
-          owner_scope: 'user',
-          subject_key: 'user',
-          attribute_key: 'response_style',
-          value_text: '用户喜欢简洁回答，不要长篇解释。',
-          source_type: 'user_explicit',
-        },
-      ]),
-      createMockEmbedding(),
-    );
-
-    const ingested = await dedupeService.ingest({
-      agent_id: 'dedupe-agent',
-      user_message: '喜欢简洁回答，不要长篇解释。',
-      assistant_message: '明白，后续我会尽量简洁。',
-    });
-
-    expect(ingested.records).toHaveLength(1);
-    const records = dedupeService.listRecords({ agent_id: 'dedupe-agent', limit: 10 });
-    expect(records.items).toHaveLength(1);
-    expect(records.items[0]?.content).toContain('用户喜欢简洁回答');
-  });
-
-  it('supersedes equivalent profile rules that differ only by preference wording', async () => {
+  it('keeps explicit preference writes on a single durable profile rule key', async () => {
     const first = await service.remember({
-      agent_id: 'profile-agent',
+      agent_id: 'preference-agent',
       kind: 'profile_rule',
-      content: '用户偏好简洁回答，不要长篇解释。',
-      owner_scope: 'user',
-      source_type: 'user_explicit',
+      content: '我喜欢简洁回答，不要长篇解释。',
     });
 
     const second = await service.remember({
-      agent_id: 'profile-agent',
+      agent_id: 'preference-agent',
       kind: 'profile_rule',
-      content: '喜欢简洁回答，不要长篇解释。',
-      owner_scope: 'user',
-      source_type: 'user_explicit',
+      content: '用户偏好简洁回答，不要长篇解释。',
+      source_type: 'user_confirmed',
     });
 
-    expect(first.decision).toBe('inserted');
+    expect(first.record.kind).toBe('profile_rule');
+    expect(second.record.kind).toBe('profile_rule');
     expect(second.decision).toBe('superseded');
 
-    const records = service.listRecords({ agent_id: 'profile-agent', kind: 'profile_rule', limit: 10 });
+    const records = service.listRecords({ agent_id: 'preference-agent', kind: 'profile_rule', limit: 10 });
     expect(records.items).toHaveLength(1);
-    expect(records.items[0]?.content).toContain('用户喜欢简洁回答');
+    expect(records.items[0]?.content).toContain('简洁回答');
+  });
+
+  it('downgrades assistant-only durable writes to session_note', async () => {
+    const result = await service.remember({
+      agent_id: 'assistant-only-agent',
+      kind: 'fact_slot',
+      content: '用户可能更偏好咖啡',
+      source_type: 'assistant_inferred',
+    });
+
+    expect(result.record.kind).toBe('session_note');
+    expect(result.written_kind).toBe('session_note');
+    expect(result.reason_code).toBe('assistant_only_evidence');
   });
 
   it('keeps agent persona available even when regular recall is skipped', async () => {

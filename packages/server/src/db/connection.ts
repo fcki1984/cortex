@@ -302,7 +302,7 @@ const migrations = [
         agent_id TEXT NOT NULL,
         session_id TEXT,
         exchange_preview TEXT,
-        channel TEXT CHECK (channel IN ('fast', 'deep', 'flush')),
+        channel TEXT CHECK (channel IN ('fast', 'deep', 'flush', 'mcp', 'v2')),
         raw_output TEXT,
         parsed_memories TEXT,
         memories_written INTEGER,
@@ -616,6 +616,40 @@ const migrations = [
         record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
         migrated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+    `,
+  },
+  {
+    name: '014_extraction_logs_v2_channel',
+    sql: `
+      CREATE TABLE extraction_logs_new (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        session_id TEXT,
+        exchange_preview TEXT,
+        channel TEXT CHECK (channel IN ('fast', 'deep', 'flush', 'mcp', 'v2')),
+        raw_output TEXT,
+        parsed_memories TEXT,
+        memories_written INTEGER,
+        memories_deduped INTEGER,
+        memories_smart_updated INTEGER DEFAULT 0,
+        latency_ms INTEGER,
+        error TEXT,
+        input_hash TEXT,
+        created_at DATETIME DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO extraction_logs_new (
+        id, agent_id, session_id, exchange_preview, channel, raw_output, parsed_memories,
+        memories_written, memories_deduped, memories_smart_updated, latency_ms, error, input_hash, created_at
+      )
+      SELECT
+        id, agent_id, session_id, exchange_preview, channel, raw_output, parsed_memories,
+        memories_written, memories_deduped, COALESCE(memories_smart_updated, 0), latency_ms, error, input_hash, created_at
+      FROM extraction_logs;
+
+      DROP TABLE extraction_logs;
+      ALTER TABLE extraction_logs_new RENAME TO extraction_logs;
+      CREATE INDEX IF NOT EXISTS idx_extraction_logs_agent ON extraction_logs(agent_id, created_at);
     `,
   },
 ];

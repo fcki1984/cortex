@@ -487,7 +487,6 @@ export default function AgentDetail() {
 
   const renderIntegration = () => {
     const cortexUrl = window.location.origin;
-    const mcpUrl = `${cortexUrl.replace(/\/$/, '')}/mcp`;
     const agentId = id!;
     const authHeaderLine = authEnabled ? `\n  -H "Authorization: Bearer YOUR_TOKEN" \\\\` : '';
 
@@ -513,9 +512,18 @@ export default function AgentDetail() {
       )
     );
 
+    const writeSemanticsNotice = (
+      <div style={{ margin: '8px 0 16px 0', padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: 8, fontSize: 13, lineHeight: 1.6, border: '1px solid var(--border)' }}>
+        <span style={{ fontWeight: 600 }}>Structured writes only.</span>
+        <br />
+        Durable records need stable keys and clear user-confirmed semantics. Ambiguous natural-language inputs will be downgraded to <code>session_note</code>.
+      </div>
+    );
+
     const renderApiTab = () => (
       <div>
         {authNotice}
+        {writeSemanticsNotice}
         <StepBlock
           step={1}
           title={t('agentDetail.apiStep1Title')}
@@ -526,19 +534,19 @@ export default function AgentDetail() {
           step={2}
           title={t('agentDetail.apiStep2Title')}
           description={t('agentDetail.apiStep2Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v2/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v1/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={3}
           title={t('agentDetail.apiStep3Title')}
           description={t('agentDetail.apiStep3Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v2/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v1/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={4}
           title={t('agentDetail.apiStep4Title')}
           description={t('agentDetail.apiStep4Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v2/records \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "kind": "fact_slot",\n    "content": "User lives in Tokyo",\n    "entity_key": "user",\n    "attribute_key": "location",\n    "value_text": "Tokyo",\n    "agent_id": "${agentId}"\n  }'\n\ncurl ${cortexUrl}/api/v2/records?agent_id=${agentId}&kind=fact_slot${authEnabled ? ` \\\\\n  -H "Authorization: Bearer YOUR_TOKEN"` : ''}`}
+          code={`curl -X POST ${cortexUrl}/api/v1/memories \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "layer": "core",\n    "category": "fact",\n    "content": "...",\n    "agent_id": "${agentId}",\n    "importance": 0.8\n  }'`}
         />
         <StepBlock
           step={5}
@@ -548,7 +556,7 @@ export default function AgentDetail() {
 const AGENT_ID = '${agentId}';${authEnabled ? `\nconst AUTH_TOKEN = 'YOUR_TOKEN';` : ''}
 
 async function recall(query: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v2/recall\`, {
+  const res = await fetch(\`\${CORTEX_URL}/api/v1/recall\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -558,8 +566,8 @@ async function recall(query: string) {
   return res.json();
 }
 
-async function ingestConversation(userMessage: string, assistantMessage: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v2/ingest\`, {
+async function ingest(userMessage: string, assistantMessage: string) {
+  const res = await fetch(\`\${CORTEX_URL}/api/v1/ingest\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -569,33 +577,6 @@ async function ingestConversation(userMessage: string, assistantMessage: string)
       assistant_message: assistantMessage,
       agent_id: AGENT_ID,
     }),
-  });
-  return res.json();
-
-}
-
-async function createRecord() {
-  const res = await fetch(\`\${CORTEX_URL}/api/v2/records\`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
-    },
-    body: JSON.stringify({
-      kind: 'profile_rule',
-      content: 'User prefers concise answers.',
-      owner_scope: 'user',
-      subject_key: 'user',
-      attribute_key: 'preference_concise_answers',
-      agent_id: AGENT_ID,
-    }),
-  });
-  return res.json();
-}
-
-async function listRecords() {
-  const res = await fetch(\`\${CORTEX_URL}/api/v2/records?agent_id=\${AGENT_ID}\`, {
-    headers: {${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
-    },
   });
   return res.json();
 }`}
@@ -614,41 +595,20 @@ HEADERS = {
 
 def recall(query: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v2/recall",
+        f"{CORTEX_URL}/api/v1/recall",
         headers=HEADERS,
         json={"query": query, "agent_id": AGENT_ID},
     ).json()
 
-def ingest_conversation(user_msg: str, assistant_msg: str):
+def ingest(user_msg: str, assistant_msg: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v2/ingest",
+        f"{CORTEX_URL}/api/v1/ingest",
         headers=HEADERS,
         json={
             "user_message": user_msg,
             "assistant_message": assistant_msg,
             "agent_id": AGENT_ID,
         },
-    ).json()
-
-def create_record():
-    return requests.post(
-        f"{CORTEX_URL}/api/v2/records",
-        headers=HEADERS,
-        json={
-            "kind": "fact_slot",
-            "content": "User lives in Tokyo",
-            "entity_key": "user",
-            "attribute_key": "location",
-            "value_text": "Tokyo",
-            "agent_id": AGENT_ID,
-        },
-    ).json()
-
-def list_records():
-    return requests.get(
-        f"{CORTEX_URL}/api/v2/records",
-        headers=HEADERS,
-        params={"agent_id": AGENT_ID},
     ).json()`}
           isLast
         />
@@ -661,7 +621,7 @@ def list_records():
           mcpServers: {
             cortex: {
               command: 'npx',
-              args: ['@cortexmem/mcp', '--server-url', mcpUrl],
+              args: ['@cortexmem/mcp', '--server-url', cortexUrl],
               env: {
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,
@@ -678,7 +638,7 @@ def list_records():
               command: 'npx',
               args: ['@cortexmem/mcp'],
               env: {
-                CORTEX_URL: mcpUrl,
+                CORTEX_URL: cortexUrl,
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,
               },
@@ -689,8 +649,8 @@ def list_records():
       },
       'claude-code': {
         code: authEnabled
-          ? `claude mcp add cortex -e CORTEX_AUTH_TOKEN=YOUR_TOKEN -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${mcpUrl}`
-          : `claude mcp add cortex -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${mcpUrl}`,
+          ? `claude mcp add cortex -e CORTEX_AUTH_TOKEN=YOUR_TOKEN -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${cortexUrl}`
+          : `claude mcp add cortex -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${cortexUrl}`,
         pasteDesc: t('agentDetail.mcpStep2ClaudeCodeDesc'),
       },
       'other': {
@@ -698,7 +658,7 @@ def list_records():
           mcpServers: {
             cortex: {
               command: 'npx',
-              args: ['@cortexmem/mcp', '--server-url', mcpUrl],
+              args: ['@cortexmem/mcp', '--server-url', cortexUrl],
               env: {
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,
@@ -714,6 +674,7 @@ def list_records():
 
     const renderMcpTab = () => (
       <div>
+        {writeSemanticsNotice}
         <StepBlock
           step={1}
           title={t('agentDetail.mcpStep1Title')}
@@ -885,7 +846,7 @@ def list_records():
   if (!agent) return <div className="card" style={{ color: 'var(--danger)' }}>{t('agentDetail.notFound')}</div>;
 
   const isBuiltIn = agent.id === 'default' || agent.id === 'mcp';
-  const stats = agent.stats || { kinds: {}, sources: {}, total: 0, active: 0, inactive: 0 };
+  const stats = agent.stats || { layers: {}, total: 0 };
   const mc = mergedConfig?.config;
 
   return (
@@ -975,60 +936,39 @@ def list_records():
             )}
           </div>
 
-          {/* Record Stats */}
+          {/* Memory Stats */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.recordStats')}</h3>
+            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.memoryStats')}</h3>
             <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>
-              {stats.active ?? stats.total} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>{t('agentDetail.activeRecords')}</span>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-              {t('agentDetail.inactiveRecords')}: {stats.inactive ?? 0}
+              {stats.total} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>{t('agentDetail.totalMemories')}</span>
             </div>
 
-            {(stats.active ?? stats.total) > 0 && (
+            {stats.total > 0 && (
               <>
+                {/* Layer bar */}
                 <div style={{ display: 'flex', height: 24, borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 12 }}>
-                  {(['profile_rule', 'fact_slot', 'task_state', 'session_note'] as const).map(kind => {
-                    const count = stats.kinds[kind] || 0;
-                    const pct = (stats.active ?? stats.total) > 0 ? (count / (stats.active ?? stats.total)) * 100 : 0;
+                  {(['working', 'core', 'archive'] as const).map(layer => {
+                    const count = stats.layers[layer] || 0;
+                    const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
                     if (pct === 0) return null;
-                    const colors: Record<string, string> = {
-                      profile_rule: '#3b82f6',
-                      fact_slot: '#22c55e',
-                      task_state: '#f59e0b',
-                      session_note: '#a855f7',
-                    };
+                    const colors: Record<string, string> = { working: '#f59e0b', core: '#3b82f6', archive: '#6b7280' };
                     return (
                       <div
-                        key={kind}
-                        title={`${kind}: ${count}`}
-                        style={{ width: `${pct}%`, background: colors[kind], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 500 }}
+                        key={layer}
+                        title={`${layer}: ${count}`}
+                        style={{ width: `${pct}%`, background: colors[layer], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 500 }}
                       >
-                        {pct > 10 ? `${kind} (${count})` : ''}
+                        {pct > 10 ? `${layer} (${count})` : ''}
                       </div>
                     );
                   })}
                 </div>
 
-                <div style={{ display: 'flex', gap: 16, fontSize: 13, flexWrap: 'wrap' }}>
-                  {(['profile_rule', 'fact_slot', 'task_state', 'session_note'] as const).map(kind => (
-                    <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 2,
-                          background: kind === 'profile_rule' ? '#3b82f6' : kind === 'fact_slot' ? '#22c55e' : kind === 'task_state' ? '#f59e0b' : '#a855f7',
-                        }}
-                      />
-                      <span>{kind}: {stats.kinds[kind] || 0}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 16, fontSize: 13, marginTop: 12, flexWrap: 'wrap' }}>
-                  {Object.entries(stats.sources || {}).map(([source, count]) => (
-                    <div key={source} className="badge" style={{ background: 'rgba(59,130,246,0.12)', color: 'var(--text)' }}>
-                      {source}: {count as number}
+                <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
+                  {(['working', 'core', 'archive'] as const).map(layer => (
+                    <div key={layer} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 2, background: layer === 'working' ? '#f59e0b' : layer === 'core' ? '#3b82f6' : '#6b7280' }} />
+                      <span>{layer}: {stats.layers[layer] || 0}</span>
                     </div>
                   ))}
                 </div>

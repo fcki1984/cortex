@@ -28,9 +28,9 @@ export interface MCPServerDeps {
   recall: (query: string, agentId?: string, maxResults?: number) => Promise<any>;
   remember: (content: string, kind?: string, priority?: number, agentId?: string, sourceType?: string, tags?: string[]) => Promise<any>;
   forget: (recordId: string, reason?: string) => Promise<any>;
-  search: (query: string, debug?: boolean, agentId?: string) => Promise<any>;
+  search: (query: string, debug?: boolean) => Promise<any>;
   stats: () => Promise<any>;
-  listRelations: (subject?: string, object?: string, limit?: number, agentId?: string) => Promise<any>;
+  listRelations: (subject?: string, object?: string, limit?: number) => Promise<any>;
 }
 
 const TOOLS: MCPTool[] = [
@@ -49,7 +49,7 @@ const TOOLS: MCPTool[] = [
   },
   {
     name: 'cortex_remember',
-    description: 'Create or update a Cortex V2 record. Prefer profile_rule/fact_slot/task_state for durable information and session_note for non-stable context.',
+    description: 'Create or update a Cortex V2 record. Durable kinds only fit clear, updateable user facts/rules/state. Ambiguous or assistant-only content will be written as session_note automatically.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,8 +57,8 @@ const TOOLS: MCPTool[] = [
         kind: {
           type: 'string',
           enum: ['profile_rule', 'fact_slot', 'task_state', 'session_note'],
-          description: 'Record kind',
-          default: 'fact_slot',
+          description: 'Requested record kind. Durable kinds require stable keys and user-confirmed semantics.',
+          default: 'session_note',
         },
         source_type: {
           type: 'string',
@@ -96,14 +96,13 @@ const TOOLS: MCPTool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query' },
-        agent_id: { type: 'string', description: 'Agent identifier', default: 'mcp' },
       },
       required: ['query'],
     },
   },
   {
     name: 'cortex_stats',
-    description: 'Get Cortex V2 record statistics (active count, kinds, sources, and agent distribution)',
+    description: 'Get memory statistics (total count, layer distribution, etc)',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -118,7 +117,6 @@ const TOOLS: MCPTool[] = [
         subject: { type: 'string', description: 'Filter by subject entity' },
         object: { type: 'string', description: 'Filter by object entity' },
         limit: { type: 'number', description: 'Maximum results to return', default: 20 },
-        agent_id: { type: 'string', description: 'Agent identifier', default: 'mcp' },
       },
     },
   },
@@ -165,7 +163,7 @@ export class MCPServer {
         }
 
         case 'cortex_search_debug': {
-          const result = await this.deps.search(call.arguments.query, true, call.arguments.agent_id);
+          const result = await this.deps.search(call.arguments.query, true);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
@@ -179,7 +177,6 @@ export class MCPServer {
             call.arguments.subject,
             call.arguments.object,
             call.arguments.limit,
-            call.arguments.agent_id,
           );
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }

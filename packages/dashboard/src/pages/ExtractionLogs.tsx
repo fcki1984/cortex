@@ -9,6 +9,10 @@ interface ExtractedMemory {
   importance: number;
   source: string;
   reasoning: string;
+  requested_kind?: string;
+  written_kind?: string;
+  normalization?: string;
+  reason_code?: string | null;
 }
 
 interface LogEntry {
@@ -16,7 +20,7 @@ interface LogEntry {
   agent_id: string;
   session_id?: string;
   exchange_preview: string;
-  channel: 'fast' | 'deep' | 'flush' | 'mcp';
+  channel: 'fast' | 'deep' | 'flush' | 'mcp' | 'v2';
   raw_output: string;
   parsed_memories: ExtractedMemory[];
   memories_written: number;
@@ -31,6 +35,7 @@ const CHANNEL_COLORS: Record<string, { bg: string; color: string }> = {
   deep: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
   flush: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
   mcp: { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b' },
+  v2: { bg: 'rgba(14,165,233,0.15)', color: '#38bdf8' },
 };
 
 export default function ExtractionLogs() {
@@ -104,7 +109,7 @@ export default function ExtractionLogs() {
   const totalWritten = stats.totalWritten ?? 0;
   const totalDeduped = stats.totalDeduped ?? 0;
   const avgLatency = stats.avgLatency ?? 0;
-  const channelCounts = stats.channelCounts ?? { fast: 0, deep: 0, flush: 0, mcp: 0 };
+  const channelCounts = stats.channelCounts ?? { fast: 0, deep: 0, flush: 0, mcp: 0, v2: 0 };
 
   return (
     <div>
@@ -127,6 +132,7 @@ export default function ExtractionLogs() {
             <option value="deep">Deep</option>
             <option value="flush">Flush</option>
             <option value="mcp">MCP</option>
+            <option value="v2">V2</option>
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -175,7 +181,7 @@ export default function ExtractionLogs() {
           <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>{avgLatency}ms</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('extractionLogs.avgLatency')}</div>
         </div>
-        {(['fast', 'deep', 'flush', 'mcp'] as const).map(ch => (
+        {(['fast', 'deep', 'flush', 'mcp', 'v2'] as const).map(ch => (
           <div key={ch} className="card" style={{ padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 24, fontWeight: 700, color: CHANNEL_COLORS[ch].color }}>{channelCounts[ch]}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ch}</div>
@@ -265,8 +271,18 @@ export default function ExtractionLogs() {
                                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                   imp: {m.importance?.toFixed(2)} | {m.source}
                                 </span>
+                                {m.written_kind && (
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    {m.requested_kind || m.written_kind} → {m.written_kind}
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: 13, marginBottom: 4 }}>{m.content}</div>
+                              {(m.normalization || m.reason_code) && (
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                  normalization: {m.normalization || 'durable'} | reason: {m.reason_code || '—'}
+                                </div>
+                              )}
                               {m.reasoning && (
                                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{m.reasoning}</div>
                               )}

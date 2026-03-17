@@ -7,13 +7,17 @@ import type {
   EvidenceInput,
   FactSlotCandidate,
   FactSlotRecord,
+  NormalizedRecordCandidate,
   ProfileRuleCandidate,
   ProfileRuleRecord,
   RecordCandidate,
   RecordEvidence,
   RecordKind,
+  RecordReasonCode,
+  RecordWriteMeta,
   RecordListOptions,
   RecordUpsertResult,
+  RecordNormalization,
   SessionNoteCandidate,
   SessionNoteRecord,
   SourceType,
@@ -37,6 +41,13 @@ type RegistryRow = {
 
 type SearchHit = { id: string; score: number };
 
+type StoredWriteMeta = {
+  requested_kind: RecordKind;
+  written_kind: RecordKind;
+  normalization: RecordNormalization;
+  reason_code: RecordReasonCode | null;
+};
+
 function parseTags(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
@@ -50,6 +61,69 @@ function parseTags(raw: string | null | undefined): string[] {
 
 function uniqueTags(tags: string[] | undefined): string[] {
   return [...new Set((tags || []).map(tag => tag.trim()).filter(Boolean))].slice(0, 12);
+}
+
+function defaultWriteMeta(kind: RecordKind): StoredWriteMeta {
+  return {
+    requested_kind: kind,
+    written_kind: kind,
+    normalization: 'durable',
+    reason_code: null,
+  };
+}
+
+function parseCandidateMetadata(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseWriteMeta(raw: string | null | undefined, fallbackKind: RecordKind): StoredWriteMeta {
+  const parsed = parseCandidateMetadata(raw);
+  const requested_kind = parsed.requested_kind;
+  const written_kind = parsed.written_kind;
+  const normalization = parsed.normalization;
+  const reason_code = parsed.reason_code;
+
+  const meta = defaultWriteMeta(fallbackKind);
+  if (requested_kind === 'profile_rule' || requested_kind === 'fact_slot' || requested_kind === 'task_state' || requested_kind === 'session_note') {
+    meta.requested_kind = requested_kind;
+  }
+  if (written_kind === 'profile_rule' || written_kind === 'fact_slot' || written_kind === 'task_state' || written_kind === 'session_note') {
+    meta.written_kind = written_kind;
+  }
+  if (normalization === 'durable' || normalization === 'downgraded_to_session_note') {
+    meta.normalization = normalization;
+  }
+  if (
+    reason_code === 'assistant_only_evidence' ||
+    reason_code === 'unstable_attribute' ||
+    reason_code === 'ambiguous_subject' ||
+    reason_code === 'insufficient_structure' ||
+    reason_code === 'unsupported_kind' ||
+    reason_code === 'fallback_summary'
+  ) {
+    meta.reason_code = reason_code;
+  }
+  return meta;
+}
+
+function withWriteMeta(candidate: RecordCandidate, meta: RecordWriteMeta): RecordCandidate {
+  const nextMetadata = {
+    ...parseCandidateMetadata(candidate.metadata),
+    requested_kind: meta.requested_kind,
+    written_kind: meta.written_kind,
+    normalization: meta.normalization,
+    reason_code: meta.reason_code,
+  };
+  return {
+    ...candidate,
+    metadata: JSON.stringify(nextMetadata),
+  };
 }
 
 function recordContent(candidate: RecordCandidate): string {
@@ -170,9 +244,11 @@ function getProfileRuleById(base: RegistryRow): ProfileRuleRecord | null {
     metadata: string | null;
   } | undefined;
   if (!row) return null;
+  const writeMeta = parseWriteMeta(row.metadata, 'profile_rule');
   return {
     ...base,
     kind: 'profile_rule',
+    ...writeMeta,
     tags: parseTags(base.tags_json),
     content: row.value_text,
     owner_scope: row.owner_scope,
@@ -201,9 +277,11 @@ function getFactSlotById(base: RegistryRow): FactSlotRecord | null {
     metadata: string | null;
   } | undefined;
   if (!row) return null;
+  const writeMeta = parseWriteMeta(row.metadata, 'fact_slot');
   return {
     ...base,
     kind: 'fact_slot',
+    ...writeMeta,
     tags: parseTags(base.tags_json),
     content: row.value_text,
     entity_key: row.entity_key,
@@ -232,9 +310,11 @@ function getTaskStateById(base: RegistryRow): TaskStateRecord | null {
     metadata: string | null;
   } | undefined;
   if (!row) return null;
+  const writeMeta = parseWriteMeta(row.metadata, 'task_state');
   return {
     ...base,
     kind: 'task_state',
+    ...writeMeta,
     tags: parseTags(base.tags_json),
     content: row.summary,
     subject_key: row.subject_key,
@@ -260,9 +340,11 @@ function getSessionNoteById(base: RegistryRow): SessionNoteRecord | null {
     metadata: string | null;
   } | undefined;
   if (!row) return null;
+  const writeMeta = parseWriteMeta(row.metadata, 'session_note');
   return {
     ...base,
     kind: 'session_note',
+    ...writeMeta,
     tags: parseTags(base.tags_json),
     content: row.summary,
     session_id: row.session_id,
@@ -598,53 +680,55 @@ function findActiveMatch(candidate: RecordCandidate): CortexRecord | null {
   return matched ? getRecordById(matched.id) : null;
 }
 
-export function upsertRecord(candidate: RecordCandidate): RecordUpsertResult {
+export function upsertRecord(candidate: RecordCandidate, writeMeta?: RecordWriteMeta): RecordUpsertResult {
   const db = getDb();
-  const tags = uniqueTags(candidate.tags);
-  const searchText = searchableText(candidate);
-  const matched = findActiveMatch(candidate);
+  const effectiveWriteMeta = writeMeta || parseWriteMeta(candidate.metadata, candidate.kind);
+  const candidateWithMeta = withWriteMeta(candidate, effectiveWriteMeta);
+  const tags = uniqueTags(candidateWithMeta.tags);
+  const searchText = searchableText(candidateWithMeta);
+  const matched = findActiveMatch(candidateWithMeta);
 
   if (matched) {
-    const mergedTags = mergeTagsFromExisting(candidate, matched);
-    if (equivalentContent(candidate, matched)) {
+    const mergedTags = mergeTagsFromExisting(candidateWithMeta, matched);
+    if (equivalentContent(candidateWithMeta, matched)) {
       db.transaction(() => {
-        updateExistingContent(candidate, matched);
+        updateExistingContent(candidateWithMeta, matched);
         updateRegistryCommon(matched.id, {
           searchable_text: searchText,
           tags: mergedTags,
-          priority: Math.max(matched.priority, candidate.priority ?? matched.priority),
-          source_type: candidate.source_type,
+          priority: Math.max(matched.priority, candidateWithMeta.priority ?? matched.priority),
+          source_type: candidateWithMeta.source_type,
           is_active: 1,
         });
         syncFtsUpdate(matched.id, searchText, matched.kind, mergedTags);
       })();
       const updated = getRecordById(matched.id);
       if (!updated) throw new Error('Updated record not found');
-      return { decision: 'updated', record: updated };
+      return { decision: 'updated', record: updated, ...effectiveWriteMeta };
     }
 
     const id = generateId();
     db.transaction(() => {
       supersedeRecord(matched, id);
-      insertRegistry(candidate, id, searchText, mergedTags);
-      insertRecordDetails(id, { ...candidate, tags: mergedTags });
-      syncFtsInsert(id, searchText, candidate.kind, mergedTags);
+      insertRegistry(candidateWithMeta, id, searchText, mergedTags);
+      insertRecordDetails(id, { ...candidateWithMeta, tags: mergedTags });
+      syncFtsInsert(id, searchText, candidateWithMeta.kind, mergedTags);
       updateRegistryTimestamp(matched.id);
     })();
     const inserted = getRecordById(id);
     if (!inserted) throw new Error('Inserted record not found');
-    return { decision: 'superseded', record: inserted, previous_record_id: matched.id };
+    return { decision: 'superseded', record: inserted, previous_record_id: matched.id, ...effectiveWriteMeta };
   }
 
   const id = generateId();
   db.transaction(() => {
-    insertRegistry(candidate, id, searchText, tags);
-    insertRecordDetails(id, candidate);
-    syncFtsInsert(id, searchText, candidate.kind, tags);
+    insertRegistry(candidateWithMeta, id, searchText, tags);
+    insertRecordDetails(id, candidateWithMeta);
+    syncFtsInsert(id, searchText, candidateWithMeta.kind, tags);
   })();
   const inserted = getRecordById(id);
   if (!inserted) throw new Error('Inserted record not found');
-  return { decision: 'inserted', record: inserted };
+  return { decision: 'inserted', record: inserted, ...effectiveWriteMeta };
 }
 
 export function insertConversationRef(data: {
