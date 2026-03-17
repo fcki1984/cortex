@@ -487,6 +487,7 @@ export default function AgentDetail() {
 
   const renderIntegration = () => {
     const cortexUrl = window.location.origin;
+    const mcpUrl = `${cortexUrl.replace(/\/$/, '')}/mcp`;
     const agentId = id!;
     const authHeaderLine = authEnabled ? `\n  -H "Authorization: Bearer YOUR_TOKEN" \\\\` : '';
 
@@ -660,7 +661,7 @@ def list_records():
           mcpServers: {
             cortex: {
               command: 'npx',
-              args: ['@cortexmem/mcp', '--server-url', cortexUrl],
+              args: ['@cortexmem/mcp', '--server-url', mcpUrl],
               env: {
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,
@@ -677,7 +678,7 @@ def list_records():
               command: 'npx',
               args: ['@cortexmem/mcp'],
               env: {
-                CORTEX_URL: cortexUrl,
+                CORTEX_URL: mcpUrl,
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,
               },
@@ -688,8 +689,8 @@ def list_records():
       },
       'claude-code': {
         code: authEnabled
-          ? `claude mcp add cortex -e CORTEX_AUTH_TOKEN=YOUR_TOKEN -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${cortexUrl}`
-          : `claude mcp add cortex -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${cortexUrl}`,
+          ? `claude mcp add cortex -e CORTEX_AUTH_TOKEN=YOUR_TOKEN -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${mcpUrl}`
+          : `claude mcp add cortex -e CORTEX_AGENT_ID=${agentId} -- npx @cortexmem/mcp --server-url ${mcpUrl}`,
         pasteDesc: t('agentDetail.mcpStep2ClaudeCodeDesc'),
       },
       'other': {
@@ -697,7 +698,7 @@ def list_records():
           mcpServers: {
             cortex: {
               command: 'npx',
-              args: ['@cortexmem/mcp', '--server-url', cortexUrl],
+              args: ['@cortexmem/mcp', '--server-url', mcpUrl],
               env: {
                 ...(authEnabled ? { CORTEX_AUTH_TOKEN: 'YOUR_TOKEN' } : {}),
                 CORTEX_AGENT_ID: agentId,

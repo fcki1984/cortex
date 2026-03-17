@@ -129,7 +129,21 @@ describe('API V2 Integration', () => {
     expect(body.records.length).toBeGreaterThan(0);
   });
 
-  it('scopes MCP search debug to the caller agent_id', async () => {
+  it('exposes MCP endpoint metadata on GET /mcp', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/mcp',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.payload);
+    expect(payload.endpoints.jsonrpc_post).toBe('/mcp');
+    expect(payload.endpoints.compat_jsonrpc_post).toBe('/mcp/message');
+    expect(payload.endpoints.sse).toBe('/mcp/sse');
+    expect(payload.endpoints.tools).toBe('/mcp/tools');
+  });
+
+  it('scopes MCP search debug to the caller agent_id on primary and compat routes', async () => {
     await app.inject({
       method: 'POST',
       url: '/api/v2/records',
@@ -142,30 +156,32 @@ describe('API V2 Integration', () => {
       },
     });
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/mcp/message',
-      headers: {
-        'x-agent-id': 'mcp-scope',
-      },
-      payload: {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'cortex_search_debug',
-          arguments: {
-            query: 'Scoped MCP debug',
+    for (const route of ['/mcp', '/mcp/message'] as const) {
+      const response = await app.inject({
+        method: 'POST',
+        url: route,
+        headers: {
+          'x-agent-id': 'mcp-scope',
+        },
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'cortex_search_debug',
+            arguments: {
+              query: 'Scoped MCP debug',
+            },
           },
         },
-      },
-    });
+      });
 
-    expect(response.statusCode).toBe(200);
-    const payload = JSON.parse(response.payload);
-    const text = payload.result.content[0].text;
-    const parsed = JSON.parse(text);
-    expect(parsed.results.some((item: any) => item.content.includes('Scoped MCP debug record'))).toBe(true);
+      expect(response.statusCode).toBe(200);
+      const payload = JSON.parse(response.payload);
+      const text = payload.result.content[0].text;
+      const parsed = JSON.parse(text);
+      expect(parsed.results.some((item: any) => item.content.includes('Scoped MCP debug record'))).toBe(true);
+    }
   });
 
   it('classifies database busy errors on v2 recall', async () => {

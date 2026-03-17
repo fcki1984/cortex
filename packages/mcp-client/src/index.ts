@@ -8,7 +8,7 @@
  *   "mcpServers": {
  *     "cortex": {
  *       "command": "npx",
- *       "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
+ *       "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100/mcp"],
  *       "env": { "CORTEX_AGENT_ID": "your-agent-id" }
  *     }
  *   }
@@ -18,9 +18,9 @@
  * Env vars:  CORTEX_URL          CORTEX_AGENT_ID   CORTEX_AUTH_TOKEN
  */
 
-const CORTEX_URL = process.argv.includes('--server-url')
-  ? process.argv[process.argv.indexOf('--server-url') + 1] || 'http://localhost:21100'
-  : process.env.CORTEX_URL || 'http://localhost:21100';
+const RAW_CORTEX_URL = process.argv.includes('--server-url')
+  ? process.argv[process.argv.indexOf('--server-url') + 1] || 'http://localhost:21100/mcp'
+  : process.env.CORTEX_URL || 'http://localhost:21100/mcp';
 
 const CORTEX_AGENT_ID = process.argv.includes('--agent-id')
   ? process.argv[process.argv.indexOf('--agent-id') + 1]
@@ -30,13 +30,22 @@ const CORTEX_AUTH_TOKEN = process.argv.includes('--auth-token')
   ? process.argv[process.argv.indexOf('--auth-token') + 1]
   : process.env.CORTEX_AUTH_TOKEN || '';
 
+function normalizeServerUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  if (trimmed.endsWith('/mcp/message')) return trimmed;
+  if (trimmed.endsWith('/mcp')) return trimmed;
+  return `${trimmed}/mcp`;
+}
+
+const CORTEX_MCP_URL = normalizeServerUrl(RAW_CORTEX_URL);
+
 async function forwardToServer(msg: any): Promise<any> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (CORTEX_AGENT_ID) headers['x-agent-id'] = CORTEX_AGENT_ID;
     if (CORTEX_AUTH_TOKEN) headers['Authorization'] = `Bearer ${CORTEX_AUTH_TOKEN}`;
 
-    const res = await fetch(`${CORTEX_URL}/mcp/message`, {
+    const res = await fetch(CORTEX_MCP_URL, {
       method: 'POST',
       headers,
       body: JSON.stringify(msg),
@@ -86,4 +95,4 @@ process.stdin.on('data', async (chunk: string) => {
   }
 });
 
-process.stderr.write(`Cortex MCP Client connected to ${CORTEX_URL}\n`);
+process.stderr.write(`Cortex MCP Client connected to ${CORTEX_MCP_URL}\n`);

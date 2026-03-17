@@ -11,6 +11,7 @@ describe('Security', () => {
       registerAuthMiddleware(app, { token: 'test-token-123' });
       app.get('/api/v1/health', async () => ({ status: 'ok' }));
       app.get('/api/v1/stats', async () => ({ count: 0 }));
+      app.post('/mcp', async () => ({ ok: true }));
       app.get('/dashboard', async () => 'html');
       await app.ready();
     });
@@ -43,6 +44,23 @@ describe('Security', () => {
         headers: { authorization: 'Bearer test-token-123' },
       });
       expect(res.statusCode).toBe(200);
+    });
+
+    it('should protect /mcp with the same bearer token middleware', async () => {
+      const unauthorized = await app.inject({
+        method: 'POST',
+        url: '/mcp',
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      });
+      expect(unauthorized.statusCode).toBe(401);
+
+      const authorized = await app.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: 'Bearer test-token-123', 'content-type': 'application/json' },
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      });
+      expect(authorized.statusCode).toBe(200);
     });
 
     it('should allow non-API routes without token', async () => {
@@ -140,6 +158,7 @@ describe('Security', () => {
       app = Fastify();
       registerRateLimiting(app, { windowMs: 60000, maxRequests: 3 });
       app.get('/api/v1/test', async () => ({ ok: true }));
+      app.post('/mcp', async () => ({ ok: true }));
       await app.ready();
     });
 
@@ -157,6 +176,20 @@ describe('Security', () => {
       await app.inject({ method: 'GET', url: '/api/v1/test' });
       const res = await app.inject({ method: 'GET', url: '/api/v1/test' });
       expect(res.statusCode).toBe(429);
+    });
+
+    it('should also rate-limit /mcp requests', async () => {
+      const scopedApp = Fastify();
+      registerRateLimiting(scopedApp, { windowMs: 60000, maxRequests: 2 });
+      scopedApp.post('/mcp', async () => ({ ok: true }));
+      await scopedApp.ready();
+
+      await scopedApp.inject({ method: 'POST', url: '/mcp', payload: { id: 1 } });
+      await scopedApp.inject({ method: 'POST', url: '/mcp', payload: { id: 2 } });
+      const blocked = await scopedApp.inject({ method: 'POST', url: '/mcp', payload: { id: 3 } });
+
+      expect(blocked.statusCode).toBe(429);
+      await scopedApp.close();
     });
   });
 });

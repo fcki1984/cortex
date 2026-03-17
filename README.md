@@ -404,7 +404,7 @@ Settings → Developer → Edit Config:
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100/mcp"],
       "env": {
         "CORTEX_AUTH_TOKEN": "your-token-here",
         "CORTEX_AGENT_ID": "my-agent"
@@ -415,6 +415,8 @@ Settings → Developer → Edit Config:
 ```
 
 > Without auth: remove the `CORTEX_AUTH_TOKEN` line from `env`.
+>
+> Primary MCP endpoint is `/mcp`. `/mcp/message` remains available as a compatibility path.
 
 ### Other MCP Clients
 
@@ -430,7 +432,7 @@ Settings → MCP → Add new global MCP server:
       "command": "npx",
       "args": ["@cortexmem/mcp"],
       "env": {
-        "CORTEX_URL": "http://localhost:21100",
+        "CORTEX_URL": "http://localhost:21100/mcp",
         "CORTEX_AUTH_TOKEN": "your-token-here",
         "CORTEX_AGENT_ID": "my-agent"
       }
@@ -445,11 +447,11 @@ Settings → MCP → Add new global MCP server:
 
 ```bash
 # Without auth
-claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
+claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100/mcp
 
 # With auth + agent ID
 CORTEX_AUTH_TOKEN=your-token-here CORTEX_AGENT_ID=my-agent \
-  claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
+  claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100/mcp
 ```
 </details>
 
@@ -461,7 +463,7 @@ CORTEX_AUTH_TOKEN=your-token-here CORTEX_AGENT_ID=my-agent \
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100/mcp"],
       "env": {
         "CORTEX_AGENT_ID": "my-agent",
         "CORTEX_AUTH_TOKEN": "your-token-here"
@@ -476,16 +478,42 @@ CORTEX_AUTH_TOKEN=your-token-here CORTEX_AGENT_ID=my-agent \
 
 ```bash
 # Without auth
-curl -X POST http://localhost:21100/api/v1/recall \
+curl -X POST http://localhost:21100/api/v2/recall \
   -H "Content-Type: application/json" \
   -d '{"query":"What food do I like?","agent_id":"default"}'
 
 # With auth
-curl -X POST http://localhost:21100/api/v1/ingest \
+curl -X POST http://localhost:21100/api/v2/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{"user_message":"I love sushi","assistant_message":"Noted!","agent_id":"default"}'
 ```
+
+### Deployment Smoke Test
+
+```bash
+CORTEX_BASE_URL=http://localhost:21100 \
+CORTEX_AUTH_TOKEN=your-token-here \
+pnpm smoke:v2
+```
+
+> The smoke script verifies V2-only runtime flags, disabled legacy routes, V2 REST endpoints, and both MCP JSON-RPC paths (`/mcp` and `/mcp/message`).
+
+### Dashboard Browser Validation on WSL
+
+If you are running Cortex inside WSL, prefer Windows Chrome for browser validation instead of looking for a Linux browser inside the distro:
+
+```bash
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="C:\\temp\\cortex-devtools"
+```
+
+Recommended checks:
+- Dashboard home does not show `Legacy compatibility ON`
+- `Relations` and `Lifecycle` are absent in V2-only mode
+- Settings shows the Runtime status card
+- Global Search and Memory Browser still work
 
 ---
 
@@ -545,21 +573,18 @@ curl -X POST http://localhost:21100/api/v1/ingest \
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/recall` | Search & inject memories |
-| `POST` | `/api/v1/ingest` | Ingest conversation |
-| `POST` | `/api/v1/flush` | Emergency flush |
-| `POST` | `/api/v1/search` | Hybrid search with debug |
-| `CRUD` | `/api/v1/memories` | Memory management |
-| `CRUD` | `/api/v1/relations` | Entity relations |
-| `GET` | `/api/v1/relations/traverse` | Multi-hop graph traversal |
-| `GET` | `/api/v1/relations/stats` | Graph statistics |
+| `POST` | `/api/v2/recall` | Structured recall blocks + packed context |
+| `POST` | `/api/v2/ingest` | Ingest conversation into V2 records |
+| `CRUD` | `/api/v2/records` | V2 record management |
+| `GET` | `/api/v2/stats` | V2 record and runtime statistics |
+| `POST` | `/mcp` | Primary MCP JSON-RPC endpoint |
+| `POST` | `/mcp/message` | MCP compatibility endpoint |
+| `GET` | `/mcp/tools` | MCP tools list |
+| `GET` | `/mcp/sse` | MCP SSE transport |
 | `CRUD` | `/api/v1/agents` | Agent management |
 | `GET` | `/api/v1/agents/:id/config` | Agent merged config |
 | `GET` | `/api/v1/extraction-logs` | Extraction audit logs |
-| `POST` | `/api/v1/lifecycle/run` | Trigger lifecycle |
-| `GET` | `/api/v1/lifecycle/preview` | Dry-run preview |
 | `GET` | `/api/v1/health` | Health check |
-| `GET` | `/api/v1/stats` | Statistics |
 | `GET/PATCH` | `/api/v1/config` | Global config |
 
 ## Cost

@@ -406,7 +406,7 @@ openclaw plugins install @cortexmem/openclaw
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100/mcp"],
       "env": {
         "CORTEX_AUTH_TOKEN": "你的令牌",
         "CORTEX_AGENT_ID": "my-agent"
@@ -417,6 +417,8 @@ openclaw plugins install @cortexmem/openclaw
 ```
 
 > 不用认证：删除 `env` 中的 `CORTEX_AUTH_TOKEN` 行。
+>
+> MCP 主入口是 `/mcp`，`/mcp/message` 继续保留为兼容入口。
 
 ### 其他 MCP 客户端
 
@@ -432,7 +434,7 @@ openclaw plugins install @cortexmem/openclaw
       "command": "npx",
       "args": ["@cortexmem/mcp"],
       "env": {
-        "CORTEX_URL": "http://localhost:21100",
+        "CORTEX_URL": "http://localhost:21100/mcp",
         "CORTEX_AUTH_TOKEN": "你的令牌",
         "CORTEX_AGENT_ID": "my-agent"
       }
@@ -447,11 +449,11 @@ openclaw plugins install @cortexmem/openclaw
 
 ```bash
 # 不用认证
-claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
+claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100/mcp
 
 # 带认证 + agent ID
 CORTEX_AUTH_TOKEN=你的令牌 CORTEX_AGENT_ID=my-agent \
-  claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100
+  claude mcp add cortex -- npx @cortexmem/mcp --server-url http://localhost:21100/mcp
 ```
 </details>
 
@@ -463,7 +465,7 @@ CORTEX_AUTH_TOKEN=你的令牌 CORTEX_AGENT_ID=my-agent \
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100"],
+      "args": ["@cortexmem/mcp", "--server-url", "http://localhost:21100/mcp"],
       "env": {
         "CORTEX_AGENT_ID": "my-agent",
         "CORTEX_AUTH_TOKEN": "你的令牌"
@@ -478,16 +480,42 @@ CORTEX_AUTH_TOKEN=你的令牌 CORTEX_AGENT_ID=my-agent \
 
 ```bash
 # 不用认证
-curl -X POST http://localhost:21100/api/v1/recall \
+curl -X POST http://localhost:21100/api/v2/recall \
   -H "Content-Type: application/json" \
   -d '{"query":"我喜欢什么食物？","agent_id":"default"}'
 
 # 带认证
-curl -X POST http://localhost:21100/api/v1/ingest \
+curl -X POST http://localhost:21100/api/v2/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 你的令牌" \
   -d '{"user_message":"我喜欢寿司","assistant_message":"记住了！","agent_id":"default"}'
 ```
+
+### 部署冒烟测试
+
+```bash
+CORTEX_BASE_URL=http://localhost:21100 \
+CORTEX_AUTH_TOKEN=你的令牌 \
+pnpm smoke:v2
+```
+
+> 这套脚本会检查 V2-only 运行标志、legacy 路由已关闭、V2 REST 正常，以及 `/mcp` 和 `/mcp/message` 两个 JSON-RPC 入口行为一致。
+
+### WSL 下的 Dashboard 浏览器验证
+
+如果 Cortex 跑在 WSL 里，默认用 Windows Chrome 做浏览器验证，不要再优先找发行版里的 Linux 浏览器：
+
+```bash
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="C:\\temp\\cortex-devtools"
+```
+
+建议验证这几项：
+- 首页不再显示 `Legacy compatibility ON`
+- V2-only 模式下导航里没有 `Relations` 和 `Lifecycle`
+- Settings 页面显示 Runtime 状态卡
+- 全局搜索和 Memory Browser 正常
 
 ---
 
@@ -546,21 +574,18 @@ curl -X POST http://localhost:21100/api/v1/ingest \
 
 | 方法 | 端点 | 说明 |
 |---|---|---|
-| `POST` | `/api/v1/recall` | 搜索并注入记忆 |
-| `POST` | `/api/v1/ingest` | 录入对话 |
-| `POST` | `/api/v1/flush` | 紧急刷盘 |
-| `POST` | `/api/v1/search` | 带调试信息的混合搜索 |
-| `CRUD` | `/api/v1/memories` | 记忆管理 |
-| `CRUD` | `/api/v1/relations` | 实体关系 |
-| `GET` | `/api/v1/relations/traverse` | 多跳图遍历 |
-| `GET` | `/api/v1/relations/stats` | 图统计 |
+| `POST` | `/api/v2/recall` | 结构化召回块 + 打包上下文 |
+| `POST` | `/api/v2/ingest` | 将对话写入 V2 records |
+| `CRUD` | `/api/v2/records` | V2 record 管理 |
+| `GET` | `/api/v2/stats` | V2 record 与运行态统计 |
+| `POST` | `/mcp` | MCP JSON-RPC 主入口 |
+| `POST` | `/mcp/message` | MCP 兼容入口 |
+| `GET` | `/mcp/tools` | MCP 工具列表 |
+| `GET` | `/mcp/sse` | MCP SSE 传输 |
 | `CRUD` | `/api/v1/agents` | Agent 管理 |
 | `GET` | `/api/v1/agents/:id/config` | Agent 合并配置 |
 | `GET` | `/api/v1/extraction-logs` | 提取审计日志 |
-| `POST` | `/api/v1/lifecycle/run` | 触发生命周期 |
-| `GET` | `/api/v1/lifecycle/preview` | 干跑预览 |
 | `GET` | `/api/v1/health` | 健康检查 |
-| `GET` | `/api/v1/stats` | 统计信息 |
 | `GET/PATCH` | `/api/v1/config` | 全局配置 |
 
 ## 成本

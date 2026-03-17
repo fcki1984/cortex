@@ -7,7 +7,8 @@
     "dev": "pnpm --filter @cortex/server dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "smoke:v2": "node scripts/smoke-v2.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

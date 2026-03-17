@@ -188,7 +188,7 @@ export function registerAuthMiddleware(app: FastifyInstance, authConfig: AuthCon
     if (req.url === '/api/v1/metrics') return;
     if (req.url.startsWith('/api/v1/auth/')) return;
     // Skip non-API routes (dashboard static files)
-    if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp/')) return;
+    if (!req.url.startsWith('/api/') && req.url !== '/mcp' && !req.url.startsWith('/mcp/')) return;
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -327,8 +327,8 @@ export function registerRateLimiting(
   if (cleanup.unref) cleanup.unref();
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
-    // Only rate-limit API routes
-    if (!req.url.startsWith('/api/')) return;
+    // Only rate-limit API and MCP routes
+    if (!req.url.startsWith('/api/') && req.url !== '/mcp' && !req.url.startsWith('/mcp/')) return;
 
     const key = req.ip;
     const now = Date.now();

@@ -86,7 +86,7 @@ async function main() {
     });
     // SPA fallback: serve index.html for non-API routes
     app.setNotFoundHandler(async (req, reply) => {
-      if (req.url.startsWith('/api/') || req.url.startsWith('/mcp/')) {
+      if (req.url.startsWith('/api/') || req.url === '/mcp' || req.url.startsWith('/mcp/')) {
         reply.code(404).send({ error: 'Not found' });
       } else {
         return reply.sendFile('index.html');
@@ -108,6 +108,9 @@ async function main() {
   try {
     await app.listen({ port: config.port, host: config.host });
     log.info({ port: config.port, host: config.host }, 'Cortex server is running');
+    log.info(`runtime mode: ${config.runtime.legacyMode ? 'legacy compatibility' : 'v2-only'}`);
+    log.info('mcp json-rpc endpoints: /mcp, /mcp/message');
+    log.info('mcp sse endpoint: /mcp/sse');
 
     // Start lifecycle scheduler
     startLifecycleScheduler(cortex);
