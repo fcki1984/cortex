@@ -13,6 +13,7 @@ export interface Agent {
 
 export interface AgentWithCount extends Agent {
   memory_count: number;
+  record_count: number;
 }
 
 // Agent ID validation: lowercase alphanumeric + hyphens/underscores, 2-64 chars
@@ -47,7 +48,10 @@ export function ensureAgent(agentId: string): void {
 export function listAgents(): AgentWithCount[] {
   const db = getDb();
   return db.prepare(`
-    SELECT a.*, (SELECT COUNT(*) FROM memories WHERE agent_id = a.id) as memory_count
+    SELECT
+      a.*,
+      (SELECT COUNT(*) FROM memories WHERE agent_id = a.id) as memory_count,
+      (SELECT COUNT(*) FROM record_registry WHERE agent_id = a.id AND is_active = 1) as record_count
     FROM agents a
     ORDER BY a.created_at
   `).all() as AgentWithCount[];
@@ -58,19 +62,31 @@ export function getAgentById(id: string): Agent | null {
   return db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as Agent | null;
 }
 
-export function getAgentStats(id: string): { layers: Record<string, number>; total: number } {
+export function getAgentStats(id: string): {
+  total: number;
+  active: number;
+  inactive: number;
+  kinds: Record<string, number>;
+  sources: Record<string, number>;
+} {
   const db = getDb();
-  const rows = db.prepare(
-    'SELECT layer, COUNT(*) as cnt FROM memories WHERE agent_id = ? GROUP BY layer'
-  ).all(id) as { layer: string; cnt: number }[];
-
-  const layers: Record<string, number> = {};
-  let total = 0;
-  for (const r of rows) {
-    layers[r.layer] = r.cnt;
-    total += r.cnt;
-  }
-  return { layers, total };
+  const total = (db.prepare('SELECT COUNT(*) as cnt FROM record_registry WHERE agent_id = ?').get(id) as { cnt: number }).cnt;
+  const active = (db.prepare('SELECT COUNT(*) as cnt FROM record_registry WHERE agent_id = ? AND is_active = 1').get(id) as { cnt: number }).cnt;
+  const kinds = Object.fromEntries(
+    (db.prepare('SELECT kind, COUNT(*) as cnt FROM record_registry WHERE agent_id = ? AND is_active = 1 GROUP BY kind').all(id) as { kind: string; cnt: number }[])
+      .map(row => [row.kind, row.cnt]),
+  );
+  const sources = Object.fromEntries(
+    (db.prepare('SELECT source_type, COUNT(*) as cnt FROM record_registry WHERE agent_id = ? AND is_active = 1 GROUP BY source_type').all(id) as { source_type: string; cnt: number }[])
+      .map(row => [row.source_type, row.cnt]),
+  );
+  return {
+    total: active,
+    active,
+    inactive: Math.max(0, total - active),
+    kinds,
+    sources,
+  };
 }
 
 export function insertAgent(data: { id: string; name: string; description?: string; config_override?: any }): Agent {

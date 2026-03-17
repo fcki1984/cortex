@@ -90,6 +90,8 @@ export const getComponentHealth = () => request('/health/components');
 // Stats
 export const getStats = (agentId?: string) =>
   request(`/stats${agentId ? `?agent_id=${agentId}` : ''}`);
+export const getStatsV2 = (agentId?: string) =>
+  requestV2(`/stats${agentId ? `?agent_id=${agentId}` : ''}`);
 
 // Memories
 export const listMemories = (params?: Record<string, string>) => {

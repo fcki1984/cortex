@@ -19,12 +19,12 @@ import { CortexRecordsV2 } from './v2/service.js';
 const log = createLogger('app');
 
 export class CortexApp {
-  gate: MemoryGate;
-  sieve: MemorySieve;
-  flush: MemoryFlush;
-  lifecycle: LifecycleEngine;
-  searchEngine: HybridSearchEngine;
-  exporter: MarkdownExporter;
+  gate: MemoryGate | null;
+  sieve: MemorySieve | null;
+  flush: MemoryFlush | null;
+  lifecycle: LifecycleEngine | null;
+  searchEngine: HybridSearchEngine | null;
+  exporter: MarkdownExporter | null;
   recordsV2: CortexRecordsV2;
   readonly vectorBackend: VectorBackend;
   llmExtraction: LLMProvider;
@@ -40,13 +40,13 @@ export class CortexApp {
     this.vectorBackend = createVectorBackend(config.vectorBackend as any);
 
     // Initialize engines
-    const reranker = createReranker(config.search.reranker, this.llmExtraction);
-    this.searchEngine = new HybridSearchEngine(this.vectorBackend, this.embeddingProvider, config.search);
-    this.gate = new MemoryGate(this.searchEngine, config.gate, this.llmExtraction, reranker, config.search.reranker?.weight);
-    this.sieve = new MemorySieve(this.llmExtraction, this.embeddingProvider, this.vectorBackend, config);
-    this.flush = new MemoryFlush(this.llmExtraction, this.embeddingProvider, this.vectorBackend, config);
-    this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, config);
-    this.exporter = new MarkdownExporter(config);
+    this.searchEngine = null;
+    this.gate = null;
+    this.sieve = null;
+    this.flush = null;
+    this.lifecycle = null;
+    this.exporter = null;
+    this.rebuildLegacyEngines(config);
     this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
 
     log.info('CortexApp initialized');
@@ -85,17 +85,14 @@ export class CortexApp {
     // Check if search/gate config changed (reranker, query expansion, etc.)
     const searchConfigChanged = JSON.stringify(this.config.search) !== JSON.stringify(newConfig.search);
     const gateConfigChanged = JSON.stringify(this.config.gate) !== JSON.stringify(newConfig.gate);
+    const runtimeChanged = JSON.stringify(this.config.runtime) !== JSON.stringify(newConfig.runtime);
     if (searchConfigChanged) reloaded.push('search');
     if (gateConfigChanged) reloaded.push('gate');
+    if (runtimeChanged) reloaded.push('runtime');
 
     // Rebuild dependent engines if any provider or config changed
     if (reloaded.length > 0) {
-      const reranker = createReranker(newConfig.search.reranker, this.llmExtraction);
-      this.searchEngine = new HybridSearchEngine(this.vectorBackend, this.embeddingProvider, newConfig.search);
-      this.gate = new MemoryGate(this.searchEngine, newConfig.gate, this.llmExtraction, reranker, newConfig.search.reranker?.weight);
-      this.sieve = new MemorySieve(this.llmExtraction, this.embeddingProvider, this.vectorBackend, newConfig);
-      this.flush = new MemoryFlush(this.llmExtraction, this.embeddingProvider, this.vectorBackend, newConfig);
-      this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, newConfig);
+      this.rebuildLegacyEngines(newConfig);
       this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
       log.info({ reloaded }, 'Rebuilt dependent engines');
     }
@@ -115,6 +112,27 @@ export class CortexApp {
   async shutdown(): Promise<void> {
     await this.vectorBackend.close();
     log.info('CortexApp shut down');
+  }
+
+  private rebuildLegacyEngines(config: CortexConfig): void {
+    if (!config.runtime.legacyMode) {
+      this.searchEngine = null;
+      this.gate = null;
+      this.sieve = null;
+      this.flush = null;
+      this.lifecycle = null;
+      this.exporter = null;
+      log.info('Legacy engines disabled');
+      return;
+    }
+
+    const reranker = createReranker(config.search.reranker, this.llmExtraction);
+    this.searchEngine = new HybridSearchEngine(this.vectorBackend, this.embeddingProvider, config.search);
+    this.gate = new MemoryGate(this.searchEngine, config.gate, this.llmExtraction, reranker, config.search.reranker?.weight);
+    this.sieve = new MemorySieve(this.llmExtraction, this.embeddingProvider, this.vectorBackend, config);
+    this.flush = new MemoryFlush(this.llmExtraction, this.embeddingProvider, this.vectorBackend, config);
+    this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, config);
+    this.exporter = new MarkdownExporter(config);
   }
 }
 

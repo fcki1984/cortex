@@ -19,7 +19,7 @@ export function registerSearchRoutes(app: FastifyInstance, cortex: CortexApp): v
     },
   }, async (req) => {
     const body = req.body as any;
-    return cortex.searchEngine.search({
+    return cortex.searchEngine!.search({
       query: body.query,
       layers: body.layers,
       categories: body.categories,

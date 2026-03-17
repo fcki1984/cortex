@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import Stats from './pages/Stats.js';
 import MemoryBrowser from './pages/MemoryBrowser.js';
-import SearchDebug from './pages/SearchDebug.js';
 import RelationGraph from './pages/RelationGraph.js';
 import LifecycleMonitor from './pages/LifecycleMonitor.js';
 import Settings from './pages/Settings/index.js';
@@ -10,7 +9,7 @@ import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
 import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
-import { listRecordsV2, checkAuth, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, triggerUpdate } from './api/client.js';
+import { listRecordsV2, checkAuth, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getConfig, triggerUpdate } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
 
@@ -337,6 +336,19 @@ function GlobalSearch() {
   );
 }
 
+function LegacyOnlyPage() {
+  const { t } = useI18n();
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0, marginBottom: 8 }}>{t('common.unavailable')}</h2>
+      <div style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        {t('common.legacyOnly')}
+      </div>
+    </div>
+  );
+}
+
 // ============ Main App Content ============
 
 function AppContent() {
@@ -352,6 +364,7 @@ function AppContent() {
   const [updateResult, setUpdateResult] = useState<'success'|'stale'|'down'|null>(null);
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string|null>(null);
+  const [legacyMode, setLegacyMode] = useState(true);
 
   useEffect(() => {
     // Check auth status (new endpoint with setup detection)
@@ -391,6 +404,9 @@ function AppContent() {
     if (authState !== 'authenticated') return;
     getHealth().then((data: any) => {
       setVersionInfo({ version: data.version, github: data.github, latestRelease: data.latestRelease });
+    }).catch(() => {});
+    getConfig().then((cfg: any) => {
+      setLegacyMode(cfg.runtime?.legacyMode !== false);
     }).catch(() => {});
     // Re-check every 30 min
     const iv = setInterval(() => {
@@ -634,15 +650,14 @@ function AppContent() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>📊 {t('nav.dashboard')}</NavLink>
           <NavLink to="/memories" className={({ isActive }) => isActive ? 'active' : ''}>🗂️ {t('nav.memories')}</NavLink>
           <NavLink to="/agents" className={({ isActive }) => isActive ? 'active' : ''}>🤖 {t('nav.agents')}</NavLink>
-
-          <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>
+          {legacyMode && <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>}
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '日志' : 'Logs'}</div>
           <NavLink to="/extraction-logs" className={({ isActive }) => isActive ? 'active' : ''}>📋 {t('nav.extractionLogs')}</NavLink>
           <NavLink to="/system-logs" className={({ isActive }) => isActive ? 'active' : ''}>🖥️ {t('nav.systemLogs')}</NavLink>
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '系统' : 'System'}</div>
-          <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>
+          {legacyMode && <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>}
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''}>⚙️ {t('nav.settings')}</NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -671,11 +686,10 @@ function AppContent() {
           <Route path="/memories" element={<MemoryBrowser />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetail />} />
-          {/* SearchDebug removed — use MemoryBrowser search or Stats recall test */}
-          <Route path="/relations" element={<RelationGraph />} />
+          <Route path="/relations" element={legacyMode ? <RelationGraph /> : <LegacyOnlyPage />} />
           <Route path="/extraction-logs" element={<ExtractionLogs />} />
           <Route path="/system-logs" element={<SystemLogs />} />
-          <Route path="/lifecycle" element={<LifecycleMonitor />} />
+          <Route path="/lifecycle" element={legacyMode ? <LifecycleMonitor /> : <LegacyOnlyPage />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

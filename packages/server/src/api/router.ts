@@ -16,22 +16,27 @@ import { registerFeedbackRoutes } from './feedback.js';
 import { registerV2RecordRoutes } from './records-v2.js';
 import { registerV2IngestRoutes } from './ingest-v2.js';
 import { registerV2RecallRoutes } from './recall-v2.js';
+import { registerV2StatsRoutes } from './stats-v2.js';
 
 export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void {
-  registerRecallRoutes(app, cortex);
-  registerIngestRoutes(app, cortex);
-  registerFlushRoutes(app, cortex);
-  registerSearchRoutes(app, cortex);
-  registerMemoriesRoutes(app, cortex);
-  registerRelationsRoutes(app);
-  registerLifecycleRoutes(app, cortex);
   registerSystemRoutes(app, cortex);
   registerMCPRoutes(app, cortex);
   registerImportExportRoutes(app, cortex);
   registerAgentRoutes(app);
   registerExtractionLogRoutes(app);
-  registerFeedbackRoutes(app, cortex);
   registerV2RecordRoutes(app, cortex);
   registerV2IngestRoutes(app, cortex);
   registerV2RecallRoutes(app, cortex);
+  registerV2StatsRoutes(app, cortex);
+
+  if (cortex.config.runtime.legacyMode) {
+    registerRecallRoutes(app, cortex);
+    registerIngestRoutes(app, cortex);
+    registerFlushRoutes(app, cortex);
+    registerSearchRoutes(app, cortex);
+    registerMemoriesRoutes(app, cortex);
+    registerRelationsRoutes(app);
+    registerLifecycleRoutes(app, cortex);
+    registerFeedbackRoutes(app, cortex);
+  }
 }

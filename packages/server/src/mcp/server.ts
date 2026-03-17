@@ -103,7 +103,7 @@ const TOOLS: MCPTool[] = [
   },
   {
     name: 'cortex_stats',
-    description: 'Get memory statistics (total count, layer distribution, etc)',
+    description: 'Get Cortex V2 record statistics (active count, kinds, sources, and agent distribution)',
     inputSchema: {
       type: 'object',
       properties: {},

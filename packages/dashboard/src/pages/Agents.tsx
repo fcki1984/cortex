@@ -95,7 +95,7 @@ export default function Agents() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: 11 }}>
-                  {t('agents.memoriesCount', { count: a.memory_count })}
+                  {t('agents.recordsCount', { count: a.record_count ?? a.memory_count ?? 0 })}
                 </span>
               </div>
             </div>

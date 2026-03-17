@@ -882,3 +882,57 @@ export function getRecordsCount(agentId?: string): number {
   }
   return (db.prepare('SELECT COUNT(*) as cnt FROM record_registry WHERE is_active = 1').get() as { cnt: number }).cnt;
 }
+
+export function getV2Stats(agentId?: string): {
+  totals: {
+    total_records: number;
+    active_records: number;
+    inactive_records: number;
+    total_agents: number;
+  };
+  distributions: {
+    kinds: Record<string, number>;
+    sources: Record<string, number>;
+  };
+  agents: Array<{ agent_id: string; active_records: number }>;
+} {
+  const db = getDb();
+  const filter = agentId ? ' WHERE agent_id = ?' : '';
+  const activeFilter = agentId ? ' WHERE agent_id = ? AND is_active = 1' : ' WHERE is_active = 1';
+  const params = agentId ? [agentId] : [];
+
+  const totalRecords = (db.prepare(`SELECT COUNT(*) as cnt FROM record_registry${filter}`).get(...params) as { cnt: number }).cnt;
+  const activeRecords = (db.prepare(`SELECT COUNT(*) as cnt FROM record_registry${activeFilter}`).get(...params) as { cnt: number }).cnt;
+  const totalAgents = (db.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number }).cnt;
+  const kinds = Object.fromEntries(
+    (db.prepare(`SELECT kind, COUNT(*) as cnt FROM record_registry${activeFilter} GROUP BY kind`).all(...params) as { kind: string; cnt: number }[])
+      .map(row => [row.kind, row.cnt]),
+  );
+  const sources = Object.fromEntries(
+    (db.prepare(`SELECT source_type, COUNT(*) as cnt FROM record_registry${activeFilter} GROUP BY source_type`).all(...params) as { source_type: string; cnt: number }[])
+      .map(row => [row.source_type, row.cnt]),
+  );
+  const agents = (db.prepare(`
+    SELECT COALESCE(NULLIF(agent_id, ''), 'default') as agent_id, COUNT(*) as active_records
+    FROM record_registry
+    WHERE is_active = 1
+    ${agentId ? 'AND agent_id = ?' : ''}
+    GROUP BY COALESCE(NULLIF(agent_id, ''), 'default')
+    ORDER BY active_records DESC, agent_id ASC
+    LIMIT 12
+  `).all(...params) as { agent_id: string; active_records: number }[]);
+
+  return {
+    totals: {
+      total_records: totalRecords,
+      active_records: activeRecords,
+      inactive_records: Math.max(0, totalRecords - activeRecords),
+      total_agents: totalAgents,
+    },
+    distributions: {
+      kinds,
+      sources,
+    },
+    agents,
+  };
+}

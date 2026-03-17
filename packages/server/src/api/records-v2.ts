@@ -1,9 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { ensureAgent } from '../db/index.js';
+import { observedRoute } from './observability.js';
 
 export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp): void {
-  app.get('/api/v2/records', async (req) => {
+  app.get('/api/v2/records', observedRoute({
+    route: '/api/v2/records',
+    method: 'GET',
+    timeoutMs: 5000,
+    metricPrefix: 'v2_route',
+  }, async (req) => {
     const query = req.query as Record<string, string | undefined>;
     return cortex.recordsV2.listRecords({
       agent_id: query.agent_id,
@@ -16,9 +22,14 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       order_dir: query.order_dir as any,
       query: query.query,
     });
-  });
+  }));
 
-  app.get('/api/v2/records/:id', async (req, reply) => {
+  app.get('/api/v2/records/:id', observedRoute({
+    route: '/api/v2/records/:id',
+    method: 'GET',
+    timeoutMs: 5000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const record = cortex.recordsV2.getRecord(id);
     if (!record) {
@@ -29,9 +40,14 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       ...record,
       evidence: cortex.recordsV2.getEvidence(id),
     };
-  });
+  }));
 
-  app.post('/api/v2/records', async (req, reply) => {
+  app.post('/api/v2/records', observedRoute({
+    route: '/api/v2/records',
+    method: 'POST',
+    timeoutMs: cortex.config.embedding.timeoutMs || 5000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const body = req.body as any;
     if (body.agent_id) ensureAgent(body.agent_id);
     const result = await cortex.recordsV2.remember({
@@ -55,9 +71,14 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       decision: result.decision,
       previous_record_id: result.previous_record_id,
     };
-  });
+  }));
 
-  app.patch('/api/v2/records/:id', async (req, reply) => {
+  app.patch('/api/v2/records/:id', observedRoute({
+    route: '/api/v2/records/:id',
+    method: 'PATCH',
+    timeoutMs: cortex.config.embedding.timeoutMs || 5000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as any;
     const record = await cortex.recordsV2.updateRecord(id, {
@@ -72,9 +93,14 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       return { error: 'Record not found' };
     }
     return record;
-  });
+  }));
 
-  app.delete('/api/v2/records/:id', async (req, reply) => {
+  app.delete('/api/v2/records/:id', observedRoute({
+    route: '/api/v2/records/:id',
+    method: 'DELETE',
+    timeoutMs: 5000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const ok = await cortex.recordsV2.deleteRecord(id);
     if (!ok) {
@@ -82,5 +108,5 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       return { error: 'Record not found' };
     }
     return { ok: true, id };
-  });
+  }));
 }

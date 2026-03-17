@@ -90,7 +90,7 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
         }
 
         // Also trigger disk export if enabled
-        cortex.exporter.exportAll().catch(() => {});
+        cortex.exporter?.exportAll().catch(() => {});
 
         return { content: lines.join('\n'), format: 'markdown', total: memories.length };
       }

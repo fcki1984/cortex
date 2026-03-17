@@ -33,6 +33,11 @@ export function getSchedulerStatus(): { running: boolean; schedule: string | nul
 export function startLifecycleScheduler(cortex: CortexApp): void {
   stopLifecycleScheduler();
 
+  if (!cortex.lifecycle) {
+    log.info('Legacy lifecycle disabled, skipping scheduler start');
+    return;
+  }
+
   const schedule = cortex.config.lifecycle?.schedule;
   if (!schedule) {
     log.info('Lifecycle schedule not configured, skipping');
@@ -45,7 +50,7 @@ export function startLifecycleScheduler(cortex: CortexApp): void {
       log.info({ schedule }, 'Lifecycle cron triggered');
       try { backupDb(); } catch (e: any) { log.warn({ error: e.message }, 'Pre-lifecycle backup failed'); }
       try {
-        const report = await cortex.lifecycle.run(false, 'scheduled');
+        const report = await cortex.lifecycle!.run(false, 'scheduled');
         log.info(
           {
             promoted: report.promoted,
@@ -90,7 +95,7 @@ export function restartLifecycleScheduler(cortex: CortexApp): void {
  * Trigger markdown export after a successful ingest (debounced inside exporter).
  */
 export function triggerMarkdownExport(cortex: CortexApp): void {
-  if (cortex.config.markdownExport?.enabled) {
+  if (cortex.config.markdownExport?.enabled && cortex.exporter) {
     cortex.exporter.scheduleExport();
   }
 }

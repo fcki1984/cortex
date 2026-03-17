@@ -36,6 +36,9 @@ const CortexConfigSchema = z.object({
   enabled: z.boolean().default(true),
   port: z.number().default(21100),
   host: z.string().default('127.0.0.1'),
+  runtime: z.object({
+    legacyMode: z.boolean().default(true),
+  }).default({}),
   auth: z.object({
     token: z.string().optional(),
     agents: z.array(z.object({
@@ -258,6 +261,7 @@ export function loadConfig(overrides?: Partial<CortexConfig>): CortexConfig {
   const host = getStringEnv('CORTEX_HOST');
   const dbPath = getStringEnv('CORTEX_DB_PATH');
   const authToken = getStringEnv('CORTEX_AUTH_TOKEN');
+  const legacyMode = getStringEnv('CORTEX_LEGACY_MODE');
   const fileConfigTyped = fileConfig as Partial<CortexConfig>;
   const extractionProvider = getStringEnv('CORTEX_LLM_EXTRACTION_PROVIDER') || fileConfigTyped.llm?.extraction?.provider || 'openai';
   const lifecycleProvider = getStringEnv('CORTEX_LLM_LIFECYCLE_PROVIDER') || fileConfigTyped.llm?.lifecycle?.provider || 'openai';
@@ -270,6 +274,7 @@ export function loadConfig(overrides?: Partial<CortexConfig>): CortexConfig {
   if (host) envOverrides.host = host;
   if (dbPath) envOverrides.storage = { dbPath };
   if (authToken) envOverrides.auth = { token: authToken };
+  if (legacyMode !== undefined) envOverrides.runtime = { legacyMode: ['1', 'true', 'yes', 'on'].includes(legacyMode.toLowerCase()) };
   if (extractionOverride || lifecycleOverride) {
     envOverrides.llm = {
       ...(extractionOverride ? { extraction: extractionOverride } : {}),

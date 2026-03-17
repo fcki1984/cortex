@@ -836,7 +836,7 @@ def ingest(user_msg: str, assistant_msg: str):
   if (!agent) return <div className="card" style={{ color: 'var(--danger)' }}>{t('agentDetail.notFound')}</div>;
 
   const isBuiltIn = agent.id === 'default' || agent.id === 'mcp';
-  const stats = agent.stats || { layers: {}, total: 0 };
+  const stats = agent.stats || { kinds: {}, sources: {}, total: 0, active: 0, inactive: 0 };
   const mc = mergedConfig?.config;
 
   return (
@@ -926,39 +926,60 @@ def ingest(user_msg: str, assistant_msg: str):
             )}
           </div>
 
-          {/* Memory Stats */}
+          {/* Record Stats */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.memoryStats')}</h3>
+            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.recordStats')}</h3>
             <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>
-              {stats.total} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>{t('agentDetail.totalMemories')}</span>
+              {stats.active ?? stats.total} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>{t('agentDetail.activeRecords')}</span>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              {t('agentDetail.inactiveRecords')}: {stats.inactive ?? 0}
             </div>
 
-            {stats.total > 0 && (
+            {(stats.active ?? stats.total) > 0 && (
               <>
-                {/* Layer bar */}
                 <div style={{ display: 'flex', height: 24, borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 12 }}>
-                  {(['working', 'core', 'archive'] as const).map(layer => {
-                    const count = stats.layers[layer] || 0;
-                    const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
+                  {(['profile_rule', 'fact_slot', 'task_state', 'session_note'] as const).map(kind => {
+                    const count = stats.kinds[kind] || 0;
+                    const pct = (stats.active ?? stats.total) > 0 ? (count / (stats.active ?? stats.total)) * 100 : 0;
                     if (pct === 0) return null;
-                    const colors: Record<string, string> = { working: '#f59e0b', core: '#3b82f6', archive: '#6b7280' };
+                    const colors: Record<string, string> = {
+                      profile_rule: '#3b82f6',
+                      fact_slot: '#22c55e',
+                      task_state: '#f59e0b',
+                      session_note: '#a855f7',
+                    };
                     return (
                       <div
-                        key={layer}
-                        title={`${layer}: ${count}`}
-                        style={{ width: `${pct}%`, background: colors[layer], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 500 }}
+                        key={kind}
+                        title={`${kind}: ${count}`}
+                        style={{ width: `${pct}%`, background: colors[kind], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 500 }}
                       >
-                        {pct > 10 ? `${layer} (${count})` : ''}
+                        {pct > 10 ? `${kind} (${count})` : ''}
                       </div>
                     );
                   })}
                 </div>
 
-                <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-                  {(['working', 'core', 'archive'] as const).map(layer => (
-                    <div key={layer} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 2, background: layer === 'working' ? '#f59e0b' : layer === 'core' ? '#3b82f6' : '#6b7280' }} />
-                      <span>{layer}: {stats.layers[layer] || 0}</span>
+                <div style={{ display: 'flex', gap: 16, fontSize: 13, flexWrap: 'wrap' }}>
+                  {(['profile_rule', 'fact_slot', 'task_state', 'session_note'] as const).map(kind => (
+                    <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: 2,
+                          background: kind === 'profile_rule' ? '#3b82f6' : kind === 'fact_slot' ? '#22c55e' : kind === 'task_state' ? '#f59e0b' : '#a855f7',
+                        }}
+                      />
+                      <span>{kind}: {stats.kinds[kind] || 0}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 16, fontSize: 13, marginTop: 12, flexWrap: 'wrap' }}>
+                  {Object.entries(stats.sources || {}).map(([source, count]) => (
+                    <div key={source} className="badge" style={{ background: 'rgba(59,130,246,0.12)', color: 'var(--text)' }}>
+                      {source}: {count as number}
                     </div>
                   ))}
                 </div>

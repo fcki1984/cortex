@@ -18,7 +18,7 @@ export function registerRecallRoutes(app: FastifyInstance, cortex: CortexApp): v
     },
   }, async (req, reply) => {
     const body = req.body as any;
-    const result = await cortex.gate.recall({
+    const result = await cortex.gate!.recall({
       query: body.query,
       agent_id: body.agent_id,
       max_tokens: body.max_tokens,

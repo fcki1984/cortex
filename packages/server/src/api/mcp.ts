@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { MCPServer, type MCPServerDeps } from '../mcp/server.js';
-import { getStats, ensureAgent, listRelations } from '../db/index.js';
+import { ensureAgent, listRelations } from '../db/index.js';
+import { getV2Stats } from '../v2/store.js';
+import { observedRoute } from './observability.js';
 
 export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void {
   const deps: MCPServerDeps = {
@@ -50,7 +52,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
     },
 
     stats: async () => {
-      return getStats();
+      return getV2Stats();
     },
 
     listRelations: async (subject, object, limit, agentId) => {
@@ -83,7 +85,12 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
   });
 
   // JSON-RPC endpoint for MCP tool calls
-  app.post('/mcp/message', async (req) => {
+  app.post('/mcp/message', observedRoute({
+    route: '/mcp/message',
+    method: 'POST',
+    timeoutMs: cortex.config.llm.extraction.timeoutMs || 15000,
+    metricPrefix: 'mcp_route',
+  }, async (req) => {
     const msg = req.body as any;
     // Inject x-agent-id header into tool call arguments if not already set
     const agentIdFromHeader = (req.headers as any)['x-agent-id'] as string | undefined;
@@ -93,7 +100,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
       }
     }
     return mcpServer.handleMessage(msg);
-  });
+  }));
 
   // MCP tools list
   app.get('/mcp/tools', async () => {

@@ -1,9 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { ensureAgent } from '../db/index.js';
+import { observedRoute } from './observability.js';
 
 export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp): void {
-  app.post('/api/v2/ingest', async (req, reply) => {
+  app.post('/api/v2/ingest', observedRoute({
+    route: '/api/v2/ingest',
+    method: 'POST',
+    timeoutMs: cortex.config.llm.extraction.timeoutMs || 15000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const body = req.body as any;
     if (body.agent_id) ensureAgent(body.agent_id);
 
@@ -17,5 +23,5 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
 
     reply.code(201);
     return result;
-  });
+  }));
 }

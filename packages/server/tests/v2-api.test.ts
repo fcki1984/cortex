@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { loadConfig } from '../src/utils/config.js';
@@ -13,8 +13,11 @@ describe('API V2 Integration', () => {
   beforeAll(async () => {
     const config = loadConfig({
       storage: { dbPath: ':memory:', walMode: false },
-      llm: { extraction: { provider: 'none' }, lifecycle: { provider: 'none' } },
-      embedding: { provider: 'none', dimensions: 4 },
+      llm: {
+        extraction: { provider: 'none', timeoutMs: 100 },
+        lifecycle: { provider: 'none' },
+      },
+      embedding: { provider: 'none', dimensions: 4, timeoutMs: 100 },
       vectorBackend: { provider: 'sqlite-vec' },
       markdownExport: { enabled: false, exportMemoryMd: false, debounceMs: 999999 },
     });
@@ -56,6 +59,19 @@ describe('API V2 Integration', () => {
     expect(listed.statusCode).toBe(200);
     const body = JSON.parse(listed.payload);
     expect(body.items.some((item: any) => item.content.includes('东京'))).toBe(true);
+  });
+
+  it('returns v2 stats for dashboard and MCP consumers', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/stats',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.payload);
+    expect(payload.totals).toBeDefined();
+    expect(payload.distributions).toBeDefined();
+    expect(typeof payload.runtime?.legacy_mode).toBe('boolean');
   });
 
   it('recalls grouped v2 records', async () => {
@@ -150,5 +166,85 @@ describe('API V2 Integration', () => {
     const text = payload.result.content[0].text;
     const parsed = JSON.parse(text);
     expect(parsed.results.some((item: any) => item.content.includes('Scoped MCP debug record'))).toBe(true);
+  });
+
+  it('classifies database busy errors on v2 recall', async () => {
+    const originalRecall = cortex.recordsV2.recall.bind(cortex.recordsV2);
+    cortex.recordsV2.recall = vi.fn(async () => {
+      throw new Error('database is locked');
+    }) as any;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'busy', agent_id: 'api-v2' },
+    });
+
+    cortex.recordsV2.recall = originalRecall as any;
+
+    expect(response.statusCode).toBe(503);
+    const payload = JSON.parse(response.payload);
+    expect(payload.category).toBe('db_busy');
+    expect(payload.error).toContain('Database is busy');
+  });
+
+  it('times out slow v2 ingest handlers with classified errors', async () => {
+    const originalIngest = cortex.recordsV2.ingest.bind(cortex.recordsV2);
+    cortex.recordsV2.ingest = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      return { records: [], skipped: false };
+    }) as any;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'slow request',
+        assistant_message: 'still slow',
+        agent_id: 'api-v2',
+      },
+    });
+
+    cortex.recordsV2.ingest = originalIngest as any;
+
+    expect(response.statusCode).toBe(504);
+    const payload = JSON.parse(response.payload);
+    expect(payload.category).toBe('upstream_timeout');
+  });
+
+  it('freezes legacy write/search routes when legacy mode is disabled', async () => {
+    const disabledConfig = JSON.parse(JSON.stringify(cortex.config));
+    disabledConfig.runtime = { legacyMode: false };
+
+    const legacyOff = new CortexApp(disabledConfig);
+    await legacyOff.initialize();
+
+    const offApp = Fastify();
+    await offApp.register(cors, { origin: true });
+    registerAllRoutes(offApp, legacyOff);
+    await offApp.ready();
+
+    const legacyRecall = await offApp.inject({
+      method: 'POST',
+      url: '/api/v1/recall',
+      payload: { query: 'test' },
+    });
+    const legacySearch = await offApp.inject({
+      method: 'POST',
+      url: '/api/v1/search',
+      payload: { query: 'test' },
+    });
+    const v2Recall = await offApp.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'test', agent_id: 'api-v2' },
+    });
+
+    await offApp.close();
+    await legacyOff.shutdown();
+
+    expect(legacyRecall.statusCode).toBe(404);
+    expect(legacySearch.statusCode).toBe(404);
+    expect(v2Recall.statusCode).toBe(200);
   });
 });
