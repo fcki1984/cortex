@@ -37,6 +37,62 @@ function tokensToKey(text: string, fallback: string): string {
   return tokens.join('_');
 }
 
+function canonicalizeUserNarration(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+
+  const replacements: Array<[RegExp, string]> = [
+    [/^我的名字是/u, '用户的名字是'],
+    [/^我的名字叫/u, '用户的名字叫'],
+    [/^我叫/u, '用户叫'],
+    [/^我住在/u, '用户住在'],
+    [/^我在(.+?)(工作|上班)/u, '用户在$1$2'],
+    [/^我喜欢/u, '用户喜欢'],
+    [/^我偏好/u, '用户偏好'],
+    [/^我讨厌/u, '用户讨厌'],
+    [/^我不想/u, '用户不想'],
+    [/^我不要/u, '用户不要'],
+    [/^我希望/u, '用户希望'],
+    [/^我需要/u, '用户需要'],
+    [/^我是/u, '用户是'],
+    [/^I am\b/i, 'User is'],
+    [/^I'm\b/i, 'User is'],
+    [/^My name is\b/i, 'User name is'],
+    [/^Call me\b/i, 'User is called'],
+    [/^I live in\b/i, 'User lives in'],
+    [/^I work (?:at|in)\b/i, 'User works at'],
+    [/^I prefer\b/i, 'User prefers'],
+    [/^I like\b/i, 'User likes'],
+    [/^I love\b/i, 'User likes'],
+    [/^I hate\b/i, 'User dislikes'],
+    [/^I do not want\b/i, 'User does not want'],
+    [/^I don't want\b/i, 'User does not want'],
+    [/^I need\b/i, 'User needs'],
+    [/^I want\b/i, 'User wants'],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    if (pattern.test(trimmed)) return trimmed.replace(pattern, replacement);
+  }
+
+  return trimmed;
+}
+
+function profileAttributeFromContent(category: MemoryCategory | null, content: string): string | null {
+  if (/我叫|我的名字|my name|call me|name is/i.test(content)) return 'display_name';
+  if (/住在|live in|lives in|位于|location|在.+工作|work at|work in/i.test(content)) return 'location';
+  if (/喜欢|偏好|prefer|like|讨厌|hate|不想|不要|风格|tone|格式|style/i.test(content)) {
+    return `preference_${tokensToKey(content, 'rule')}`;
+  }
+  if (/禁止|必须|always|never|不要|别|constraint|rule|必须先/i.test(content)) {
+    return `constraint_${tokensToKey(content, 'rule')}`;
+  }
+  if (/policy|策略|流程|优先|default/i.test(content)) return `policy_${tokensToKey(content, 'rule')}`;
+  if (category === 'agent_persona') return `persona_${tokensToKey(content, 'persona')}`;
+  if (category === 'identity') return `identity_${tokensToKey(content, 'identity')}`;
+  return null;
+}
+
 function buildSessionNote(
   agentId: string,
   summary: string,
@@ -63,16 +119,8 @@ function profileRuleFromCategory(
   sourceType: SourceType,
 ): ProfileRuleCandidate | null {
   const owner_scope = category === 'agent_persona' ? 'agent' : 'user';
-
-  let attribute = '';
-  if (/我叫|我的名字|my name|call me|name is/i.test(content)) attribute = 'display_name';
-  else if (/住在|live in|lives in|位于|location|在.+工作|work at|work in/i.test(content)) attribute = 'location';
-  else if (/喜欢|偏好|prefer|like|讨厌|hate|不想|不要|风格|tone|格式|style/i.test(content)) attribute = `preference_${tokensToKey(content, 'rule')}`;
-  else if (/禁止|必须|always|never|不要|别|constraint|rule|必须先/i.test(content)) attribute = `constraint_${tokensToKey(content, 'rule')}`;
-  else if (/policy|策略|流程|优先|default/i.test(content)) attribute = `policy_${tokensToKey(content, 'rule')}`;
-  else if (category === 'agent_persona') attribute = `persona_${tokensToKey(content, 'persona')}`;
-  else if (category === 'identity') attribute = `identity_${tokensToKey(content, 'identity')}`;
-
+  const normalizedContent = owner_scope === 'user' ? canonicalizeUserNarration(content) : content.trim();
+  const attribute = profileAttributeFromContent(category, normalizedContent);
   if (!attribute) return null;
 
   return {
@@ -81,7 +129,7 @@ function profileRuleFromCategory(
     owner_scope,
     subject_key: owner_scope === 'agent' ? 'agent' : 'user',
     attribute_key: normalizeKey(attribute, `${category}_rule`),
-    value_text: content,
+    value_text: normalizedContent,
     source_type: sourceType,
     priority,
     confidence: Math.max(0.5, Math.min(priority, 0.98)),
@@ -233,8 +281,14 @@ export function extractedRecordToCandidate(
   if (kind === 'profile_rule') {
     const owner_scope = raw.owner_scope === 'agent' ? 'agent' : 'user';
     const subject_key = typeof raw.subject_key === 'string' ? normalizeKey(raw.subject_key, owner_scope) : owner_scope;
-    const attribute_key = typeof raw.attribute_key === 'string' ? normalizeKey(raw.attribute_key) : '';
-    const value_text = typeof raw.value_text === 'string' ? raw.value_text.trim() : '';
+    const value_text = typeof raw.value_text === 'string'
+      ? (owner_scope === 'user' ? canonicalizeUserNarration(raw.value_text) : raw.value_text.trim())
+      : '';
+    const inferredAttribute = owner_scope === 'user' ? profileAttributeFromContent(null, value_text) : null;
+    const attribute_key = normalizeKey(
+      inferredAttribute || (typeof raw.attribute_key === 'string' ? raw.attribute_key : ''),
+      owner_scope === 'agent' ? 'persona_rule' : 'user_rule',
+    );
     if (!attribute_key || !value_text) return null;
     return {
       kind,
@@ -329,44 +383,54 @@ export function normalizeManualInput(
   const tags = input.tags || [];
 
   switch (input.kind) {
-    case 'profile_rule':
+    case 'profile_rule': {
+      const ownerScope = input.owner_scope || 'user';
+      const normalizedContent = ownerScope === 'user' ? canonicalizeUserNarration(content) : content;
+      const inferredAttribute = ownerScope === 'user' ? profileAttributeFromContent(null, normalizedContent) : null;
       return {
         kind: 'profile_rule',
         agent_id: agentId,
-        owner_scope: input.owner_scope || 'user',
-        subject_key: normalizeKey(input.subject_key || (input.owner_scope === 'agent' ? 'agent' : 'user'), 'user'),
-        attribute_key: normalizeKey(input.attribute_key || tokensToKey(content, 'rule'), 'rule'),
-        value_text: content,
+        owner_scope: ownerScope,
+        subject_key: normalizeKey(input.subject_key || (ownerScope === 'agent' ? 'agent' : 'user'), 'user'),
+        attribute_key: normalizeKey(input.attribute_key || inferredAttribute || tokensToKey(normalizedContent, 'rule'), 'rule'),
+        value_text: normalizedContent,
         source_type: sourceType,
         priority,
         confidence: 0.95,
         tags,
       };
-    case 'fact_slot':
+    }
+    case 'fact_slot': {
+      const entityKey = normalizeKey(input.entity_key || extractEntityTokens(content)[0] || 'user', 'user');
+      const factContent = entityKey === 'user' ? canonicalizeUserNarration(content) : content;
       return {
         kind: 'fact_slot',
         agent_id: agentId,
-        entity_key: normalizeKey(input.entity_key || extractEntityTokens(content)[0] || 'user', 'user'),
-        attribute_key: normalizeKey(input.attribute_key || tokensToKey(content, 'fact'), 'fact'),
-        value_text: content,
+        entity_key: entityKey,
+        attribute_key: normalizeKey(input.attribute_key || tokensToKey(factContent, 'fact'), 'fact'),
+        value_text: factContent,
         source_type: sourceType,
         priority,
         confidence: 0.95,
         tags,
       };
-    case 'task_state':
+    }
+    case 'task_state': {
+      const subjectKey = normalizeKey(input.subject_key || extractEntityTokens(content)[0] || 'user', 'user');
+      const summary = subjectKey === 'user' ? canonicalizeUserNarration(content) : content;
       return {
         kind: 'task_state',
         agent_id: agentId,
-        subject_key: normalizeKey(input.subject_key || extractEntityTokens(content)[0] || 'user', 'user'),
-        state_key: normalizeKey(input.state_key || tokensToKey(content, 'task'), 'task'),
+        subject_key: subjectKey,
+        state_key: normalizeKey(input.state_key || tokensToKey(summary, 'task'), 'task'),
         status: normalizeKey(input.status || 'active', 'active'),
-        summary: content,
+        summary,
         source_type: sourceType,
         priority,
         confidence: 0.95,
         tags,
       };
+    }
     case 'session_note':
     default:
       return {

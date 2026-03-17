@@ -112,4 +112,43 @@ describe('API V2 Integration', () => {
     expect(Array.isArray(body.records)).toBe(true);
     expect(body.records.length).toBeGreaterThan(0);
   });
+
+  it('scopes MCP search debug to the caller agent_id', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: 'Scoped MCP debug record',
+        entity_key: 'scoped',
+        attribute_key: 'debug_key',
+        agent_id: 'mcp-scope',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp/message',
+      headers: {
+        'x-agent-id': 'mcp-scope',
+      },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'cortex_search_debug',
+          arguments: {
+            query: 'Scoped MCP debug',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.payload);
+    const text = payload.result.content[0].text;
+    const parsed = JSON.parse(text);
+    expect(parsed.results.some((item: any) => item.content.includes('Scoped MCP debug record'))).toBe(true);
+  });
 });

@@ -44,8 +44,8 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
       return { status: 'forgotten', id: recordId, reason };
     },
 
-    search: async (query, debug) => {
-      const results = await cortex.recordsV2.search(query, { agent_id: 'mcp', limit: 10 });
+    search: async (query, debug, agentId) => {
+      const results = await cortex.recordsV2.search(query, { agent_id: agentId || 'mcp', limit: 10 });
       return { results, debug };
     },
 
@@ -53,8 +53,8 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
       return getStats();
     },
 
-    listRelations: async (subject, object, limit) => {
-      return listRelations({ subject, object, limit: limit || 20, agent_id: 'mcp' });
+    listRelations: async (subject, object, limit, agentId) => {
+      return listRelations({ subject, object, limit: limit || 20, agent_id: agentId || 'mcp' });
     },
   };
 

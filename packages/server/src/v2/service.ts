@@ -128,6 +128,16 @@ function sourceWeight(sourceType: SourceType): number {
   }
 }
 
+function hasLexicalEvidence(result: SearchResult): boolean {
+  return result.overlap > 0 || result.lexical_score >= 0.12;
+}
+
+function passesRecallAdmission(result: SearchResult): boolean {
+  if (!sourceAllowed(result)) return false;
+  if (result.kind === 'session_note') return result.overlap > 0 || result.lexical_score >= 0.18;
+  return hasLexicalEvidence(result);
+}
+
 function formatRuleLabel(record: CortexRecord): string {
   if (record.kind !== 'profile_rule') return 'Rule';
   if (record.owner_scope === 'agent') return 'Persona';
@@ -384,13 +394,7 @@ export class CortexRecordsV2 {
       })
       .filter((result): result is SearchResult => !!result);
 
-    const filtered = opts.recall_only
-      ? results.filter(result => {
-          if (!sourceAllowed(result)) return false;
-          if (result.kind === 'session_note') return result.final_score >= 0.18 || result.overlap > 0;
-          return result.overlap > 0 || result.vector_score >= 0.55 || result.lexical_score >= 0.12;
-        })
-      : results;
+    const filtered = opts.recall_only ? results.filter(result => passesRecallAdmission(result)) : results;
 
     return filtered
       .sort((a, b) => b.final_score - a.final_score)
@@ -422,7 +426,7 @@ export class CortexRecordsV2 {
     }
 
     const searchResults = await this.search(query, { agent_id: opts.agent_id, limit: 12, recall_only: true });
-    const relevancePassed = searchResults.some(result => result.overlap > 0 || result.vector_score >= 0.62 || result.lexical_score >= 0.16);
+    const relevancePassed = searchResults.some(result => hasLexicalEvidence(result));
 
     const rules = searchResults
       .filter((result): result is SearchResult & { kind: 'profile_rule' } => result.kind === 'profile_rule')

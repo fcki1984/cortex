@@ -263,6 +263,13 @@ function GlobalSearch() {
     }
   };
 
+  const openMemoryBrowser = () => {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set('query', query.trim());
+    setOpen(false);
+    navigate(params.toString() ? `/memories?${params.toString()}` : '/memories');
+  };
+
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -302,7 +309,7 @@ function GlobalSearch() {
               <div
                 key={r.id}
                 style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer', fontSize: 13 }}
-                onClick={() => { setOpen(false); setQuery(''); navigate('/memories'); }}
+                onClick={openMemoryBrowser}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >
@@ -316,7 +323,7 @@ function GlobalSearch() {
             {results.length > 0 && (
               <div
                 style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }}
-                onClick={() => { setOpen(false); navigate('/memories'); }}
+                onClick={openMemoryBrowser}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >

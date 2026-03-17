@@ -13,10 +13,22 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
-function createMockLLM(): LLMProvider {
+function createConstantEmbedding(vector: number[]): EmbeddingProvider {
+  return {
+    name: 'constant',
+    dimensions: vector.length,
+    embed: vi.fn().mockResolvedValue(vector),
+    embedBatch: vi.fn().mockResolvedValue([]),
+  };
+}
+
+function createMockLLM(records: unknown[] = []): LLMProvider {
   return {
     name: 'mock',
-    complete: vi.fn().mockResolvedValue('{"records":[],"nothing_extracted":true}'),
+    complete: vi.fn().mockResolvedValue(JSON.stringify({
+      records,
+      nothing_extracted: records.length === 0,
+    })),
   };
 }
 
@@ -84,6 +96,61 @@ describe('CortexRecordsV2', () => {
     const recall = await service.recall({ query: '咖啡', agent_id: 'inferred-agent' });
     expect(recall.facts).toHaveLength(0);
     expect(recall.context).toBe('');
+  });
+
+  it('suppresses vector-only false positives for irrelevant recall', async () => {
+    const semanticOnlyService = new CortexRecordsV2(createMockLLM(), createConstantEmbedding([1, 0, 0, 0]));
+
+    await semanticOnlyService.remember({
+      agent_id: 'semantic-agent',
+      kind: 'profile_rule',
+      content: '用户偏好简洁回答，不要长篇解释。',
+      owner_scope: 'user',
+      subject_key: 'user',
+      attribute_key: 'response_style',
+      source_type: 'user_explicit',
+    });
+    await semanticOnlyService.remember({
+      agent_id: 'semantic-agent',
+      kind: 'fact_slot',
+      content: 'Atlas 部署环境是 production。',
+      entity_key: 'atlas',
+      attribute_key: 'deploy_env',
+      source_type: 'user_confirmed',
+    });
+
+    const recall = await semanticOnlyService.recall({ query: '量子力学波函数塌缩', agent_id: 'semantic-agent' });
+    expect(recall.rules).toHaveLength(0);
+    expect(recall.facts).toHaveLength(0);
+    expect(recall.context).toBe('');
+    expect(recall.meta.reason).toBe('low_relevance');
+  });
+
+  it('deduplicates overlapping fast and deep profile rule extraction', async () => {
+    const dedupeService = new CortexRecordsV2(
+      createMockLLM([
+        {
+          kind: 'profile_rule',
+          owner_scope: 'user',
+          subject_key: 'user',
+          attribute_key: 'response_style',
+          value_text: '用户喜欢简洁回答，不要长篇解释。',
+          source_type: 'user_explicit',
+        },
+      ]),
+      createMockEmbedding(),
+    );
+
+    const ingested = await dedupeService.ingest({
+      agent_id: 'dedupe-agent',
+      user_message: '我喜欢简洁回答，不要长篇解释。',
+      assistant_message: '明白，后续我会尽量简洁。',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    const records = dedupeService.listRecords({ agent_id: 'dedupe-agent', limit: 10 });
+    expect(records.items).toHaveLength(1);
+    expect(records.items[0]?.content).toContain('用户喜欢简洁回答');
   });
 
   it('keeps agent persona available even when regular recall is skipped', async () => {
