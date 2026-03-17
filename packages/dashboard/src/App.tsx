@@ -661,6 +661,11 @@ function AppContent() {
         </div>
       </aside>
       <main className="main">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <div style={{ width: 'min(100%, 480px)' }}>
+            <GlobalSearch />
+          </div>
+        </div>
         <Routes>
           <Route path="/" element={<Stats />} />
           <Route path="/memories" element={<MemoryBrowser />} />

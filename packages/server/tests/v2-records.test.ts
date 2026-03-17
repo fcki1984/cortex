@@ -143,12 +143,37 @@ describe('CortexRecordsV2', () => {
 
     const ingested = await dedupeService.ingest({
       agent_id: 'dedupe-agent',
-      user_message: '我喜欢简洁回答，不要长篇解释。',
+      user_message: '喜欢简洁回答，不要长篇解释。',
       assistant_message: '明白，后续我会尽量简洁。',
     });
 
     expect(ingested.records).toHaveLength(1);
     const records = dedupeService.listRecords({ agent_id: 'dedupe-agent', limit: 10 });
+    expect(records.items).toHaveLength(1);
+    expect(records.items[0]?.content).toContain('用户喜欢简洁回答');
+  });
+
+  it('supersedes equivalent profile rules that differ only by preference wording', async () => {
+    const first = await service.remember({
+      agent_id: 'profile-agent',
+      kind: 'profile_rule',
+      content: '用户偏好简洁回答，不要长篇解释。',
+      owner_scope: 'user',
+      source_type: 'user_explicit',
+    });
+
+    const second = await service.remember({
+      agent_id: 'profile-agent',
+      kind: 'profile_rule',
+      content: '喜欢简洁回答，不要长篇解释。',
+      owner_scope: 'user',
+      source_type: 'user_explicit',
+    });
+
+    expect(first.decision).toBe('inserted');
+    expect(second.decision).toBe('superseded');
+
+    const records = service.listRecords({ agent_id: 'profile-agent', kind: 'profile_rule', limit: 10 });
     expect(records.items).toHaveLength(1);
     expect(records.items[0]?.content).toContain('用户喜欢简洁回答');
   });

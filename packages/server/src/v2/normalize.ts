@@ -46,23 +46,36 @@ function canonicalizeUserNarration(text: string): string {
     [/^我的名字叫/u, '用户的名字叫'],
     [/^我叫/u, '用户叫'],
     [/^我住在/u, '用户住在'],
+    [/^住在/u, '用户住在'],
     [/^我在(.+?)(工作|上班)/u, '用户在$1$2'],
+    [/^在(.+?)(工作|上班)/u, '用户在$1$2'],
     [/^我喜欢/u, '用户喜欢'],
+    [/^喜欢/u, '用户喜欢'],
     [/^我偏好/u, '用户偏好'],
+    [/^偏好/u, '用户偏好'],
     [/^我讨厌/u, '用户讨厌'],
+    [/^讨厌/u, '用户讨厌'],
     [/^我不想/u, '用户不想'],
+    [/^不想/u, '用户不想'],
     [/^我不要/u, '用户不要'],
+    [/^不要/u, '用户不要'],
     [/^我希望/u, '用户希望'],
+    [/^希望/u, '用户希望'],
     [/^我需要/u, '用户需要'],
+    [/^需要/u, '用户需要'],
     [/^我是/u, '用户是'],
     [/^I am\b/i, 'User is'],
     [/^I'm\b/i, 'User is'],
     [/^My name is\b/i, 'User name is'],
     [/^Call me\b/i, 'User is called'],
     [/^I live in\b/i, 'User lives in'],
+    [/^Live in\b/i, 'User lives in'],
     [/^I work (?:at|in)\b/i, 'User works at'],
+    [/^Work (?:at|in)\b/i, 'User works at'],
     [/^I prefer\b/i, 'User prefers'],
+    [/^Prefer\b/i, 'User prefers'],
     [/^I like\b/i, 'User likes'],
+    [/^Like\b/i, 'User likes'],
     [/^I love\b/i, 'User likes'],
     [/^I hate\b/i, 'User dislikes'],
     [/^I do not want\b/i, 'User does not want'],
@@ -78,16 +91,38 @@ function canonicalizeUserNarration(text: string): string {
   return trimmed;
 }
 
+function profileRuleKeyBase(content: string): string {
+  const trimmed = canonicalizeUserNarration(content).trim();
+  if (!trimmed) return trimmed;
+
+  const replacements: RegExp[] = [
+    /^用户(?:偏好|喜欢|希望|需要|想要|想|倾向|爱|比较喜欢)/u,
+    /^用户(?:不要|不想|拒绝|避免|禁止|必须|总是|永远不要|别)/u,
+    /^user\s+(?:prefers|likes|wants|needs|does\s+not\s+want|avoids|must|always)\b/i,
+  ];
+
+  let normalized = trimmed;
+  for (const pattern of replacements) {
+    normalized = normalized.replace(pattern, '').trim();
+  }
+
+  return normalized
+    .replace(/^[,:;，。；、\s]+/u, '')
+    .trim();
+}
+
 function profileAttributeFromContent(category: MemoryCategory | null, content: string): string | null {
+  const keyBase = profileRuleKeyBase(content) || content;
+
   if (/我叫|我的名字|my name|call me|name is/i.test(content)) return 'display_name';
   if (/住在|live in|lives in|位于|location|在.+工作|work at|work in/i.test(content)) return 'location';
   if (/喜欢|偏好|prefer|like|讨厌|hate|不想|不要|风格|tone|格式|style/i.test(content)) {
-    return `preference_${tokensToKey(content, 'rule')}`;
+    return `preference_${tokensToKey(keyBase, 'rule')}`;
   }
   if (/禁止|必须|always|never|不要|别|constraint|rule|必须先/i.test(content)) {
-    return `constraint_${tokensToKey(content, 'rule')}`;
+    return `constraint_${tokensToKey(keyBase, 'rule')}`;
   }
-  if (/policy|策略|流程|优先|default/i.test(content)) return `policy_${tokensToKey(content, 'rule')}`;
+  if (/policy|策略|流程|优先|default/i.test(content)) return `policy_${tokensToKey(keyBase, 'rule')}`;
   if (category === 'agent_persona') return `persona_${tokensToKey(content, 'persona')}`;
   if (category === 'identity') return `identity_${tokensToKey(content, 'identity')}`;
   return null;
