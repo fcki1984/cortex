@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import Stats from './pages/Stats.js';
 import MemoryBrowser from './pages/MemoryBrowser.js';
 import RelationGraph from './pages/RelationGraph.js';
@@ -336,21 +336,6 @@ function GlobalSearch() {
   );
 }
 
-function LegacyOnlyPage() {
-  const { t } = useI18n();
-
-  return (
-    <div className="card">
-      <h2 style={{ marginTop: 0, marginBottom: 8 }}>{t('common.unavailable')}</h2>
-      <div style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        {t('common.legacyOnly')}
-      </div>
-    </div>
-  );
-}
-
-// ============ Main App Content ============
-
 function AppContent() {
   const { t, locale, setLocale } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -364,7 +349,7 @@ function AppContent() {
   const [updateResult, setUpdateResult] = useState<'success'|'stale'|'down'|null>(null);
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string|null>(null);
-  const [legacyMode, setLegacyMode] = useState(true);
+  const [legacyMode, setLegacyMode] = useState(false);
 
   useEffect(() => {
     // Check auth status (new endpoint with setup detection)
@@ -686,10 +671,10 @@ function AppContent() {
           <Route path="/memories" element={<MemoryBrowser />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetail />} />
-          <Route path="/relations" element={legacyMode ? <RelationGraph /> : <LegacyOnlyPage />} />
+          <Route path="/relations" element={legacyMode ? <RelationGraph /> : <Navigate to="/" replace />} />
           <Route path="/extraction-logs" element={<ExtractionLogs />} />
           <Route path="/system-logs" element={<SystemLogs />} />
-          <Route path="/lifecycle" element={legacyMode ? <LifecycleMonitor /> : <LegacyOnlyPage />} />
+          <Route path="/lifecycle" element={legacyMode ? <LifecycleMonitor /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

@@ -135,6 +135,11 @@ describe('Config env wiring', () => {
     expect(config.embedding.dimensions).toBe(1024);
   });
 
+  it('defaults runtime legacy mode to false', () => {
+    const config = loadConfig();
+    expect(config.runtime.legacyMode).toBe(false);
+  });
+
   it('keeps OPENAI_API_KEY and OLLAMA_BASE_URL as legacy compatibility env vars', () => {
     process.env.OPENAI_API_KEY = 'legacy-openai-key';
     process.env.CORTEX_LLM_EXTRACTION_PROVIDER = 'openai';

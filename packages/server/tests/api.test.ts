@@ -13,6 +13,7 @@ describe('API Integration', () => {
 
   beforeAll(async () => {
     const config = loadConfig({
+      runtime: { legacyMode: true },
       storage: { dbPath: ':memory:', walMode: false },
       llm: {
         extraction: { provider: 'none', timeoutMs: 1111 },

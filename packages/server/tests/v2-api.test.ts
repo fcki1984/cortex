@@ -234,10 +234,38 @@ describe('API V2 Integration', () => {
       url: '/api/v1/search',
       payload: { query: 'test' },
     });
+    const legacyMemories = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/memories',
+    });
+    const legacyRelations = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/relations',
+    });
+    const legacyLifecycle = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/lifecycle/preview',
+    });
     const v2Recall = await offApp.inject({
       method: 'POST',
       url: '/api/v2/recall',
       payload: { query: 'test', agent_id: 'api-v2' },
+    });
+    const health = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/health',
+    });
+    const configResponse = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/config',
+    });
+    const agents = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/agents',
+    });
+    const extractionLogs = await offApp.inject({
+      method: 'GET',
+      url: '/api/v1/extraction-logs',
     });
 
     await offApp.close();
@@ -245,6 +273,13 @@ describe('API V2 Integration', () => {
 
     expect(legacyRecall.statusCode).toBe(404);
     expect(legacySearch.statusCode).toBe(404);
+    expect(legacyMemories.statusCode).toBe(404);
+    expect(legacyRelations.statusCode).toBe(404);
+    expect(legacyLifecycle.statusCode).toBe(404);
     expect(v2Recall.statusCode).toBe(200);
+    expect(health.statusCode).toBe(200);
+    expect(configResponse.statusCode).toBe(200);
+    expect(agents.statusCode).toBe(200);
+    expect(extractionLogs.statusCode).toBe(200);
   });
 });

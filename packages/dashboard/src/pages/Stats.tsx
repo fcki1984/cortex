@@ -213,11 +213,8 @@ export default function Stats() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style={{ marginBottom: 16 }}>
         <h1 className="page-title" style={{ margin: 0 }}>{t('stats.title')}</h1>
-        <span className="badge" style={{ background: stats.runtime?.legacy_mode ? 'rgba(245,158,11,0.2)' : 'rgba(34,197,94,0.18)', color: stats.runtime?.legacy_mode ? '#fbbf24' : '#4ade80' }}>
-          {stats.runtime?.legacy_mode ? t('stats.legacyModeOn') : t('stats.legacyModeOff')}
-        </span>
       </div>
 
       <div className="card-grid">

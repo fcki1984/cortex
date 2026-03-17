@@ -17,6 +17,9 @@ import { registerV2RecordRoutes } from './records-v2.js';
 import { registerV2IngestRoutes } from './ingest-v2.js';
 import { registerV2RecallRoutes } from './recall-v2.js';
 import { registerV2StatsRoutes } from './stats-v2.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('api.router');
 
 export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void {
   registerSystemRoutes(app, cortex);
@@ -38,5 +41,8 @@ export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void
     registerRelationsRoutes(app);
     registerLifecycleRoutes(app, cortex);
     registerFeedbackRoutes(app, cortex);
+    return;
   }
+
+  log.info('Legacy routes disabled');
 }

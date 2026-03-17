@@ -525,19 +525,19 @@ export default function AgentDetail() {
           step={2}
           title={t('agentDetail.apiStep2Title')}
           description={t('agentDetail.apiStep2Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={3}
           title={t('agentDetail.apiStep3Title')}
           description={t('agentDetail.apiStep3Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={4}
           title={t('agentDetail.apiStep4Title')}
           description={t('agentDetail.apiStep4Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/memories \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "layer": "core",\n    "category": "fact",\n    "content": "...",\n    "agent_id": "${agentId}",\n    "importance": 0.8\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/records \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "kind": "fact_slot",\n    "content": "User lives in Tokyo",\n    "entity_key": "user",\n    "attribute_key": "location",\n    "value_text": "Tokyo",\n    "agent_id": "${agentId}"\n  }'\n\ncurl ${cortexUrl}/api/v2/records?agent_id=${agentId}&kind=fact_slot${authEnabled ? ` \\\\\n  -H "Authorization: Bearer YOUR_TOKEN"` : ''}`}
         />
         <StepBlock
           step={5}
@@ -547,7 +547,7 @@ export default function AgentDetail() {
 const AGENT_ID = '${agentId}';${authEnabled ? `\nconst AUTH_TOKEN = 'YOUR_TOKEN';` : ''}
 
 async function recall(query: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v1/recall\`, {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/recall\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -557,8 +557,8 @@ async function recall(query: string) {
   return res.json();
 }
 
-async function ingest(userMessage: string, assistantMessage: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v1/ingest\`, {
+async function ingestConversation(userMessage: string, assistantMessage: string) {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/ingest\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -568,6 +568,33 @@ async function ingest(userMessage: string, assistantMessage: string) {
       assistant_message: assistantMessage,
       agent_id: AGENT_ID,
     }),
+  });
+  return res.json();
+
+}
+
+async function createRecord() {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/records\`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
+    },
+    body: JSON.stringify({
+      kind: 'profile_rule',
+      content: 'User prefers concise answers.',
+      owner_scope: 'user',
+      subject_key: 'user',
+      attribute_key: 'preference_concise_answers',
+      agent_id: AGENT_ID,
+    }),
+  });
+  return res.json();
+}
+
+async function listRecords() {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/records?agent_id=\${AGENT_ID}\`, {
+    headers: {${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
+    },
   });
   return res.json();
 }`}
@@ -586,20 +613,41 @@ HEADERS = {
 
 def recall(query: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v1/recall",
+        f"{CORTEX_URL}/api/v2/recall",
         headers=HEADERS,
         json={"query": query, "agent_id": AGENT_ID},
     ).json()
 
-def ingest(user_msg: str, assistant_msg: str):
+def ingest_conversation(user_msg: str, assistant_msg: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v1/ingest",
+        f"{CORTEX_URL}/api/v2/ingest",
         headers=HEADERS,
         json={
             "user_message": user_msg,
             "assistant_message": assistant_msg,
             "agent_id": AGENT_ID,
         },
+    ).json()
+
+def create_record():
+    return requests.post(
+        f"{CORTEX_URL}/api/v2/records",
+        headers=HEADERS,
+        json={
+            "kind": "fact_slot",
+            "content": "User lives in Tokyo",
+            "entity_key": "user",
+            "attribute_key": "location",
+            "value_text": "Tokyo",
+            "agent_id": AGENT_ID,
+        },
+    ).json()
+
+def list_records():
+    return requests.get(
+        f"{CORTEX_URL}/api/v2/records",
+        headers=HEADERS,
+        params={"agent_id": AGENT_ID},
     ).json()`}
           isLast
         />

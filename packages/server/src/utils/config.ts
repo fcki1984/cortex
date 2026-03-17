@@ -37,7 +37,7 @@ const CortexConfigSchema = z.object({
   port: z.number().default(21100),
   host: z.string().default('127.0.0.1'),
   runtime: z.object({
-    legacyMode: z.boolean().default(true),
+    legacyMode: z.boolean().default(false),
   }).default({}),
   auth: z.object({
     token: z.string().optional(),
