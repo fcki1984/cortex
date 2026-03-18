@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../../../i18n/index.js';
+import { changeAuthToken, getAuthStatus } from '../../../api/client.js';
 
 interface AuthStatus {
   authRequired: boolean;
@@ -21,8 +22,7 @@ export default function AuthSection() {
   const { t } = useI18n();
 
   const fetchStatus = () => {
-    fetch('/api/v1/auth/status')
-      .then(r => r.json())
+    getAuthStatus()
       .then(setStatus)
       .catch(() => {});
   };
@@ -45,26 +45,13 @@ export default function AuthSection() {
 
     setLoading(true);
     try {
-      const stored = localStorage.getItem('cortex_auth_token') || '';
-      const res = await fetch('/api/v1/auth/change-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${stored}`,
-        },
-        body: JSON.stringify({ oldToken, newToken }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem('cortex_auth_token', newToken);
-        setSuccess(t('settings.authTokenChanged'));
-        setOldToken('');
-        setNewToken('');
-        setConfirmToken('');
-        fetchStatus();
-      } else {
-        setError(data.error || 'Failed');
-      }
+      await changeAuthToken(oldToken, newToken);
+      localStorage.setItem('cortex_auth_token', newToken);
+      setSuccess(t('settings.authTokenChanged'));
+      setOldToken('');
+      setNewToken('');
+      setConfirmToken('');
+      fetchStatus();
     } catch {
       setError(t('login.networkError'));
     } finally {

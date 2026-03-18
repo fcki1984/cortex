@@ -10,7 +10,7 @@ import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
 import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
-import { listRecordsV2, checkAuth, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getConfig, triggerUpdate } from './api/client.js';
+import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getConfig, getAuthStatus, setupAuthToken, triggerUpdate } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
 
@@ -127,18 +127,9 @@ function SetupPage({ onSetup }: { onSetup: () => void }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/v1/auth/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStoredToken(token.trim());
-        onSetup();
-      } else {
-        setError(data.error || 'Setup failed');
-      }
+      await setupAuthToken(token.trim());
+      setStoredToken(token.trim());
+      onSetup();
     } catch {
       setError(t('login.networkError'));
     } finally {
@@ -353,8 +344,7 @@ function AppContent() {
   const [legacyMode, setLegacyMode] = useState(false);
 
   useEffect(() => {
-    // Check auth status (new endpoint with setup detection)
-    fetch('/api/v1/auth/status').then(r => r.json()).then(async (status: any) => {
+    getAuthStatus().then(async (status: any) => {
       if (status.setupRequired) {
         setAuthState('setup');
         return;

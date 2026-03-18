@@ -4,6 +4,7 @@ import { createLogger } from '../utils/logger.js';
 import { updateConfig } from '../utils/config.js';
 
 const log = createLogger('security');
+const AUTH_PREFIX = '/api/v2/auth';
 
 /** Timing-safe string comparison to prevent timing attacks */
 function safeCompare(a: string, b: string): boolean {
@@ -37,15 +38,15 @@ export interface TokenInfo {
 // ============ Auth Routes ============
 
 export function registerAuthRoutes(app: FastifyInstance, authConfig: AuthConfig): void {
-  const hasAuth = !!(authConfig.token || (authConfig.agents && authConfig.agents.length > 0));
+  const hasAuth = () => !!(authConfig.token || (authConfig.agents && authConfig.agents.length > 0));
 
   // Public: check if auth is enabled (no token required)
-  app.get('/api/v1/auth/check', async () => {
-    return { authRequired: hasAuth };
+  app.get(`${AUTH_PREFIX}/check`, async () => {
+    return { authRequired: hasAuth() };
   });
 
   // Public: auth status — source, setupRequired, etc.
-  app.get('/api/v1/auth/status', async () => {
+  app.get(`${AUTH_PREFIX}/status`, async () => {
     const hasToken = !!authConfig.token;
     const hasAgents = !!(authConfig.agents && authConfig.agents.length > 0);
     const fromEnv = isTokenFromEnv();
@@ -56,7 +57,7 @@ export function registerAuthRoutes(app: FastifyInstance, authConfig: AuthConfig)
     }
 
     return {
-      authRequired: hasToken || hasAgents,
+      authRequired: hasAuth(),
       setupRequired: !hasToken && !hasAgents,
       source,
       hasAgentTokens: hasAgents,
@@ -66,9 +67,9 @@ export function registerAuthRoutes(app: FastifyInstance, authConfig: AuthConfig)
   });
 
   // Public: first-time token setup (only works when no token is set)
-  app.post('/api/v1/auth/setup', async (req, reply) => {
+  app.post(`${AUTH_PREFIX}/setup`, async (req, reply) => {
     if (authConfig.token) {
-      reply.code(409).send({ error: 'Token already configured. Use /api/v1/auth/change-token instead.' });
+      reply.code(409).send({ error: `Token already configured. Use ${AUTH_PREFIX}/change-token instead.` });
       return;
     }
 
@@ -88,7 +89,7 @@ export function registerAuthRoutes(app: FastifyInstance, authConfig: AuthConfig)
   });
 
   // Authenticated: change existing master token
-  app.post('/api/v1/auth/change-token', async (req, reply) => {
+  app.post(`${AUTH_PREFIX}/change-token`, async (req, reply) => {
     if (isTokenFromEnv()) {
       reply.code(403).send({
         error: 'Token is set via environment variable (CORTEX_AUTH_TOKEN). Change it there and restart.',
@@ -125,8 +126,8 @@ export function registerAuthRoutes(app: FastifyInstance, authConfig: AuthConfig)
   });
 
   // Public: verify a token
-  app.post('/api/v1/auth/verify', async (req) => {
-    if (!hasAuth) {
+  app.post(`${AUTH_PREFIX}/verify`, async (req) => {
+    if (!hasAuth()) {
       return { valid: true, isMaster: true };
     }
     const body = req.body as any;
@@ -186,7 +187,7 @@ export function registerAuthMiddleware(app: FastifyInstance, authConfig: AuthCon
     // Skip health check and auth routes (public)
     if (req.url === '/api/v2/health') return;
     if (req.url === '/api/v2/metrics') return;
-    if (req.url.startsWith('/api/v1/auth/')) return;
+    if (req.url.startsWith(`${AUTH_PREFIX}/`)) return;
     // Skip non-API routes (dashboard static files)
     if (!req.url.startsWith('/api/') && req.url !== '/mcp' && !req.url.startsWith('/mcp/')) return;
 
@@ -226,7 +227,7 @@ export function registerAgentEnforcement(app: FastifyInstance, authConfig: AuthC
     // Only enforce on API routes
     if (!req.url.startsWith('/api/')) return;
     // Skip auth/health/system routes
-    if (req.url.startsWith('/api/v1/auth/')) return;
+    if (req.url.startsWith(`${AUTH_PREFIX}/`)) return;
     if (req.url === '/api/v2/health') return;
 
     const tokenInfo = req.tokenInfo;

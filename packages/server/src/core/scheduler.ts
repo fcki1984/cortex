@@ -1,8 +1,8 @@
 /**
- * Scheduler — cron-based lifecycle runner + post-ingest markdown export trigger.
+ * Scheduler — cron-based lifecycle v2 runner + post-ingest markdown export trigger.
  *
  * This module wires up the two "phantom features" that had config but no runtime:
- * 1. Lifecycle schedule (config.lifecycle.schedule) → runs LifecycleEngine on cron
+ * 1. Lifecycle schedule (config.lifecycle.schedule) → runs Lifecycle v2 note maintenance on cron
  * 2. Markdown export (config.markdownExport.enabled) → scheduleExport() after ingest
  */
 
@@ -33,43 +33,37 @@ export function getSchedulerStatus(): { running: boolean; schedule: string | nul
 export function startLifecycleScheduler(cortex: CortexApp): void {
   stopLifecycleScheduler();
 
-  if (!cortex.lifecycle) {
-    log.info('Legacy lifecycle disabled, skipping scheduler start');
-    return;
-  }
-
   const schedule = cortex.config.lifecycle?.schedule;
   if (!schedule) {
-    log.info('Lifecycle schedule not configured, skipping');
+    log.info('Lifecycle v2 schedule not configured, skipping');
     return;
   }
 
   try {
     const tz = process.env.TZ || 'UTC';
     lifecycleCron = new Cron(schedule, { timezone: tz }, async () => {
-      log.info({ schedule }, 'Lifecycle cron triggered');
+      log.info({ schedule }, 'Lifecycle v2 cron triggered');
       try { backupDb(); } catch (e: any) { log.warn({ error: e.message }, 'Pre-lifecycle backup failed'); }
       try {
-        const report = await cortex.lifecycle!.run(false, 'scheduled');
+        const report = await cortex.lifecycleV2.run();
         log.info(
           {
-            promoted: report.promoted,
-            archived: report.archived,
-            merged: report.merged,
-            compressedToCore: report.compressedToCore,
-            expiredWorking: report.expiredWorking,
+            expired_notes: report.summary.expired_notes,
+            compressed_notes: report.summary.compressed_notes,
+            written_notes: report.summary.written_notes,
+            compression_groups: report.summary.compression_groups,
           },
-          'Lifecycle cron completed',
+          'Lifecycle v2 cron completed',
         );
       } catch (e: any) {
-        log.error({ error: e.message }, 'Lifecycle cron failed');
+        log.error({ error: e.message }, 'Lifecycle v2 cron failed');
       }
     });
 
     const next = lifecycleCron.nextRun();
-    log.info({ schedule, timezone: tz, nextRun: next?.toISOString() }, 'Lifecycle scheduler started');
+    log.info({ schedule, timezone: tz, nextRun: next?.toISOString() }, 'Lifecycle v2 scheduler started');
   } catch (e: any) {
-    log.error({ error: e.message, schedule }, 'Failed to start lifecycle scheduler (invalid cron?)');
+    log.error({ error: e.message, schedule }, 'Failed to start lifecycle v2 scheduler (invalid cron?)');
   }
 }
 
@@ -80,7 +74,7 @@ export function stopLifecycleScheduler(): void {
   if (lifecycleCron) {
     lifecycleCron.stop();
     lifecycleCron = null;
-    log.info('Lifecycle scheduler stopped');
+    log.info('Lifecycle v2 scheduler stopped');
   }
 }
 

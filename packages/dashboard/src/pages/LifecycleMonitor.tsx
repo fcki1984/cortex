@@ -51,17 +51,17 @@ export default function LifecycleMonitor() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>V2 lifecycle only maintains session notes.</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Facts, rules, and task states are not archived or decayed here.</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>{t('lifecycle.subtitle')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.noteOnlyHint')}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent</label>
+            <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('lifecycle.agent')}</label>
             <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }}>
-              <option value="">All</option>
+              <option value="">{t('lifecycle.allAgents')}</option>
               {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
             </select>
-            <button className="btn" onClick={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
-            <button className="btn" onClick={handleRun} disabled={running}>{running ? 'Running...' : 'Run maintenance'}</button>
+            <button className="btn" onClick={refresh} disabled={loading}>{loading ? t('lifecycle.refreshing') : t('lifecycle.refresh')}</button>
+            <button className="btn" onClick={handleRun} disabled={running}>{running ? t('lifecycle.running') : t('lifecycle.runNow')}</button>
           </div>
         </div>
       </div>
@@ -69,32 +69,35 @@ export default function LifecycleMonitor() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.active_notes ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Active session notes</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.activeNotes')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.expire_count ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expired note candidates</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.expiredCandidates')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.compression_groups ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Compression groups</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.compressionGroups')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.notes_to_compress ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Notes to compress</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.notesToCompress')}</div>
         </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 12 }}>Compression Preview</h3>
+        <h3 style={{ marginBottom: 12 }}>{t('lifecycle.compressionPreview')}</h3>
         {!preview?.compression_candidates?.length ? (
-          <div className="empty">No compression candidates.</div>
+          <div className="empty">{t('lifecycle.noCompressionCandidates')}</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {preview.compression_candidates.map((candidate: any, index: number) => (
               <div key={`${candidate.session_id || 'global'}-${index}`} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                  Session: {candidate.session_id || 'global'} · {candidate.note_ids.length} notes
+                  {t('lifecycle.sessionSummary', {
+                    session: candidate.session_id || t('lifecycle.global'),
+                    count: candidate.note_ids.length,
+                  })}
                 </div>
                 <div style={{ marginBottom: 8, color: 'var(--text)' }}>{candidate.replacement_summary}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{candidate.summaries.join(' | ')}</div>
@@ -105,9 +108,9 @@ export default function LifecycleMonitor() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginBottom: 12 }}>Lifecycle Log</h3>
+        <h3 style={{ marginBottom: 12 }}>{t('lifecycle.logTitle')}</h3>
         {logs.length === 0 ? (
-          <div className="empty">No V2 lifecycle entries.</div>
+          <div className="empty">{t('lifecycle.noEntries')}</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {logs.map((log: any) => {
@@ -124,7 +127,12 @@ export default function LifecycleMonitor() {
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{toLocal(log.executed_at)}</span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    Agent: {details.agent_id || 'all'} · Expired: {details.expired_notes ?? 0} · Compressed: {details.compressed_notes ?? details.compressed_count ?? 0} · Written: {details.written_notes ?? 0}
+                    {t('lifecycle.logSummary', {
+                      agent: details.agent_id || t('lifecycle.global'),
+                      expired: details.expired_notes ?? 0,
+                      compressed: details.compressed_notes ?? details.compressed_count ?? 0,
+                      written: details.written_notes ?? 0,
+                    })}
                   </div>
                 </div>
               );

@@ -283,28 +283,26 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
       });
     } catch { components.push({ id: 'extraction_llm', name: 'Extraction LLM', status: 'error' }); }
 
-    // 2. Lifecycle Engine
+    // 2. Lifecycle v2 maintenance
     try {
-      const last = db.prepare(`SELECT action, executed_at, details FROM lifecycle_log WHERE action = 'lifecycle_run' ORDER BY executed_at DESC LIMIT 1`).get() as any;
-      if (last?.executed_at && !last.executed_at.endsWith('Z')) last.executed_at = last.executed_at + 'Z';
+      const latestRun = cortex.lifecycleV2.logs(50, 0).items.find((entry: any) => entry.action === 'v2_lifecycle_run') as any;
+      if (latestRun?.executed_at && !latestRun.executed_at.endsWith('Z')) latestRun.executed_at = latestRun.executed_at + 'Z';
       let details: any = {};
-      try { details = last?.details ? JSON.parse(last.details) : {}; } catch {}
-      const hasErrors = details.errors && details.errors.length > 0;
+      try { details = latestRun?.details ? JSON.parse(latestRun.details) : {}; } catch {}
       components.push({
         id: 'lifecycle',
-        name: 'Lifecycle Engine',
-        status: last ? (hasErrors ? 'warning' : 'ok') : 'unknown',
-        lastRun: last?.executed_at || null,
+        name: 'Lifecycle V2',
+        status: latestRun ? 'ok' : 'unknown',
+        lastRun: latestRun?.executed_at || null,
         latencyMs: details.durationMs || null,
         details: {
-          trigger: details.trigger,
-          promoted: details.promoted,
-          archived: details.archived,
-          expired: details.expiredWorking,
-          errors: details.errors?.length || 0,
+          expiredNotes: details.expired_notes ?? 0,
+          compressedNotes: details.compressed_notes ?? 0,
+          writtenNotes: details.written_notes ?? 0,
+          compressionGroups: details.compression_groups ?? 0,
         },
       });
-    } catch { components.push({ id: 'lifecycle', name: 'Lifecycle Engine', status: 'error' }); }
+    } catch { components.push({ id: 'lifecycle', name: 'Lifecycle V2', status: 'error' }); }
 
     // 3. Embedding Service
     try {
@@ -329,7 +327,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
       const sched = getSchedulerStatus();
       components.push({
         id: 'scheduler',
-        name: 'Scheduler',
+        name: 'Lifecycle Scheduler',
         status: sched.running ? 'ok' : 'stopped',
         details: {
           schedule: sched.schedule,

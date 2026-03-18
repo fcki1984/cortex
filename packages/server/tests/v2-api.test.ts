@@ -5,8 +5,10 @@ import { loadConfig } from '../src/utils/config.js';
 import { initDatabase, closeDatabase } from '../src/db/index.js';
 import { CortexApp } from '../src/app.js';
 import { registerAllRoutes } from '../src/api/router.js';
+import { registerAuthRoutes } from '../src/api/security.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
+import { startLifecycleScheduler, stopLifecycleScheduler } from '../src/core/scheduler.js';
 
 function createVectorOnlyEmbedding(): EmbeddingProvider {
   const vector = [1, 0, 0, 0];
@@ -18,7 +20,8 @@ function createVectorOnlyEmbedding(): EmbeddingProvider {
         text.includes('我住大阪') ||
         text.includes('我喜欢简洁回答') ||
         text.includes('最近也许会考虑换方案') ||
-        text.includes('最近是否要换方案')
+        text.includes('最近是否要换方案') ||
+        text.includes('Should we switch approaches')
       ) {
         return vector;
       }
@@ -29,7 +32,8 @@ function createVectorOnlyEmbedding(): EmbeddingProvider {
         text.includes('我住大阪') ||
         text.includes('我喜欢简洁回答') ||
         text.includes('最近也许会考虑换方案') ||
-        text.includes('最近是否要换方案')
+        text.includes('最近是否要换方案') ||
+        text.includes('Should we switch approaches')
       ) {
         return vector;
       }
@@ -41,6 +45,7 @@ function createVectorOnlyEmbedding(): EmbeddingProvider {
 describe('API V2 Integration', () => {
   let app: FastifyInstance;
   let cortex: CortexApp;
+  let authConfig: { token?: string; agents?: Array<{ agent_id: string; token: string }> };
 
   beforeAll(async () => {
     const config = loadConfig({
@@ -57,6 +62,8 @@ describe('API V2 Integration', () => {
 
     app = Fastify();
     await app.register(cors, { origin: true });
+    authConfig = { agents: [] };
+    registerAuthRoutes(app, authConfig);
     registerAllRoutes(app, cortex);
     await app.ready();
   });
@@ -227,6 +234,70 @@ describe('API V2 Integration', () => {
     expect(configV1.statusCode).toBe(404);
     expect(healthV1.statusCode).toBe(404);
     expect(extractionLogsV1.statusCode).toBe(404);
+  });
+
+  it('exposes auth bootstrap under /api/v2 and closes /api/v1 auth aliases', async () => {
+    const checkV2 = await app.inject({ method: 'GET', url: '/api/v2/auth/check' });
+    const checkV1 = await app.inject({ method: 'GET', url: '/api/v1/auth/check' });
+    const statusBefore = await app.inject({ method: 'GET', url: '/api/v2/auth/status' });
+
+    expect(checkV2.statusCode).toBe(200);
+    expect(JSON.parse(checkV2.payload)).toEqual({ authRequired: false });
+    expect(checkV1.statusCode).toBe(404);
+    expect(statusBefore.statusCode).toBe(200);
+    expect(JSON.parse(statusBefore.payload)).toMatchObject({
+      authRequired: false,
+      setupRequired: true,
+      source: 'none',
+    });
+
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/api/v2/auth/setup',
+      payload: { token: 'super-secret-token' },
+    });
+    expect(setup.statusCode).toBe(200);
+
+    const statusAfter = await app.inject({ method: 'GET', url: '/api/v2/auth/status' });
+    expect(statusAfter.statusCode).toBe(200);
+    expect(JSON.parse(statusAfter.payload)).toMatchObject({
+      authRequired: true,
+      setupRequired: false,
+      source: 'config',
+      mutable: true,
+    });
+
+    const verify = await app.inject({
+      method: 'POST',
+      url: '/api/v2/auth/verify',
+      payload: { token: 'super-secret-token' },
+    });
+    expect(verify.statusCode).toBe(200);
+    expect(JSON.parse(verify.payload)).toMatchObject({
+      valid: true,
+      isMaster: true,
+    });
+
+    const change = await app.inject({
+      method: 'POST',
+      url: '/api/v2/auth/change-token',
+      payload: {
+        oldToken: 'super-secret-token',
+        newToken: 'super-secret-token-2',
+      },
+    });
+    expect(change.statusCode).toBe(200);
+
+    const verifyChanged = await app.inject({
+      method: 'POST',
+      url: '/api/v2/auth/verify',
+      payload: { token: 'super-secret-token-2' },
+    });
+    expect(verifyChanged.statusCode).toBe(200);
+    expect(JSON.parse(verifyChanged.payload)).toMatchObject({
+      valid: true,
+      isMaster: true,
+    });
   });
 
   it('returns downgrade metadata for ambiguous manual writes', async () => {
@@ -480,7 +551,7 @@ describe('API V2 Integration', () => {
     const recalled = await app.inject({
       method: 'POST',
       url: '/api/v2/recall',
-      payload: { query: '最近是否要换方案？', agent_id: 'api-vector-only' },
+      payload: { query: 'Should we switch approaches?', agent_id: 'api-vector-only' },
     });
 
     expect(recalled.statusCode).toBe(200);
@@ -491,9 +562,74 @@ describe('API V2 Integration', () => {
     expect(body.session_notes).toHaveLength(0);
     expect(body.meta.reason).toBe('low_relevance');
     expect(body.meta.durable_candidate_count).toBe(0);
+    expect(body.meta.note_candidate_count).toBe(0);
     expect(body.meta.relevance_basis).toEqual([]);
 
     cortex.recordsV2 = originalRecordsV2;
+  });
+
+  it('marks note-only vector hits as excluded from recall', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(cortex.llmExtraction, createVectorOnlyEmbedding());
+    await cortex.recordsV2.initialize();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '最近也许会考虑换方案',
+        agent_id: 'api-vector-note-debug',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: {
+        jsonrpc: '2.0',
+        id: 7,
+        method: 'tools/call',
+        params: {
+          name: 'cortex_search_debug',
+          arguments: {
+            agent_id: 'api-vector-note-debug',
+            query: 'Should we switch approaches?',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    const parsed = JSON.parse(body.result?.content?.[0]?.text);
+    expect(Array.isArray(parsed.results)).toBe(true);
+    expect(parsed.results[0]?.kind).toBe('session_note');
+    expect(parsed.results[0]?.eligible_for_recall).toBe(false);
+    expect(parsed.results[0]?.excluded_reason).toBe('vector_only_match');
+
+    cortex.recordsV2 = originalRecordsV2;
+  });
+
+  it('starts the lifecycle v2 scheduler in v2-only mode', async () => {
+    stopLifecycleScheduler();
+    startLifecycleScheduler(cortex);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/health/components',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    const scheduler = body.components.find((component: any) => component.id === 'scheduler');
+    expect(scheduler).toBeDefined();
+    expect(scheduler.status).toBe('ok');
+    expect(scheduler.details.running).toBe(true);
+    expect(typeof scheduler.details.schedule).toBe('string');
+    expect(scheduler.details.nextRun).toBeTruthy();
+
+    stopLifecycleScheduler();
   });
 
   it('creates traceable v2 relations bound to source records', async () => {

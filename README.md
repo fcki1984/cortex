@@ -577,7 +577,7 @@ For Cortex V2 record writes, durable kinds are reserved for clear, updateable us
 | `GET` | `/mcp/sse` | MCP SSE transport |
 | `GET` | `/mcp/tools` | MCP tool catalog |
 
-> Auth remains on `/api/v1/auth/*` during the V2 production transition. All other platform and admin interfaces use `/api/v2/*`.
+> Production V2 uses `/api/v2/*` across the public REST surface, including `/api/v2/auth/*`.
 
 ## Cost
 

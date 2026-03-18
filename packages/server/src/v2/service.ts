@@ -69,6 +69,11 @@ type DurableEligibility = {
   excluded_reason: string | null;
 };
 
+type NoteEligibility = {
+  matches_query: boolean;
+  excluded_reason: string;
+};
+
 const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'user', patterns: [/\buser\b/i, /\bi\b/i, /\bme\b/i, /\bmy\b/i, /用户/i, /我/i, /我的/i] },
   { key: 'agent', patterns: [/\bagent\b/i, /\bassistant\b/i, /\byou\b/i, /助手/i, /你/i, /回答方式/i] },
@@ -288,7 +293,27 @@ function evaluateDurableEligibility(result: Pick<SearchResult, 'kind' | 'source_
 }
 
 function noteMatchesQuery(result: Pick<SearchResult, 'overlap' | 'vector_score' | 'intent_match'>): boolean {
-  return result.overlap > 0 || splitIntentMatches(result.intent_match).anchor_match.length > 0 || result.vector_score >= 0.35;
+  return evaluateNoteEligibility(result).matches_query;
+}
+
+function evaluateNoteEligibility(result: Pick<SearchResult, 'overlap' | 'vector_score' | 'intent_match'>): NoteEligibility {
+  const { anchor_match } = splitIntentMatches(result.intent_match);
+  if (result.overlap > 0 || anchor_match.length > 0) {
+    return {
+      matches_query: true,
+      excluded_reason: 'session_note_requires_durable_match',
+    };
+  }
+  if (result.vector_score >= 0.35) {
+    return {
+      matches_query: false,
+      excluded_reason: 'vector_only_match',
+    };
+  }
+  return {
+    matches_query: false,
+    excluded_reason: 'below_recall_threshold',
+  };
 }
 
 function mergeIntentProfiles(records: CortexRecord[]): RecordIntentProfile {
@@ -590,7 +615,18 @@ export class CortexRecordsV2 {
         const intentMatch = collectIntentMatches(queryIntents, buildRecordIntentProfile(record));
         const overlap = countOverlap(query, record.content);
         const durability = record.kind === 'session_note'
-          ? { eligible: false, via: [] as Array<'intent' | 'overlap' | 'lexical' | 'vector'>, excluded_reason: noteMatchesQuery({ overlap, vector_score: score.vector, intent_match: intentMatch }) ? 'session_note_requires_durable_match' : 'below_recall_threshold' }
+          ? (() => {
+              const noteEligibility = evaluateNoteEligibility({
+                overlap,
+                vector_score: score.vector,
+                intent_match: intentMatch,
+              });
+              return {
+                eligible: false,
+                via: [] as Array<'intent' | 'overlap' | 'lexical' | 'vector'>,
+                excluded_reason: noteEligibility.excluded_reason,
+              };
+            })()
           : evaluateDurableEligibility({
               kind: record.kind,
               source_type: record.source_type,

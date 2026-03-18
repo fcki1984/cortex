@@ -604,7 +604,7 @@ pnpm smoke:v2
 | `GET` | `/api/v2/metrics` | Prometheus 指标 |
 | `GET` | `/api/v2/metrics/json` | JSON 指标快照 |
 
-> 过渡期内，认证接口仍保留在 `/api/v1/auth/*`；除此之外，生产版统一使用 `/api/v2/*`。
+> V2 生产版的公开 REST 接口统一使用 `/api/v2/*`，包括 `/api/v2/auth/*`。
 
 ## 成本
 

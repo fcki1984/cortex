@@ -315,12 +315,29 @@ export default function Stats() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
             {components.map((c: any) => {
               const statusColor = c.status === 'ok' ? '#22c55e' : c.status === 'warning' ? '#f59e0b' : c.status === 'error' ? '#ef4444' : c.status === 'stopped' ? '#ef4444' : '#71717a';
-              const statusLabel = c.status === 'ok' ? '✅ OK' : c.status === 'warning' ? '⚠️ Warning' : c.status === 'error' ? '❌ Error' : c.status === 'stopped' ? '⏹ Stopped' : '⚙️ Idle';
+              const statusLabel = c.status === 'ok'
+                ? `✅ ${t('stats.statusOk')}`
+                : c.status === 'warning'
+                  ? `⚠️ ${t('stats.statusWarning')}`
+                  : c.status === 'error'
+                    ? `❌ ${t('stats.statusError')}`
+                    : c.status === 'stopped'
+                      ? `⏹ ${t('stats.statusStopped')}`
+                      : `⚙️ ${t('stats.statusIdle')}`;
+              const componentLabel = c.id === 'extraction_llm'
+                ? t('stats.componentExtractionLlm')
+                : c.id === 'lifecycle'
+                  ? t('stats.componentLifecycle')
+                  : c.id === 'embedding'
+                    ? t('stats.componentEmbedding')
+                    : c.id === 'scheduler'
+                      ? t('stats.componentScheduler')
+                      : c.name;
               const ago = c.lastRun ? timeAgo(c.lastRun) : null;
               return (
                 <div key={c.id} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{componentLabel}</span>
                     <span style={{ color: statusColor, fontSize: 12, fontWeight: 600 }}>{statusLabel}</span>
                   </div>
                   {ago && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('stats.lastRun')}: {ago}</div>}

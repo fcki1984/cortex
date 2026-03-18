@@ -1,7 +1,10 @@
 const LEGACY_BASE = '/api/v1';
 const AUTH = {
-  check: '/api/v1/auth/check',
-  verify: '/api/v1/auth/verify',
+  check: '/api/v2/auth/check',
+  status: '/api/v2/auth/status',
+  setup: '/api/v2/auth/setup',
+  changeToken: '/api/v2/auth/change-token',
+  verify: '/api/v2/auth/verify',
 } as const;
 const V2 = {
   health: '/api/v2/health',
@@ -60,6 +63,52 @@ export async function verifyToken(token: string): Promise<{ valid: boolean }> {
   });
   if (!res.ok) return { valid: false };
   return res.json();
+}
+
+export async function getAuthStatus(): Promise<{
+  authRequired: boolean;
+  setupRequired: boolean;
+  source: 'env' | 'config' | 'none';
+  hasAgentTokens: boolean;
+  agentTokenCount: number;
+  mutable: boolean;
+}> {
+  const res = await fetch(AUTH.status);
+  if (!res.ok) {
+    throw new Error(`API ${res.status}: unable to fetch auth status`);
+  }
+  return res.json();
+}
+
+export async function setupAuthToken(token: string): Promise<any> {
+  const res = await fetch(AUTH.setup, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `API ${res.status}: setup failed`);
+  }
+  return data;
+}
+
+export async function changeAuthToken(oldToken: string, newToken: string): Promise<any> {
+  const stored = getStoredToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (stored) headers.Authorization = `Bearer ${stored}`;
+  const res = await fetch(AUTH.changeToken, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ oldToken, newToken }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `API ${res.status}: change-token failed`);
+  }
+  return data;
 }
 
 // ============ Authenticated Request ============
