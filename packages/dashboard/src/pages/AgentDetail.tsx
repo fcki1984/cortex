@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAgent, updateAgent, deleteAgent, getAgentConfig, checkAuth } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
+import { formatAgentDescriptionLabel, formatAgentNameLabel, formatRecordKindLabel, formatSourceTypeLabel } from '../utils/v2Display.js';
 
 function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -514,9 +515,9 @@ export default function AgentDetail() {
 
     const writeSemanticsNotice = (
       <div style={{ margin: '8px 0 16px 0', padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: 8, fontSize: 13, lineHeight: 1.6, border: '1px solid var(--border)' }}>
-        <span style={{ fontWeight: 600 }}>Structured writes only.</span>
+        <span style={{ fontWeight: 600 }}>{t('agentDetail.structuredWriteNoticeTitle')}</span>
         <br />
-        Durable records need stable keys and clear user-confirmed semantics. Ambiguous natural-language inputs will be downgraded to <code>session_note</code>.
+        {t('agentDetail.structuredWriteNoticeDesc')}
       </div>
     );
 
@@ -724,8 +725,8 @@ def ingest(user_msg: str, assistant_msg: str):
           <table style={{ width: '100%', fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>Tool</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>Description</th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>{t('agentDetail.toolColumn')}</th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>{t('agentDetail.descriptionColumn')}</th>
               </tr>
             </thead>
             <tbody>
@@ -852,6 +853,8 @@ def ingest(user_msg: str, assistant_msg: str):
   const kindEntries = Object.entries(stats.kinds || {});
   const sourceEntries = Object.entries(stats.sources || {});
   const mc = mergedConfig?.config;
+  const displayAgentName = formatAgentNameLabel(t, agent.id, agent.name);
+  const displayAgentDescription = formatAgentDescriptionLabel(t, agent.id, agent.description);
 
   return (
     <div>
@@ -873,7 +876,7 @@ def ingest(user_msg: str, assistant_msg: str):
         <button className="btn" onClick={() => navigate('/agents')} style={{ padding: '4px 10px', fontSize: 13 }}>
           &larr; {t('agentDetail.backToAgents')}
         </button>
-        <h1 className="page-title" style={{ margin: 0 }}>{agent.name}</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>{displayAgentName}</h1>
         <span style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--text-muted)' }}>{agent.id}</span>
       </div>
 
@@ -930,9 +933,9 @@ def ingest(user_msg: str, assistant_msg: str):
             ) : (
               <table>
                 <tbody>
-                  <tr><td style={{ width: '30%' }}>Agent ID</td><td><code style={{ fontSize: 13, padding: '2px 8px', background: 'var(--bg)', borderRadius: 4 }}>{agent.id}</code></td></tr>
-                  <tr><td>{t('agentDetail.name')}</td><td>{agent.name}</td></tr>
-                  <tr><td>{t('agentDetail.description')}</td><td>{agent.description || <span style={{ color: 'var(--text-muted)' }}>{t('agentDetail.noDescription')}</span>}</td></tr>
+                  <tr><td style={{ width: '30%' }}>{t('agentDetail.agentId')}</td><td><code style={{ fontSize: 13, padding: '2px 8px', background: 'var(--bg)', borderRadius: 4 }}>{agent.id}</code></td></tr>
+                  <tr><td>{t('agentDetail.name')}</td><td>{displayAgentName}</td></tr>
+                  <tr><td>{t('agentDetail.description')}</td><td>{displayAgentDescription || <span style={{ color: 'var(--text-muted)' }}>{t('agentDetail.noDescription')}</span>}</td></tr>
                   <tr><td>{t('agentDetail.created')}</td><td>{new Date(agent.created_at).toLocaleString()}</td></tr>
                   <tr><td>{t('agentDetail.updated')}</td><td>{new Date(agent.updated_at).toLocaleString()}</td></tr>
                 </tbody>
@@ -963,7 +966,7 @@ def ingest(user_msg: str, assistant_msg: str):
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                       {kindEntries.map(([kind, count]) => (
                         <div key={kind} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span style={{ color: 'var(--text-muted)' }}>{kind}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{formatRecordKindLabel(t, kind)}</span>
                           <span>{count as number}</span>
                         </div>
                       ))}
@@ -977,7 +980,7 @@ def ingest(user_msg: str, assistant_msg: str):
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                       {sourceEntries.map(([source, count]) => (
                         <div key={source} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span style={{ color: 'var(--text-muted)' }}>{source}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{formatSourceTypeLabel(t, source)}</span>
                           <span>{count as number}</span>
                         </div>
                       ))}

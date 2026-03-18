@@ -8,6 +8,13 @@ import {
 } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+import {
+  formatAgentNameLabel,
+  formatNormalizationLabel,
+  formatReasonCodeLabel,
+  formatRecordKindLabel,
+  formatSourceTypeLabel,
+} from '../utils/v2Display.js';
 
 interface RecordItem {
   id: string;
@@ -96,10 +103,10 @@ export default function MemoryBrowser() {
     });
     setCreating(false);
     setDraft({ kind: 'session_note', content: '', source_type: 'user_confirmed', priority: 0.8, tags: '' });
-    const requestedKind = result.requested_kind || draft.kind;
-    const writtenKind = result.written_kind || result.record?.kind || draft.kind;
-    const suffix = result.reason_code ? ` (${result.reason_code})` : '';
-    setToast(`Created ${requestedKind} -> ${writtenKind}${suffix}`);
+    const requestedKind = formatRecordKindLabel(t, result.requested_kind || draft.kind);
+    const writtenKind = formatRecordKindLabel(t, result.written_kind || result.record?.kind || draft.kind);
+    const reason = result.reason_code ? t('memoryBrowser.reasonSuffix', { reason: formatReasonCodeLabel(t, result.reason_code) }) : '';
+    setToast(t('memoryBrowser.toastCreated', { requested: requestedKind, written: writtenKind, reason }));
     await load();
   };
 
@@ -112,14 +119,14 @@ export default function MemoryBrowser() {
       tags: editing.tags,
     });
     setEditing(null);
-    setToast('Record updated');
+    setToast(t('memoryBrowser.toastUpdated'));
     await load();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm(t('memories.confirmDelete'))) return;
     await deleteRecordV2(id);
-    setToast('Record deleted');
+    setToast(t('memoryBrowser.toastDeleted'));
     await load();
   };
 
@@ -139,7 +146,7 @@ export default function MemoryBrowser() {
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>{t('memories.title')} V2</h1>
           <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            Structured records: rules, facts, task state, session notes
+            {t('memoryBrowser.subtitle')}
           </div>
         </div>
         <button className="btn primary" onClick={() => setCreating(true)}>
@@ -161,19 +168,19 @@ export default function MemoryBrowser() {
 
       <div className="toolbar" style={{ marginBottom: 16 }}>
         <select value={kind} onChange={e => { setKind(e.target.value); setPage(0); }}>
-          <option value="">All kinds</option>
-          {KINDS.map(item => <option key={item} value={item}>{item}</option>)}
+          <option value="">{t('memoryBrowser.allKinds')}</option>
+          {KINDS.map(item => <option key={item} value={item}>{formatRecordKindLabel(t, item)}</option>)}
         </select>
         <select value={sourceType} onChange={e => { setSourceType(e.target.value); setPage(0); }}>
-          <option value="">All sources</option>
-          {SOURCES.map(item => <option key={item} value={item}>{item}</option>)}
+          <option value="">{t('memoryBrowser.allSources')}</option>
+          {SOURCES.map(item => <option key={item} value={item}>{formatSourceTypeLabel(t, item)}</option>)}
         </select>
         <select value={agentId} onChange={e => { setAgentId(e.target.value); setPage(0); }}>
-          <option value="">All agents</option>
-          {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
+          <option value="">{t('memoryBrowser.allAgents')}</option>
+          {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{formatAgentNameLabel(t, agent.id, agent.name)}</option>)}
         </select>
         <div style={{ color: 'var(--text-muted)', marginLeft: 'auto', fontSize: 13 }}>
-          {total} records
+          {t('memoryBrowser.totalRecords', { count: total })}
         </div>
       </div>
 
@@ -184,15 +191,15 @@ export default function MemoryBrowser() {
           <table style={{ width: '100%', fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left' }}>Requested</th>
-                <th style={{ textAlign: 'left' }}>Written</th>
-                <th style={{ textAlign: 'left' }}>Source</th>
-                <th style={{ textAlign: 'left' }}>Content</th>
-                <th style={{ textAlign: 'left' }}>Normalization</th>
-                <th style={{ textAlign: 'left' }}>Tags</th>
-                <th style={{ textAlign: 'left' }}>Agent</th>
-                <th style={{ textAlign: 'left' }}>Updated</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnRequested')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnWritten')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnSource')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnContent')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnNormalization')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnTags')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnAgent')}</th>
+                <th style={{ textAlign: 'left' }}>{t('memoryBrowser.columnUpdated')}</th>
+                <th style={{ textAlign: 'right' }}>{t('memoryBrowser.columnActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -200,15 +207,15 @@ export default function MemoryBrowser() {
                 <tr key={record.id} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 8px 10px 0' }}>
                     <span className="badge" style={{ background: 'rgba(96,165,250,0.16)', color: '#93c5fd' }}>
-                      {record.requested_kind || record.kind}
+                      {formatRecordKindLabel(t, record.requested_kind || record.kind)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 8px' }}>
                     <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>
-                      {record.written_kind || record.kind}
+                      {formatRecordKindLabel(t, record.written_kind || record.kind)}
                     </span>
                   </td>
-                  <td style={{ padding: '10px 8px' }}>{record.source_type}</td>
+                  <td style={{ padding: '10px 8px' }}>{formatSourceTypeLabel(t, record.source_type)}</td>
                   <td style={{ padding: '10px 8px', maxWidth: 420 }}>
                     <div style={{ color: 'var(--text)', lineHeight: 1.5 }}>
                       {record.content}
@@ -218,13 +225,13 @@ export default function MemoryBrowser() {
                     </div>
                   </td>
                   <td style={{ padding: '10px 8px' }}>
-                    <div>{record.normalization || 'durable'}</div>
+                    <div>{formatNormalizationLabel(t, record.normalization)}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>
-                      {record.reason_code || '—'}
+                      {formatReasonCodeLabel(t, record.reason_code)}
                     </div>
                   </td>
                   <td style={{ padding: '10px 8px' }}>{record.tags.join(', ') || '—'}</td>
-                  <td style={{ padding: '10px 8px' }}>{record.agent_id || 'default'}</td>
+                  <td style={{ padding: '10px 8px' }}>{formatAgentNameLabel(t, record.agent_id || 'default', record.agent_id || 'default')}</td>
                   <td style={{ padding: '10px 8px' }}>{toLocal(record.updated_at || record.created_at)}</td>
                   <td style={{ padding: '10px 0 10px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button className="btn" onClick={() => setEditing(record)}>{t('common.edit')}</button>
@@ -245,11 +252,11 @@ export default function MemoryBrowser() {
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-        <button className="btn" disabled={page === 0} onClick={() => setPage(page - 1)}>Prev</button>
+        <button className="btn" disabled={page === 0} onClick={() => setPage(page - 1)}>{t('common.prev')}</button>
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-          Page {page + 1} / {Math.max(1, Math.ceil(total / limit))}
+          {t('common.page', { current: page + 1, total: Math.max(1, Math.ceil(total / limit)) })}
         </div>
-        <button className="btn" disabled={(page + 1) * limit >= total} onClick={() => setPage(page + 1)}>Next</button>
+        <button className="btn" disabled={(page + 1) * limit >= total} onClick={() => setPage(page + 1)}>{t('common.next')}</button>
       </div>
 
       {(creating || editing) && (
@@ -258,9 +265,9 @@ export default function MemoryBrowser() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="card" style={{ width: 680, maxWidth: '92vw' }}>
-            <h3 style={{ marginTop: 0, marginBottom: 16 }}>{creating ? 'Create V2 Record' : 'Edit V2 Record'}</h3>
+            <h3 style={{ marginTop: 0, marginBottom: 16 }}>{creating ? t('memoryBrowser.createTitle') : t('memoryBrowser.editTitle')}</h3>
             <div className="form-group">
-              <label>Kind</label>
+              <label>{t('memoryBrowser.kindLabel')}</label>
               <select
                 value={creating ? draft.kind : editing?.kind}
                 onChange={e => creating
@@ -269,14 +276,14 @@ export default function MemoryBrowser() {
                 }
                 disabled={!!editing}
               >
-                {KINDS.map(item => <option key={item} value={item}>{item}</option>)}
+                {KINDS.map(item => <option key={item} value={item}>{formatRecordKindLabel(t, item)}</option>)}
               </select>
               <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
-                Durable kinds require stable keys and clear user-confirmed semantics. Ambiguous text will be written as <code>session_note</code>.
+                {t('memoryBrowser.kindHint')}
               </div>
             </div>
             <div className="form-group">
-              <label>Source type</label>
+              <label>{t('memoryBrowser.sourceTypeLabel')}</label>
               <select
                 value={creating ? draft.source_type : editing?.source_type}
                 onChange={e => creating
@@ -284,11 +291,11 @@ export default function MemoryBrowser() {
                   : editing && setEditing({ ...editing, source_type: e.target.value })
                 }
               >
-                {SOURCES.map(item => <option key={item} value={item}>{item}</option>)}
+                {SOURCES.map(item => <option key={item} value={item}>{formatSourceTypeLabel(t, item)}</option>)}
               </select>
             </div>
             <div className="form-group">
-              <label>Content</label>
+              <label>{t('memoryBrowser.columnContent')}</label>
               <textarea
                 rows={6}
                 value={creating ? draft.content : editing?.content}
@@ -299,7 +306,7 @@ export default function MemoryBrowser() {
               />
             </div>
             <div className="form-group">
-              <label>Tags (comma separated)</label>
+              <label>{t('memoryBrowser.tagsLabel')}</label>
               <input
                 value={creating ? draft.tags : (editing?.tags || []).join(', ')}
                 onChange={e => creating
@@ -309,7 +316,7 @@ export default function MemoryBrowser() {
               />
             </div>
             <div className="form-group">
-              <label>Priority ({(creating ? draft.priority : editing?.priority || 0).toFixed(2)})</label>
+              <label>{t('memoryBrowser.priorityLabel', { value: (creating ? draft.priority : editing?.priority || 0).toFixed(2) })}</label>
               <input
                 type="range"
                 min="0"

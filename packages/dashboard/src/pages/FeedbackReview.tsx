@@ -7,6 +7,15 @@ import {
 } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+import {
+  formatAgentNameLabel,
+  formatFeedbackKindLabel,
+  formatNormalizationLabel,
+  formatReasonCodeLabel,
+  formatRecordKindLabel,
+  formatSourceTypeLabel,
+  formatWriteDecisionLabel,
+} from '../utils/v2Display.js';
 
 type RecordItem = {
   id: string;
@@ -73,7 +82,7 @@ export default function FeedbackReview() {
         setSelectedId(nextRecords[0]?.id || '');
       }
     } catch (e: any) {
-      setError(e.message || 'Failed to load feedback workspace');
+      setError(e.message || t('feedback.loadError'));
       setRecords([]);
     } finally {
       setLoading(false);
@@ -108,7 +117,7 @@ export default function FeedbackReview() {
       setForm(prev => ({ ...prev, reason: '' }));
       await refresh();
     } catch (e: any) {
-      setError(e.message || 'Failed to submit feedback');
+      setError(e.message || t('feedback.submitError'));
     } finally {
       setSubmitting(false);
     }
@@ -152,7 +161,7 @@ export default function FeedbackReview() {
           <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ minWidth: 180 }}>
             <option value="">{t('feedback.allAgents')}</option>
             {agents.map((agent: any) => (
-              <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>
+              <option key={agent.id} value={agent.id}>{formatAgentNameLabel(t, agent.id, agent.name)}</option>
             ))}
           </select>
           <input
@@ -189,18 +198,18 @@ export default function FeedbackReview() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>{record.kind}</span>
-                      <span className="badge" style={{ background: 'rgba(59,130,246,0.16)', color: '#93c5fd' }}>{record.source_type}</span>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>{formatRecordKindLabel(t, record.kind)}</span>
+                      <span className="badge" style={{ background: 'rgba(59,130,246,0.16)', color: '#93c5fd' }}>{formatSourceTypeLabel(t, record.source_type)}</span>
                     </div>
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{toLocal(record.updated_at || record.created_at)}</span>
                   </div>
                   <div style={{ color: 'var(--text)', lineHeight: 1.5, marginBottom: 8 }}>{record.content}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {t('feedback.requestedWritten')}: {record.requested_kind || record.kind} → {record.written_kind || record.kind}
+                    {t('feedback.requestedWritten')}: {formatRecordKindLabel(t, record.requested_kind || record.kind)} → {formatRecordKindLabel(t, record.written_kind || record.kind)}
                     {' · '}
-                    {t('feedback.normalization')}: {record.normalization || 'durable'}
-                    {record.reason_code ? ` (${record.reason_code})` : ''}
+                    {t('feedback.normalization')}: {formatNormalizationLabel(t, record.normalization || 'durable')}
+                    {record.reason_code ? ` (${formatReasonCodeLabel(t, record.reason_code)})` : ''}
                   </div>
                 </button>
               );
@@ -218,17 +227,17 @@ export default function FeedbackReview() {
             <div style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>{t('feedback.selectedRecord')}</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>{selectedRecord.kind}</span>
-                <span className="badge" style={{ background: 'rgba(59,130,246,0.16)', color: '#93c5fd' }}>{selectedRecord.agent_id}</span>
-                <span className="badge" style={{ background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>{selectedRecord.source_type}</span>
+                <span className="badge" style={{ background: 'rgba(34,197,94,0.16)', color: '#4ade80' }}>{formatRecordKindLabel(t, selectedRecord.kind)}</span>
+                <span className="badge" style={{ background: 'rgba(59,130,246,0.16)', color: '#93c5fd' }}>{formatAgentNameLabel(t, selectedRecord.agent_id, agents.find((agent: any) => agent.id === selectedRecord.agent_id)?.name)}</span>
+                <span className="badge" style={{ background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>{formatSourceTypeLabel(t, selectedRecord.source_type)}</span>
               </div>
               <div style={{ color: 'var(--text)', lineHeight: 1.5, marginBottom: 8 }}>{selectedRecord.content}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {t('feedback.requestedWritten')}: {selectedRecord.requested_kind || selectedRecord.kind} → {selectedRecord.written_kind || selectedRecord.kind}
+                {t('feedback.requestedWritten')}: {formatRecordKindLabel(t, selectedRecord.requested_kind || selectedRecord.kind)} → {formatRecordKindLabel(t, selectedRecord.written_kind || selectedRecord.kind)}
                 {' · '}
-                {t('feedback.normalization')}: {selectedRecord.normalization || 'durable'}
+                {t('feedback.normalization')}: {formatNormalizationLabel(t, selectedRecord.normalization || 'durable')}
                 {' · '}
-                {t('feedback.sourceType')}: {selectedRecord.source_type}
+                {t('feedback.sourceType')}: {formatSourceTypeLabel(t, selectedRecord.source_type)}
               </div>
             </div>
 
@@ -288,14 +297,17 @@ export default function FeedbackReview() {
         <div className="card">
           <h3 style={{ marginBottom: 12 }}>{t('feedback.latestResult')}</h3>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
-            Feedback #{result.feedback?.id} · {result.feedback?.feedback}
+            {t('feedback.resultSummary', {
+              id: result.feedback?.id,
+              feedback: formatFeedbackKindLabel(t, result.feedback?.feedback),
+            })}
           </div>
           {result.correction ? (
             <div style={{ color: 'var(--text)' }}>
-              <strong>{t('feedback.correctionResult')}:</strong> {result.correction.decision} → {result.correction.record?.kind} ({result.correction.record?.id})
+              <strong>{t('feedback.correctionResult')}:</strong> {formatWriteDecisionLabel(t, result.correction.decision)} → {formatRecordKindLabel(t, result.correction.record?.kind)} ({result.correction.record?.id})
             </div>
           ) : (
-            <div style={{ color: 'var(--text-muted)' }}>No correction record created.</div>
+            <div style={{ color: 'var(--text-muted)' }}>{t('feedback.noCorrectionRecord')}</div>
           )}
         </div>
       )}

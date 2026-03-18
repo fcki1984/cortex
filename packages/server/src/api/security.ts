@@ -184,6 +184,9 @@ export function registerAuthMiddleware(app: FastifyInstance, authConfig: AuthCon
   log.info({ agentTokens: agentCount }, 'API Bearer token authentication enabled');
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    // Retired v1 surface must fall through to the router and return 404,
+    // even when auth is enabled.
+    if (req.url === '/api/v1' || req.url.startsWith('/api/v1/')) return;
     // Skip health check and auth routes (public)
     if (req.url === '/api/v2/health') return;
     if (req.url === '/api/v2/metrics') return;

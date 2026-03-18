@@ -67,6 +67,30 @@ describe('Security', () => {
       const res = await app.inject({ method: 'GET', url: '/dashboard' });
       expect(res.statusCode).toBe(200);
     });
+
+    it('should leave retired /api/v1 auth endpoints as 404 even without a token', async () => {
+      const check = await app.inject({ method: 'GET', url: '/api/v1/auth/check' });
+      const status = await app.inject({ method: 'GET', url: '/api/v1/auth/status' });
+
+      expect(check.statusCode).toBe(404);
+      expect(status.statusCode).toBe(404);
+    });
+
+    it('should leave retired /api/v1 auth endpoints as 404 even with a valid token', async () => {
+      const check = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/check',
+        headers: { authorization: 'Bearer test-token-123' },
+      });
+      const status = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/status',
+        headers: { authorization: 'Bearer test-token-123' },
+      });
+
+      expect(check.statusCode).toBe(404);
+      expect(status.statusCode).toBe(404);
+    });
   });
 
   describe('Multi-token agent enforcement', () => {
@@ -84,11 +108,11 @@ describe('Security', () => {
       app = Fastify();
       registerAuthMiddleware(app, authConfig);
       registerAgentEnforcement(app, authConfig);
-      app.post('/api/v1/recall', async (req) => {
+      app.post('/api/v2/recall', async (req) => {
         const body = req.body as any;
         return { agent_id: body.agent_id, query: body.query };
       });
-      app.post('/api/v1/ingest', async (req) => {
+      app.post('/api/v2/ingest', async (req) => {
         const body = req.body as any;
         return { agent_id: body.agent_id };
       });
@@ -100,7 +124,7 @@ describe('Security', () => {
     it('should allow master token to access any agent', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/recall',
+        url: '/api/v2/recall',
         headers: { authorization: 'Bearer master-token', 'content-type': 'application/json' },
         payload: { query: 'test', agent_id: 'xiaomei' },
       });
@@ -111,7 +135,7 @@ describe('Security', () => {
     it('should allow agent token to access its own agent_id', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/recall',
+        url: '/api/v2/recall',
         headers: { authorization: 'Bearer xiaomei-token', 'content-type': 'application/json' },
         payload: { query: 'test', agent_id: 'xiaomei' },
       });
@@ -122,7 +146,7 @@ describe('Security', () => {
     it('should reject agent token accessing another agent_id', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/recall',
+        url: '/api/v2/recall',
         headers: { authorization: 'Bearer xiaomei-token', 'content-type': 'application/json' },
         payload: { query: 'test', agent_id: 'bot-bob' },
       });
@@ -132,7 +156,7 @@ describe('Security', () => {
     it('should auto-inject agent_id when not provided', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/ingest',
+        url: '/api/v2/ingest',
         headers: { authorization: 'Bearer bob-token', 'content-type': 'application/json' },
         payload: { user_message: 'hi', assistant_message: 'hello' },
       });
@@ -143,7 +167,7 @@ describe('Security', () => {
     it('should reject unknown tokens', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/recall',
+        url: '/api/v2/recall',
         headers: { authorization: 'Bearer unknown-token', 'content-type': 'application/json' },
         payload: { query: 'test' },
       });
@@ -157,7 +181,7 @@ describe('Security', () => {
     beforeAll(async () => {
       app = Fastify();
       registerRateLimiting(app, { windowMs: 60000, maxRequests: 3 });
-      app.get('/api/v1/test', async () => ({ ok: true }));
+      app.get('/api/v2/test', async () => ({ ok: true }));
       app.post('/mcp', async () => ({ ok: true }));
       await app.ready();
     });
@@ -165,16 +189,16 @@ describe('Security', () => {
     afterAll(() => app.close());
 
     it('should allow requests within limit', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/test' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/test' });
       expect(res.statusCode).toBe(200);
       expect(res.headers['x-ratelimit-limit']).toBe('3');
     });
 
     it('should block requests exceeding limit', async () => {
       // Already used 1, send 2 more to hit limit
-      await app.inject({ method: 'GET', url: '/api/v1/test' });
-      await app.inject({ method: 'GET', url: '/api/v1/test' });
-      const res = await app.inject({ method: 'GET', url: '/api/v1/test' });
+      await app.inject({ method: 'GET', url: '/api/v2/test' });
+      await app.inject({ method: 'GET', url: '/api/v2/test' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/test' });
       expect(res.statusCode).toBe(429);
     });
 

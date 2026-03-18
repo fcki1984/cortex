@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRelationV2, deleteRelationV2, listAgents, listRelationsV2 } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+import { formatAgentNameLabel, formatRecordKindLabel } from '../utils/v2Display.js';
 
 type RelationRecord = {
   id: string;
@@ -41,7 +42,7 @@ export default function RelationGraph() {
       const res = await listRelationsV2(agentId ? { agent_id: agentId, limit: '200' } : { limit: '200' });
       setRelations(res.items || []);
     } catch (e: any) {
-      setError(e.message || 'Failed to load relations');
+      setError(e.message || t('relationManager.createError'));
       setRelations([]);
     }
     setLoading(false);
@@ -72,13 +73,13 @@ export default function RelationGraph() {
       setForm({ source_record_id: '', subject_key: '', predicate: '', object_key: '', confidence: '0.8' });
       await load();
     } catch (e: any) {
-      setError(e.message || 'Failed to create relation');
+      setError(e.message || t('relationManager.saveError'));
     }
     setCreating(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this relation?')) return;
+    if (!confirm(t('relationManager.deleteConfirm'))) return;
     await deleteRelationV2(id);
     await load();
   };
@@ -90,67 +91,76 @@ export default function RelationGraph() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>V2 relations are traceable to source records and evidence.</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>They are for audit and explainability, not online graph traversal.</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>{t('relationManager.traceableHint')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('relationManager.auditHint')}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent</label>
+            <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('relationManager.filterAgent')}</label>
             <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }}>
-              <option value="">All</option>
-              {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
+              <option value="">{t('relationManager.allAgents')}</option>
+              {agents.map((agent: any) => (
+                <option key={agent.id} value={agent.id}>
+                  {formatAgentNameLabel(t, agent.id, agent.name)}
+                </option>
+              ))}
             </select>
           </div>
         </div>
       </div>
 
       <form className="card" onSubmit={handleCreate} style={{ marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 12 }}>Create V2 Relation</h3>
+        <h3 style={{ marginBottom: 12 }}>{t('relationManager.createTitle')}</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           <input
-            placeholder="source_record_id"
+            aria-label={t('relationManager.sourceRecordId')}
+            placeholder={t('relationManager.sourceRecordIdPlaceholder')}
             value={form.source_record_id}
             onChange={e => setForm(prev => ({ ...prev, source_record_id: e.target.value }))}
           />
           <input
-            placeholder="subject_key"
+            aria-label={t('relationManager.subjectKey')}
+            placeholder={t('relationManager.subjectKeyPlaceholder')}
             value={form.subject_key}
             onChange={e => setForm(prev => ({ ...prev, subject_key: e.target.value }))}
           />
           <input
-            placeholder="predicate"
+            aria-label={t('relationManager.predicateLabel')}
+            placeholder={t('relationManager.predicatePlaceholder')}
             value={form.predicate}
             onChange={e => setForm(prev => ({ ...prev, predicate: e.target.value }))}
           />
           <input
-            placeholder="object_key"
+            aria-label={t('relationManager.objectKey')}
+            placeholder={t('relationManager.objectKeyPlaceholder')}
             value={form.object_key}
             onChange={e => setForm(prev => ({ ...prev, object_key: e.target.value }))}
           />
           <input
-            placeholder="confidence"
+            aria-label={t('relationManager.confidenceLabel')}
+            placeholder={t('relationManager.confidencePlaceholder')}
             value={form.confidence}
             onChange={e => setForm(prev => ({ ...prev, confidence: e.target.value }))}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 12, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Use a source record id from the Memory Browser. The API will auto-link the latest evidence if available.
+            {t('relationManager.createHint')}
           </div>
-          <button className="btn" type="submit" disabled={creating}>{creating ? 'Creating...' : 'Create relation'}</button>
+          <button className="btn" type="submit" disabled={creating}>{creating ? t('relationManager.creating') : t('relationManager.create')}</button>
         </div>
         {error && <div style={{ marginTop: 12, color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
       </form>
 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Relation List</h3>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{relations.length} relations</span>
+          <h3 style={{ margin: 0 }}>{t('relationManager.listTitle')}</h3>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('relationManager.listCount', { count: relations.length })}</span>
         </div>
 
         {loading ? (
-          <div className="empty">Loading...</div>
+          <div className="empty">{t('relationManager.loading')}</div>
         ) : relations.length === 0 ? (
-          <div className="empty">No V2 relations yet.</div>
+          <div className="empty">{t('relationManager.empty')}</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {relations.map(relation => (
@@ -163,22 +173,26 @@ export default function RelationGraph() {
                       <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#fbbf24' }}>{relation.object_key}</span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Agent: {relation.agent_id} · Confidence: {relation.confidence.toFixed(2)} · Updated: {toLocal(relation.updated_at)}
+                      {t('relationManager.meta', {
+                        agent: formatAgentNameLabel(t, relation.agent_id),
+                        confidence: relation.confidence.toFixed(2),
+                        updated: toLocal(relation.updated_at),
+                      })}
                     </div>
                   </div>
-                  <button className="btn" onClick={() => handleDelete(relation.id)}>Delete</button>
+                  <button className="btn" onClick={() => handleDelete(relation.id)}>{t('common.delete')}</button>
                 </div>
 
                 <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
-                  <div><strong>Source record:</strong> {relation.source_record_id}</div>
+                  <div><strong>{t('relationManager.sourceRecord')}:</strong> {relation.source_record_id}</div>
                   {relation.source_record && (
                     <div style={{ marginTop: 4, color: 'var(--text)' }}>
-                      [{relation.source_record.kind}] {relation.source_record.content}
+                      [{formatRecordKindLabel(t, relation.source_record.kind)}] {relation.source_record.content}
                     </div>
                   )}
                   {relation.source_evidence && (
                     <div style={{ marginTop: 6 }}>
-                      <strong>Evidence:</strong> [{relation.source_evidence.role}] {relation.source_evidence.content}
+                      <strong>{t('relationManager.evidence')}:</strong> [{relation.source_evidence.role}] {relation.source_evidence.content}
                     </div>
                   )}
                 </div>

@@ -13,6 +13,7 @@ import SystemLogs from './pages/SystemLogs.js';
 import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getConfig, getAuthStatus, setupAuthToken, triggerUpdate } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
+import { formatRecordKindLabel, formatSourceTypeLabel } from './utils/v2Display.js';
 
 // ============ Login Page ============
 
@@ -305,8 +306,8 @@ function GlobalSearch() {
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >
                 <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-                  <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontSize: 10 }}>{r.kind}</span>
-                  <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: 10 }}>{r.source_type}</span>
+                  <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontSize: 10 }}>{formatRecordKindLabel(t, r.kind)}</span>
+                  <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: 10 }}>{formatSourceTypeLabel(t, r.source_type)}</span>
                 </div>
                 <div style={{ color: 'var(--text)', lineHeight: 1.4 }}>{r.content?.slice(0, 120)}{r.content?.length > 120 ? '...' : ''}</div>
               </div>

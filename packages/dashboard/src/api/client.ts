@@ -1,4 +1,3 @@
-const LEGACY_BASE = '/api/v1';
 const AUTH = {
   check: '/api/v2/auth/check',
   status: '/api/v2/auth/status',
@@ -139,27 +138,6 @@ async function request(path: string, opts?: RequestInit) {
   return res.json();
 }
 
-async function requestLegacy(path: string, opts?: RequestInit) {
-  const token = getStoredToken();
-  const headers: Record<string, string> = {
-    ...opts?.headers as Record<string, string>,
-  };
-  if (opts?.body) headers['Content-Type'] = 'application/json';
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${LEGACY_BASE}${path}`, { ...opts, headers });
-  if (res.status === 401 || res.status === 403) {
-    clearStoredToken();
-    window.dispatchEvent(new CustomEvent('cortex:auth-expired'));
-    throw new Error(`API ${res.status}: Unauthorized`);
-  }
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API ${res.status}: ${body}`);
-  }
-  return res.json();
-}
-
 // Health
 export const getHealth = (refresh = false) => request(`${V2.health}${refresh ? '?refresh=true' : ''}`);
 export const getComponentHealth = () => request(V2.healthComponents);
@@ -169,66 +147,6 @@ export const getStats = (agentId?: string) =>
   request(`${V2.stats}${agentId ? `?agent_id=${agentId}` : ''}`);
 export const getStatsV2 = (agentId?: string) =>
   request(`${V2.stats}${agentId ? `?agent_id=${agentId}` : ''}`);
-
-// Memories
-export const listMemories = (params?: Record<string, string>) => {
-  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-  return requestLegacy(`/memories${qs}`);
-};
-
-export const getMemory = (id: string) => requestLegacy(`/memories/${id}`);
-
-export const getMemoryChain = (id: string) => requestLegacy(`/memories/${id}/chain`);
-export const rollbackMemory = (id: string, targetId: string) =>
-  requestLegacy(`/memories/${id}/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_id: targetId }) });
-
-export const createMemory = (data: any) =>
-  requestLegacy('/memories', { method: 'POST', body: JSON.stringify(data) });
-
-export const updateMemory = (id: string, data: any) =>
-  requestLegacy(`/memories/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-
-export const deleteMemory = (id: string) =>
-  requestLegacy(`/memories/${id}`, { method: 'DELETE' });
-
-// Search
-export const search = (data: any) =>
-  requestLegacy('/search', { method: 'POST', body: JSON.stringify(data) });
-
-// Recall
-export const recall = (data: any) =>
-  requestLegacy('/recall', { method: 'POST', body: JSON.stringify(data) });
-
-// Ingest
-export const ingest = (data: any) =>
-  requestLegacy('/ingest', { method: 'POST', body: JSON.stringify(data) });
-
-// Relations
-export const listRelations = (params?: Record<string, string>) => {
-  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-  return requestLegacy(`/relations${qs}`);
-};
-
-export const createRelation = (data: any) =>
-  requestLegacy('/relations', { method: 'POST', body: JSON.stringify(data) });
-
-export const deleteRelation = (id: string) =>
-  requestLegacy(`/relations/${id}`, { method: 'DELETE' });
-
-export const findPath = (from: string, to: string) =>
-  requestLegacy(`/relations/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-
-export const getRelationStats = () => requestLegacy('/relations/stats');
-
-// Lifecycle
-export const runLifecycle = (dryRun = false, agentId?: string) =>
-  requestLegacy('/lifecycle/run', { method: 'POST', body: JSON.stringify({ dry_run: dryRun, agent_id: agentId }) });
-
-export const previewLifecycle = (agentId?: string) =>
-  requestLegacy(`/lifecycle/preview${agentId ? `?agent_id=${agentId}` : ''}`);
-
-export const getLifecycleLogs = (limit = 50, agentId?: string, offset = 0) =>
-  requestLegacy(`/lifecycle/log?limit=${limit}&offset=${offset}${agentId ? `&agent_id=${agentId}` : ''}`);
 
 // Config
 export const getConfig = () => request(V2.config);

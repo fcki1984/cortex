@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getStatsV2, getHealth, getComponentHealth, testConnections, recallV2, listAgents } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
+import { formatAgentNameLabel, formatRecallReasonLabel, formatRecordKindLabel, formatSourceTypeLabel } from '../utils/v2Display.js';
 
 function fmtNum(n: number): string {
   if (n >= 100_000_000) return (n / 100_000_000).toFixed(1).replace(/\.0$/, '') + '亿';
@@ -139,7 +140,7 @@ function RecallSection({ title, items, color }: { title: string; items: any[]; c
             <div key={item.id} style={{ fontSize: 13, lineHeight: 1.5 }}>
               <div style={{ color: 'var(--text)' }}>{item.content}</div>
               <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                {item.source_type} · {item.kind}
+                {formatSourceTypeLabel(t, item.source_type)} · {formatRecordKindLabel(t, item.kind)}
               </div>
             </div>
           ))}
@@ -196,12 +197,15 @@ export default function Stats() {
   };
 
   const kindSegments = Object.entries(kindMap).map(([label, value]) => ({
-    label,
+    label: formatRecordKindLabel(t, label),
     value: value as number,
     color: kindColors[label] || '#71717a',
   }));
-  const sourceData = Object.entries(sourceMap).map(([label, value]) => ({ label, value: value as number }));
-  const agentData = (stats.agents || []).map((item: any) => ({ label: item.agent_id, value: item.active_records }));
+  const sourceData = Object.entries(sourceMap).map(([label, value]) => ({ label: formatSourceTypeLabel(t, label), value: value as number }));
+  const agentData = (stats.agents || []).map((item: any) => ({
+    label: formatAgentNameLabel(t, item.agent_id, item.agent_name),
+    value: item.active_records,
+  }));
 
   const formatUptime = (seconds: number) => {
     if (seconds < 60) return `${Math.floor(seconds)}s`;
@@ -272,7 +276,7 @@ export default function Stats() {
           <h3 style={{ marginBottom: 12 }}>{t('stats.systemHealth')}</h3>
           <table>
             <tbody>
-              <tr><td>{t('stats.status')}</td><td><span style={{ color: health.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}>● {health.status}</span></td></tr>
+              <tr><td>{t('stats.status')}</td><td><span style={{ color: health.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}>● {health.status === 'ok' ? t('stats.statusOk') : health.status === 'warning' ? t('stats.statusWarning') : health.status === 'error' ? t('stats.statusError') : health.status}</span></td></tr>
               <tr><td>{t('stats.version')}</td><td>{health.version}</td></tr>
               <tr><td>{t('stats.uptime')}</td><td>{formatUptime(health.uptime)}</td></tr>
             </tbody>
@@ -305,7 +309,19 @@ export default function Stats() {
             <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
               {Object.entries(connTest).map(([key, val]: [string, any]) => (
                 <div key={key} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, background: val.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${val.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}` }}>
-                  <span style={{ fontWeight: 600 }}>{key.toUpperCase()}</span>{' '}
+                  <span style={{ fontWeight: 600 }}>
+                    {key === 'extraction'
+                      ? t('stats.componentExtractionLlm')
+                      : key === 'lifecycle'
+                        ? t('stats.componentLifecycle')
+                        : key === 'embedding'
+                          ? t('stats.componentEmbedding')
+                          : key === 'scheduler'
+                            ? t('stats.componentScheduler')
+                            : key === 'reranker'
+                              ? t('settings.rerankerTitle')
+                              : key.toUpperCase()}
+                  </span>{' '}
                   {val.ok ? `✅ ${val.latencyMs}ms` : `❌ ${val.error || 'failed'}`}
                 </div>
               ))}
@@ -363,7 +379,7 @@ export default function Stats() {
             style={{ fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: 'auto', maxWidth: 180, flexShrink: 0 }}
           >
             {agents.map((a: any) => (
-              <option key={a.id} value={a.id}>{a.name || a.id}</option>
+              <option key={a.id} value={a.id}>{formatAgentNameLabel(t, a.id, a.name)}</option>
             ))}
           </select>
           <input
@@ -396,7 +412,7 @@ export default function Stats() {
             }}
             style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', background: 'var(--primary)', color: '#fff', border: 'none', flexShrink: 0 }}
           >
-            {recalling ? '...' : t('common.search')}
+            {recalling ? t('common.loading') : t('common.search')}
           </button>
         </div>
 
@@ -408,7 +424,7 @@ export default function Stats() {
               <span>{t('stats.recallNoteCandidates', { count: recallResults.meta?.note_candidate_count || 0 })}</span>
               <span>{t('stats.recallInjected', { count: recallResults.meta?.injected_count || 0 })}</span>
               <span>⏱ {recallResults.meta?.latency_ms || 0}ms</span>
-              {recallResults.meta?.reason && <span>{t('stats.recallReason', { reason: recallResults.meta.reason })}</span>}
+              {recallResults.meta?.reason && <span>{t('stats.recallReason', { reason: formatRecallReasonLabel(t, recallResults.meta.reason) })}</span>}
             </div>
             {(((recallResults.meta?.normalized_intents?.subjects?.length || 0) > 0 ||
               (recallResults.meta?.normalized_intents?.attributes?.length || 0) > 0 ||

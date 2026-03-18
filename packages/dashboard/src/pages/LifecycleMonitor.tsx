@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getLifecycleLogsV2, listAgents, previewLifecycleV2, runLifecycleV2 } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+import { formatAgentNameLabel } from '../utils/v2Display.js';
 
 export default function LifecycleMonitor() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -58,7 +59,7 @@ export default function LifecycleMonitor() {
             <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('lifecycle.agent')}</label>
             <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }}>
               <option value="">{t('lifecycle.allAgents')}</option>
-              {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
+              {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{formatAgentNameLabel(t, agent.id, agent.name)}</option>)}
             </select>
             <button className="btn" onClick={refresh} disabled={loading}>{loading ? t('lifecycle.refreshing') : t('lifecycle.refresh')}</button>
             <button className="btn" onClick={handleRun} disabled={running}>{running ? t('lifecycle.running') : t('lifecycle.runNow')}</button>

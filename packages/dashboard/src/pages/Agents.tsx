@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAgents, createAgent } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
+import { formatAgentDescriptionLabel, formatAgentNameLabel } from '../utils/v2Display.js';
 
 const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$|^[a-z0-9]{2}$/;
 
@@ -75,7 +76,7 @@ export default function Agents() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 600 }}>{a.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{formatAgentNameLabel(t, a.id, a.name)}</div>
                   <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-muted)', marginTop: 2 }}>{a.id}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -89,7 +90,7 @@ export default function Agents() {
 
               {a.description && (
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.4 }}>
-                  {a.description}
+                  {formatAgentDescriptionLabel(t, a.id, a.description)}
                 </div>
               )}
 

@@ -2,6 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { getExtractionLogs, listAgents } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
+import {
+  formatAgentNameLabel,
+  formatCategoryLabel,
+  formatExtractionChannelLabel,
+  formatNormalizationLabel,
+  formatReasonCodeLabel,
+  formatRecordKindLabel,
+  formatSourceTypeLabel,
+} from '../utils/v2Display.js';
 
 interface ExtractedMemory {
   content: string;
@@ -120,19 +129,21 @@ export default function ExtractionLogs() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('extractionLogs.agent')}</label>
           <select value={agentId} onChange={e => { setAgentId(e.target.value); setPage(0); setLogs([]); setTotalCount(0); }} style={{ fontSize: 13, padding: '4px 8px' }}>
-            <option value="">{t('extractionLogs.allAgents') || '全部 Agent'}</option>
-            {agents.map((a: any) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
+            <option value="">{t('extractionLogs.allAgents')}</option>
+            {agents.map((a: any) => (
+              <option key={a.id} value={a.id}>{formatAgentNameLabel(t, a.id, a.name)}</option>
+            ))}
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('extractionLogs.channel')}</label>
           <select value={channel} onChange={e => { setChannel(e.target.value); setPage(0); }} style={{ fontSize: 13, padding: '4px 8px' }}>
             <option value="">{t('extractionLogs.allChannels')}</option>
-            <option value="fast">Fast</option>
-            <option value="deep">Deep</option>
-            <option value="flush">Flush</option>
-            <option value="mcp">MCP</option>
-            <option value="v2">V2</option>
+            <option value="fast">{formatExtractionChannelLabel(t, 'fast')}</option>
+            <option value="deep">{formatExtractionChannelLabel(t, 'deep')}</option>
+            <option value="flush">{formatExtractionChannelLabel(t, 'flush')}</option>
+            <option value="mcp">{formatExtractionChannelLabel(t, 'mcp')}</option>
+            <option value="v2">{formatExtractionChannelLabel(t, 'v2')}</option>
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -184,7 +195,7 @@ export default function ExtractionLogs() {
         {(['fast', 'deep', 'flush', 'mcp', 'v2'] as const).map(ch => (
           <div key={ch} className="card" style={{ padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 24, fontWeight: 700, color: CHANNEL_COLORS[ch].color }}>{channelCounts[ch]}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ch}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{formatExtractionChannelLabel(t, ch)}</div>
           </div>
         ))}
       </div>
@@ -213,13 +224,13 @@ export default function ExtractionLogs() {
                     fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
                     background: chStyle.bg, color: chStyle.color,
                   }}>
-                    {log.channel}
+                    {formatExtractionChannelLabel(t, log.channel)}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {log.exchange_preview || '—'}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {log.memories_written}w / {log.memories_deduped}d
+                    {t('extractionLogs.writeSummary', { written: log.memories_written, deduped: log.memories_deduped })}
                   </span>
                   {log.error && <span style={{ fontSize: 11, color: '#ef4444', whiteSpace: 'nowrap' }} title={log.error}>❌ 错误</span>}
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
@@ -266,26 +277,40 @@ export default function ExtractionLogs() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {log.parsed_memories.map((m, i) => (
                             <div key={i} style={{ background: 'rgba(0,0,0,0.15)', padding: 10, borderRadius: 6, border: '1px solid var(--border)' }}>
+                              {(() => {
+                                const normalizationValue = formatNormalizationLabel(t, m.normalization || 'durable');
+                                const reasonValue = formatReasonCodeLabel(t, m.reason_code);
+                                return (
+                                  <>
                               <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                                <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>{m.category}</span>
+                                <span className="badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>{formatCategoryLabel(t, m.category)}</span>
                                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                  imp: {m.importance?.toFixed(2)} | {m.source}
+                                  {t('extractionLogs.parsedMeta', {
+                                    importance: m.importance?.toFixed(2) || '0.00',
+                                    source: formatSourceTypeLabel(t, m.source),
+                                  })}
                                 </span>
                                 {m.written_kind && (
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                    {m.requested_kind || m.written_kind} → {m.written_kind}
+                                    {formatRecordKindLabel(t, m.requested_kind || m.written_kind)} → {formatRecordKindLabel(t, m.written_kind)}
                                   </span>
                                 )}
                               </div>
                               <div style={{ fontSize: 13, marginBottom: 4 }}>{m.content}</div>
                               {(m.normalization || m.reason_code) && (
                                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                                  normalization: {m.normalization || 'durable'} | reason: {m.reason_code || '—'}
+                                  {t('extractionLogs.normalizationReason', {
+                                    ['normalization']: normalizationValue,
+                                    ['reason']: reasonValue,
+                                  })}
                                 </div>
                               )}
                               {m.reasoning && (
                                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{m.reasoning}</div>
                               )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           ))}
                         </div>

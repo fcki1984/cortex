@@ -11,7 +11,13 @@ import path from 'node:path';
 
 const DASHBOARD_DIST = path.resolve(__dirname, '../../dashboard/dist');
 const ZH_LOCALE = path.resolve(__dirname, '../../dashboard/src/i18n/locales/zh.ts');
+const CLIENT_SOURCE = path.resolve(__dirname, '../../dashboard/src/api/client.ts');
 const AGENT_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/AgentDetail.tsx');
+const MEMORY_BROWSER_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/MemoryBrowser.tsx');
+const RELATION_GRAPH_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/RelationGraph.tsx');
+const EXTRACTION_LOGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/ExtractionLogs.tsx');
+const STATS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Stats.tsx');
+const MEMORY_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/MemoryDetail.tsx');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -194,6 +200,65 @@ describe('Dashboard Integration', () => {
       expect(zh).not.toContain("rulesSection: '规则与 Persona'");
       expect(zh).not.toContain("subtitle: '审查提取后的记录，标记质量，并在需要时提交 supersede 语义的更正。'");
       expect(zh).not.toContain("correctedHint: '在这里填写修正后的 durable 文本或会话摘要。'");
+    });
+
+    it('should define v2 enum and browser labels for Chinese-first UI', () => {
+      const zh = fs.readFileSync(ZH_LOCALE, 'utf-8');
+      expect(zh).toContain("sourceTypes: {");
+      expect(zh).toContain("user_explicit: '用户明确表达'");
+      expect(zh).toContain("assistant_inferred: '助手推断'");
+      expect(zh).toContain("recordKinds: {");
+      expect(zh).toContain("profile_rule: '画像/规则'");
+      expect(zh).toContain("session_note: '会话笔记'");
+      expect(zh).toContain("memoryBrowser: {");
+      expect(zh).toContain("columnRequested: '请求类型'");
+      expect(zh).toContain("columnWritten: '实际写入'");
+      expect(zh).toContain("columnSource: '来源'");
+      expect(zh).toContain("columnContent: '内容'");
+    });
+  });
+
+  describe('Chinese-first dashboard source copy', () => {
+    it('should not keep legacy v1 dashboard client wrappers or orphaned legacy detail pages', () => {
+      const client = fs.readFileSync(CLIENT_SOURCE, 'utf-8');
+      expect(client).not.toContain("const LEGACY_BASE = '/api/v1'");
+      expect(client).not.toContain('requestLegacy(');
+      expect(client).not.toContain('/api/v1/');
+      expect(fs.existsSync(MEMORY_DETAIL_SOURCE)).toBe(false);
+    });
+
+    it('should remove hardcoded English labels from Memory Browser', () => {
+      const src = fs.readFileSync(MEMORY_BROWSER_SOURCE, 'utf-8');
+      expect(src).not.toContain('All kinds');
+      expect(src).not.toContain('All sources');
+      expect(src).not.toContain('All agents');
+      expect(src).not.toContain('Requested</th>');
+      expect(src).not.toContain('Written</th>');
+      expect(src).not.toContain('Source</th>');
+      expect(src).not.toContain('Content</th>');
+      expect(src).not.toContain('Create V2 Record');
+      expect(src).not.toContain('Edit V2 Record');
+      expect(src).not.toContain('Record updated');
+      expect(src).not.toContain('Record deleted');
+      expect(src).not.toContain('Source type');
+    });
+
+    it('should remove hardcoded English labels from relations, extraction logs, and stats', () => {
+      const relations = fs.readFileSync(RELATION_GRAPH_SOURCE, 'utf-8');
+      const extractionLogs = fs.readFileSync(EXTRACTION_LOGS_SOURCE, 'utf-8');
+      const stats = fs.readFileSync(STATS_SOURCE, 'utf-8');
+
+      expect(relations).not.toContain('Create V2 Relation');
+      expect(relations).not.toContain('No V2 relations yet.');
+      expect(relations).not.toContain('Delete this relation?');
+      expect(relations).not.toContain('Source record:');
+      expect(relations).not.toContain('Evidence:');
+      expect(extractionLogs).not.toContain('<option value="fast">Fast</option>');
+      expect(extractionLogs).not.toContain('<option value="deep">Deep</option>');
+      expect(extractionLogs).not.toContain('normalization:');
+      expect(extractionLogs).not.toContain('reason:');
+      expect(extractionLogs).not.toContain('imp:');
+      expect(stats).not.toContain('item.source_type} · {item.kind}');
     });
   });
 
