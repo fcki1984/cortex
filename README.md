@@ -140,7 +140,7 @@ Every memory, searchable. Every extraction, auditable.
 | **Claude Desktop** | Add MCP config → restart |
 | **Cursor / Windsurf** | Add MCP server in settings |
 | **Claude Code** | `claude mcp add cortex -- npx @cortexmem/mcp` |
-| **Any app** | REST API: `/api/v1/recall` + `/api/v1/ingest` |
+| **Any app** | REST API: `/api/v2/recall` + `/api/v2/ingest` |
 
 ---
 
@@ -476,12 +476,12 @@ CORTEX_AUTH_TOKEN=your-token-here CORTEX_AGENT_ID=my-agent \
 
 ```bash
 # Without auth
-curl -X POST http://localhost:21100/api/v1/recall \
+curl -X POST http://localhost:21100/api/v2/recall \
   -H "Content-Type: application/json" \
   -d '{"query":"What food do I like?","agent_id":"default"}'
 
 # With auth
-curl -X POST http://localhost:21100/api/v1/ingest \
+curl -X POST http://localhost:21100/api/v2/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{"user_message":"I love sushi","assistant_message":"Noted!","agent_id":"default"}'
@@ -547,22 +547,37 @@ For Cortex V2 record writes, durable kinds are reserved for clear, updateable us
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/recall` | Search & inject memories |
-| `POST` | `/api/v1/ingest` | Ingest conversation |
-| `POST` | `/api/v1/flush` | Emergency flush |
-| `POST` | `/api/v1/search` | Hybrid search with debug |
-| `CRUD` | `/api/v1/memories` | Memory management |
-| `CRUD` | `/api/v1/relations` | Entity relations |
-| `GET` | `/api/v1/relations/traverse` | Multi-hop graph traversal |
-| `GET` | `/api/v1/relations/stats` | Graph statistics |
-| `CRUD` | `/api/v1/agents` | Agent management |
-| `GET` | `/api/v1/agents/:id/config` | Agent merged config |
-| `GET` | `/api/v1/extraction-logs` | Extraction audit logs |
-| `POST` | `/api/v1/lifecycle/run` | Trigger lifecycle |
-| `GET` | `/api/v1/lifecycle/preview` | Dry-run preview |
-| `GET` | `/api/v1/health` | Health check |
-| `GET` | `/api/v1/stats` | Statistics |
-| `GET/PATCH` | `/api/v1/config` | Global config |
+| `POST` | `/api/v2/recall` | Structured recall blocks + packed context |
+| `POST` | `/api/v2/ingest` | Extract and write V2 records from a conversation turn |
+| `CRUD` | `/api/v2/records` | V2 record management |
+| `GET` | `/api/v2/stats` | V2 record and runtime statistics |
+| `CRUD` | `/api/v2/relations` | Record-bound relations for audit and enrichment |
+| `POST` | `/api/v2/lifecycle/run` | Run note-only lifecycle maintenance |
+| `GET` | `/api/v2/lifecycle/preview` | Preview note compression and expiry |
+| `GET` | `/api/v2/lifecycle/logs` | Lifecycle execution history |
+| `POST` | `/api/v2/feedback` | Review or correct a record |
+| `GET` | `/api/v2/feedback` | Feedback history and aggregates |
+| `CRUD` | `/api/v2/agents` | Agent management |
+| `GET` | `/api/v2/agents/:id/config` | Agent merged config |
+| `GET` | `/api/v2/extraction-logs` | Extraction audit logs |
+| `GET` | `/api/v2/health` | Health check |
+| `GET` | `/api/v2/health/components` | Provider/component health details |
+| `GET/PATCH` | `/api/v2/config` | Global config |
+| `GET` | `/api/v2/config/export` | Export effective config |
+| `GET` | `/api/v2/logs` | Runtime logs |
+| `POST` | `/api/v2/log-level` | Update log level |
+| `POST` | `/api/v2/import` | Legacy/admin import utility |
+| `GET` | `/api/v2/export` | Legacy/admin export utility |
+| `POST` | `/api/v2/reindex` | Rebuild search/vector indexes |
+| `POST` | `/api/v2/update` | Trigger app self-update |
+| `GET` | `/api/v2/metrics` | Prometheus metrics |
+| `GET` | `/api/v2/metrics/json` | JSON metrics snapshot |
+| `POST` | `/mcp` | MCP JSON-RPC main entrypoint |
+| `POST` | `/mcp/message` | MCP compatibility entrypoint |
+| `GET` | `/mcp/sse` | MCP SSE transport |
+| `GET` | `/mcp/tools` | MCP tool catalog |
+
+> Auth remains on `/api/v1/auth/*` during the V2 production transition. All other platform and admin interfaces use `/api/v2/*`.
 
 ## Cost
 

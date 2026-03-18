@@ -34,7 +34,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexApp): void {
   // ============ EXPORT ============
-  app.post('/api/v1/export', async (req, reply) => {
+  app.post('/api/v2/export', async (req, reply) => {
     const { format = 'json' } = req.body as { format?: string };
 
     switch (format) {
@@ -121,7 +121,7 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
   });
 
   // ============ IMPORT ============
-  app.post('/api/v1/import', async (req, reply) => {
+  app.post('/api/v2/import', async (req, reply) => {
     const body = req.body as any;
     const format = body.format || 'json';
 

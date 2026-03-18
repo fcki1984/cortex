@@ -62,21 +62,21 @@ describe('API Integration', () => {
     fs.rmSync(new URL('../cortex.json', import.meta.url), { force: true });
   });
 
-  describe('GET /api/v1/health', () => {
+  describe('GET /api/v2/health', () => {
     it('should return health status', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/health' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/health' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.status).toBe('ok');
     });
   });
 
-  describe('GET /api/v1/stats', () => {
+  describe('GET /api/v2/stats', () => {
     it('should return stats', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/stats' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/stats' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
-      expect(typeof body.total_memories).toBe('number');
+      expect(typeof body.totals?.total_records).toBe('number');
     });
   });
 
@@ -199,9 +199,9 @@ describe('API Integration', () => {
     });
   });
 
-  describe('GET /api/v1/config', () => {
+  describe('GET /api/v2/config', () => {
     it('should return config with timeout fields', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/config' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/config' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.port).toBeDefined();
@@ -220,11 +220,11 @@ describe('API Integration', () => {
     });
   });
 
-  describe('PATCH /api/v1/config', () => {
+  describe('PATCH /api/v2/config', () => {
     it('should reload providers when timeout changes', async () => {
       const res = await app.inject({
         method: 'PATCH',
-        url: '/api/v1/config',
+        url: '/api/v2/config',
         payload: {
           llm: {
             extraction: {
@@ -243,7 +243,7 @@ describe('API Integration', () => {
     it('should persist relevance gate settings', async () => {
       const res = await app.inject({
         method: 'PATCH',
-        url: '/api/v1/config',
+        url: '/api/v2/config',
         payload: {
           gate: {
             relevanceGate: {

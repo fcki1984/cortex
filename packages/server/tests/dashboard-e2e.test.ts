@@ -111,6 +111,25 @@ describe('Dashboard Integration', () => {
       expect(js).toContain('Feedback Review');
     });
 
+    it('should target v2 platform/admin APIs while keeping v1 auth bootstrap', () => {
+      if (!js) return;
+      expect(js).toContain('/api/v2/config');
+      expect(js).toContain('/api/v2/health');
+      expect(js).toContain('/api/v2/agents');
+      expect(js).toContain('/api/v2/extraction-logs');
+      expect(js).toContain('/api/v1/auth/check');
+      expect(js).not.toContain('/api/v1/config');
+      expect(js).not.toContain('/api/v1/health');
+      expect(js).not.toContain('/api/v1/agents');
+      expect(js).not.toContain('/api/v1/extraction-logs');
+    });
+
+    it('should expose layered settings entry points', () => {
+      if (!js) return;
+      expect(js).toContain('Basic Settings');
+      expect(js).toContain('Expert Settings');
+    });
+
     // ── Hooks and tools listed ──
     it('should list hooks and tools in step 3', () => {
       if (!js) return;

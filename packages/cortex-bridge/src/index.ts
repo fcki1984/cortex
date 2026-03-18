@@ -14,7 +14,6 @@ const PLUGIN_VERSION = '0.5.1';
 // ── Timeouts ────────────────────────────────────────────
 const RECALL_TIMEOUT = 8000;
 const INGEST_TIMEOUT = 5000;
-const FLUSH_TIMEOUT = 5000;
 const HEALTH_TIMEOUT = 2000;
 
 // ── OpenClaw Plugin API types (minimal subset) ──────────
@@ -139,7 +138,7 @@ async function cortexRecall(
   agentId: string,
   config: Record<string, any> = {},
 ): Promise<{ context: string; count: number } | null> {
-  const res = await fetch(`${cortexUrl}/api/v1/recall`, {
+  const res = await fetch(`${cortexUrl}/api/v2/recall`, {
     method: 'POST',
     headers: getHeaders(config),
     body: JSON.stringify({ query, agent_id: agentId }),
@@ -170,7 +169,7 @@ async function cortexIngest(
     if (messages && messages.length > 0) {
       payload.messages = messages;
     }
-    const res = await fetch(`${cortexUrl}/api/v1/ingest`, {
+    const res = await fetch(`${cortexUrl}/api/v2/ingest`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(payload),
@@ -179,10 +178,11 @@ async function cortexIngest(
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     try {
       const data = (await res.json()) as any;
+      const records = Array.isArray(data.records) ? data.records : [];
       return {
         ok: true,
-        extracted: data.extracted?.length ?? 0,
-        deduplicated: data.deduplicated ?? 0,
+        extracted: records.length,
+        deduplicated: records.filter((record: any) => record.decision === 'ignored').length,
       };
     } catch {
       return { ok: true };
@@ -193,33 +193,70 @@ async function cortexIngest(
 }
 
 async function cortexFlush(
-  cortexUrl: string,
+  _cortexUrl: string,
   messages: { role: string; content: string }[],
-  agentId: string,
+  _agentId: string,
   config: Record<string, any> = {},
 ): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch(`${cortexUrl}/api/v1/flush`, {
-      method: 'POST',
-      headers: getHeaders(config),
-      body: JSON.stringify({ messages, agent_id: agentId, reason: 'compaction' }),
-      signal: AbortSignal.timeout(FLUSH_TIMEOUT),
-    });
-    return { ok: res.ok, error: res.ok ? undefined : `HTTP ${res.status}` };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
+  void messages;
+  void config;
+  return { ok: true };
 }
 
 async function cortexHealthCheck(cortexUrl: string): Promise<{ ok: boolean; latency_ms: number; error?: string }> {
   const start = Date.now();
   try {
-    const res = await fetch(`${cortexUrl}/api/v1/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT) });
+    const res = await fetch(`${cortexUrl}/api/v2/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT) });
     const data = (await res.json()) as any;
     return { ok: data.status === 'ok', latency_ms: Date.now() - start };
   } catch (e) {
     return { ok: false, latency_ms: Date.now() - start, error: (e as Error).message };
   }
+}
+
+function categoryToRequestedKind(category?: string): 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note' {
+  switch (category) {
+    case 'identity':
+    case 'preference':
+    case 'constraint':
+    case 'policy':
+    case 'skill':
+    case 'agent_self_improvement':
+    case 'agent_user_habit':
+    case 'agent_relationship':
+    case 'agent_persona':
+      return 'profile_rule';
+    case 'decision':
+    case 'todo':
+    case 'goal':
+    case 'project_state':
+      return 'task_state';
+    case 'relationship':
+      return 'session_note';
+    default:
+      return 'fact_slot';
+  }
+}
+
+function buildRecordWritePayload(content: string, category: string | undefined, agentId: string): Record<string, unknown> {
+  return {
+    content,
+    kind: categoryToRequestedKind(category),
+    agent_id: agentId,
+    source_type: 'user_explicit',
+    priority: 0.7,
+    tags: category ? [category] : [],
+  };
+}
+
+function summarizeWriteResult(content: string, data: any): string {
+  const decision = data.decision || 'stored';
+  const requested = data.requested_kind || 'session_note';
+  const written = data.written_kind || requested;
+  const downgrade = data.normalization === 'downgraded_to_session_note'
+    ? ` (downgraded: ${data.reason_code || 'session_note'})`
+    : '';
+  return `${decision}: stored as ${written} (requested ${requested})${downgrade} — "${content}"`;
 }
 
 // ── Plugin export (OpenClaw register(api) interface) ────
@@ -278,7 +315,7 @@ export default {
     // ── Tool: cortex_remember ───────────────────────────
     api.registerTool({
       name: 'cortex_remember',
-      description: 'Store a memory in Cortex long-term memory. Use for facts, preferences, decisions, constraints ("never do X"), policies ("prefer X before Y"), or agent self-observations.',
+      description: 'Store information in Cortex V2 records. Clear facts, preferences, constraints, and task state become durable records; ambiguous input is automatically downgraded to session notes.',
       parameters: {
         type: 'object',
         properties: {
@@ -300,21 +337,15 @@ export default {
       },
       async execute(_id: string, params: { content: string; category?: string }) {
         try {
-          const res = await fetch(`${cortexUrl}/api/v1/memories`, {
+          const res = await fetch(`${cortexUrl}/api/v2/records`, {
             method: 'POST',
             headers: getHeaders(config),
-            body: JSON.stringify({
-              content: params.content,
-              category: params.category || 'fact',
-              agent_id: agentId,
-              layer: 'core',
-              importance: 0.7,
-              confidence: 0.9,
-            }),
+            body: JSON.stringify(buildRecordWritePayload(params.content, params.category, agentId)),
             signal: AbortSignal.timeout(INGEST_TIMEOUT),
           });
           if (res.ok) {
-            return { content: [{ type: 'text', text: `Remembered: "${params.content}"` }] };
+            const data = await res.json() as any;
+            return { content: [{ type: 'text', text: summarizeWriteResult(params.content, data) }] };
           }
           const err = await res.text();
           return { content: [{ type: 'text', text: `Failed to store memory (${res.status}): ${err}` }] };
@@ -382,16 +413,17 @@ export default {
             const headers: Record<string, string> = {};
             const token = getAuthToken(config);
             if (token) headers['Authorization'] = `Bearer ${token}`;
-            const res = await fetch(`${cortexUrl}/api/v1/relations?${query.toString()}`, {
+            const res = await fetch(`${cortexUrl}/api/v2/relations?${query.toString()}`, {
               headers,
               signal: AbortSignal.timeout(RECALL_TIMEOUT),
             });
             if (!res.ok) return { content: [{ type: 'text', text: `Failed to fetch relations: HTTP ${res.status}` }] };
-            const data = await res.json() as any[];
-            if (data.length === 0) {
+            const data = await res.json() as { items?: any[] } | any[];
+            const items = Array.isArray(data) ? data : (data.items || []);
+            if (items.length === 0) {
               return { content: [{ type: 'text', text: 'No relations found.' }] };
             }
-            const formatted = data.map((r: any) => `${r.subject} → ${r.predicate} → ${r.object} (confidence: ${r.confidence})`).join('\n');
+            const formatted = items.map((r: any) => `${r.subject_key} → ${r.predicate} → ${r.object_key} (confidence: ${r.confidence})`).join('\n');
             return { content: [{ type: 'text', text: formatted }] };
           } catch (e) {
             return { content: [{ type: 'text', text: `Error: ${(e as Error).message}` }] };
@@ -431,7 +463,7 @@ export default {
 
         try {
           // Health details (version, uptime)
-          const healthRes = await fetch(`${cortexUrl}/api/v1/health`, {
+          const healthRes = await fetch(`${cortexUrl}/api/v2/health`, {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT),
           });
           if (healthRes.ok) {
@@ -450,18 +482,18 @@ export default {
 
         try {
           // Memory stats
-          const statsRes = await fetch(`${cortexUrl}/api/v1/stats?agent_id=${encodeURIComponent(agentId)}`, {
+          const statsRes = await fetch(`${cortexUrl}/api/v2/stats?agent_id=${encodeURIComponent(agentId)}`, {
             headers: getHeaders(config),
             signal: AbortSignal.timeout(HEALTH_TIMEOUT),
           });
           if (statsRes.ok) {
             const stats = (await statsRes.json()) as any;
-            lines.push(`🧠 Memories: ${stats.total_memories ?? '?'}`);
-            if (stats.layers) {
-              const layerParts = Object.entries(stats.layers).map(([k, v]) => `${k}: ${v}`);
-              lines.push(`📂 Layers: ${layerParts.join(', ')}`);
+            const totals = stats.totals || {};
+            lines.push(`🧠 Records: ${totals.total_records ?? '?'}`);
+            if (stats.distributions?.kinds) {
+              const kindParts = Object.entries(stats.distributions.kinds).map(([k, v]) => `${k}: ${v}`);
+              lines.push(`📂 Kinds: ${kindParts.join(', ')}`);
             }
-            if (stats.total_relations) lines.push(`🔗 Relations: ${stats.total_relations}`);
           }
         } catch { /* ignore */ }
 
@@ -471,7 +503,7 @@ export default {
 
         // Version compatibility check
         try {
-          const healthRes2 = await fetch(`${cortexUrl}/api/v1/health`, {
+          const healthRes2 = await fetch(`${cortexUrl}/api/v2/health`, {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT),
           });
           if (healthRes2.ok) {
@@ -499,7 +531,7 @@ export default {
           return { text: '用法: /cortex_search <关键词>' };
         }
         try {
-          const res = await fetch(`${cortexUrl}/api/v1/recall`, {
+          const res = await fetch(`${cortexUrl}/api/v2/recall`, {
             method: 'POST',
             headers: getHeaders(config),
             body: JSON.stringify({ query, agent_id: agentId }),
@@ -528,21 +560,15 @@ export default {
           return { text: '用法: /cortex_remember <要记住的内容>' };
         }
         try {
-          const res = await fetch(`${cortexUrl}/api/v1/memories`, {
+          const res = await fetch(`${cortexUrl}/api/v2/records`, {
             method: 'POST',
             headers: getHeaders(config),
-            body: JSON.stringify({
-              content,
-              category: 'fact',
-              agent_id: agentId,
-              layer: 'core',
-              importance: 0.7,
-              confidence: 0.9,
-            }),
+            body: JSON.stringify(buildRecordWritePayload(content, 'fact', agentId)),
             signal: AbortSignal.timeout(INGEST_TIMEOUT),
           });
           if (res.ok) {
-            return { text: `✅ 已记住: "${content}"` };
+            const data = await res.json() as any;
+            return { text: `✅ ${summarizeWriteResult(content, data)}` };
           }
           return { text: `❌ 存储失败 (HTTP ${res.status})` };
         } catch (e) {
@@ -561,7 +587,7 @@ export default {
           const token = getAuthToken(config);
           if (token) headers['Authorization'] = `Bearer ${token}`;
           const res = await fetch(
-            `${cortexUrl}/api/v1/memories?agent_id=${encodeURIComponent(agentId)}&limit=10&sort=created_at&order=desc`,
+            `${cortexUrl}/api/v2/records?agent_id=${encodeURIComponent(agentId)}&limit=10&order_by=created_at&order_dir=desc`,
             { headers, signal: AbortSignal.timeout(10000) },
           );
           if (!res.ok) {
@@ -574,7 +600,7 @@ export default {
           }
           const lines = items.map((m: any, i: number) => {
             const time = m.created_at ? new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?';
-            const cat = m.category || '?';
+            const cat = m.written_kind || m.kind || '?';
             const text = (m.content || '').slice(0, 80);
             return `${i + 1}. [${cat}] ${text}${m.content?.length > 80 ? '...' : ''}\n   🕐 ${time}`;
           });

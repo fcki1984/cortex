@@ -9,8 +9,8 @@ describe('Security', () => {
     beforeAll(async () => {
       app = Fastify();
       registerAuthMiddleware(app, { token: 'test-token-123' });
-      app.get('/api/v1/health', async () => ({ status: 'ok' }));
-      app.get('/api/v1/stats', async () => ({ count: 0 }));
+      app.get('/api/v2/health', async () => ({ status: 'ok' }));
+      app.get('/api/v2/stats', async () => ({ count: 0 }));
       app.post('/mcp', async () => ({ ok: true }));
       app.get('/dashboard', async () => 'html');
       await app.ready();
@@ -19,19 +19,19 @@ describe('Security', () => {
     afterAll(() => app.close());
 
     it('should allow health check without token', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/health' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/health' });
       expect(res.statusCode).toBe(200);
     });
 
     it('should reject API calls without token', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/v1/stats' });
+      const res = await app.inject({ method: 'GET', url: '/api/v2/stats' });
       expect(res.statusCode).toBe(401);
     });
 
     it('should reject API calls with wrong token', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/v1/stats',
+        url: '/api/v2/stats',
         headers: { authorization: 'Bearer wrong-token' },
       });
       expect(res.statusCode).toBe(403);
@@ -40,7 +40,7 @@ describe('Security', () => {
     it('should allow API calls with correct token', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/v1/stats',
+        url: '/api/v2/stats',
         headers: { authorization: 'Bearer test-token-123' },
       });
       expect(res.statusCode).toBe(200);

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { getExtractionLogs, countExtractionLogs, getExtractionLogStats } from '../core/extraction-log.js';
 
 export function registerExtractionLogRoutes(app: FastifyInstance): void {
-  app.get('/api/v1/extraction-logs', {
+  app.get('/api/v2/extraction-logs', {
     schema: {
       querystring: {
         type: 'object',

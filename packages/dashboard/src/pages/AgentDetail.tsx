@@ -528,25 +528,25 @@ export default function AgentDetail() {
           step={1}
           title={t('agentDetail.apiStep1Title')}
           description={t('agentDetail.apiStep1Desc')}
-          code={`curl ${cortexUrl}/api/v1/health`}
+          code={`curl ${cortexUrl}/api/v2/health`}
         />
         <StepBlock
           step={2}
           title={t('agentDetail.apiStep2Title')}
           description={t('agentDetail.apiStep2Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/ingest \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "user_message": "...",\n    "assistant_message": "...",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={3}
           title={t('agentDetail.apiStep3Title')}
           description={t('agentDetail.apiStep3Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/recall \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "query": "What are the user preferences?",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={4}
           title={t('agentDetail.apiStep4Title')}
           description={t('agentDetail.apiStep4Desc')}
-          code={`curl -X POST ${cortexUrl}/api/v1/memories \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "layer": "core",\n    "category": "fact",\n    "content": "...",\n    "agent_id": "${agentId}",\n    "importance": 0.8\n  }'`}
+          code={`curl -X POST ${cortexUrl}/api/v2/records \\\n  -H "Content-Type: application/json" \\${authHeaderLine}\n  -d '{\n    "kind": "fact_slot",\n    "content": "...",\n    "entity_key": "user",\n    "attribute_key": "location",\n    "source_type": "user_confirmed",\n    "agent_id": "${agentId}"\n  }'`}
         />
         <StepBlock
           step={5}
@@ -556,7 +556,7 @@ export default function AgentDetail() {
 const AGENT_ID = '${agentId}';${authEnabled ? `\nconst AUTH_TOKEN = 'YOUR_TOKEN';` : ''}
 
 async function recall(query: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v1/recall\`, {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/recall\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -567,7 +567,7 @@ async function recall(query: string) {
 }
 
 async function ingest(userMessage: string, assistantMessage: string) {
-  const res = await fetch(\`\${CORTEX_URL}/api/v1/ingest\`, {
+  const res = await fetch(\`\${CORTEX_URL}/api/v2/ingest\`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',${authEnabled ? `\n      'Authorization': \`Bearer \${AUTH_TOKEN}\`,` : ''}
@@ -595,14 +595,14 @@ HEADERS = {
 
 def recall(query: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v1/recall",
+        f"{CORTEX_URL}/api/v2/recall",
         headers=HEADERS,
         json={"query": query, "agent_id": AGENT_ID},
     ).json()
 
 def ingest(user_msg: str, assistant_msg: str):
     return requests.post(
-        f"{CORTEX_URL}/api/v1/ingest",
+        f"{CORTEX_URL}/api/v2/ingest",
         headers=HEADERS,
         json={
             "user_message": user_msg,

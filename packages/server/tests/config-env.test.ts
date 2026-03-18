@@ -214,7 +214,7 @@ describe('Config env API surface', () => {
   });
 
   it('returns env-backed config without exposing raw api keys', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/v1/config' });
+    const res = await app.inject({ method: 'GET', url: '/api/v2/config' });
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.payload);
@@ -236,7 +236,7 @@ describe('Config env API surface', () => {
   });
 
   it('marks embedding and extraction llm as configured when only env vars are used', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/v1/health/components' });
+    const res = await app.inject({ method: 'GET', url: '/api/v2/health/components' });
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.payload);

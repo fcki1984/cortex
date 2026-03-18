@@ -143,7 +143,7 @@
 | **Claude Desktop** | 添加 MCP 配置 → 重启 |
 | **Cursor / Windsurf** | 在设置中添加 MCP 服务器 |
 | **Claude Code** | `claude mcp add cortex -- npx @cortexmem/mcp` |
-| **任何应用** | REST API: `/api/v1/recall` + `/api/v1/ingest` |
+| **任何应用** | REST API: `/api/v2/recall` + `/api/v2/ingest` |
 
 ---
 
@@ -578,15 +578,33 @@ pnpm smoke:v2
 | `POST` | `/api/v2/ingest` | 将对话写入 V2 records |
 | `CRUD` | `/api/v2/records` | V2 record 管理 |
 | `GET` | `/api/v2/stats` | V2 record 与运行态统计 |
+| `CRUD` | `/api/v2/relations` | 绑定到 record/evidence 的关系层 |
+| `POST` | `/api/v2/lifecycle/run` | 执行 note-only 生命周期维护 |
+| `GET` | `/api/v2/lifecycle/preview` | 预览 note 压缩与过期 |
+| `GET` | `/api/v2/lifecycle/logs` | 生命周期执行日志 |
+| `POST` | `/api/v2/feedback` | 对 record 提交 good/bad/corrected |
+| `GET` | `/api/v2/feedback` | 反馈历史与聚合统计 |
 | `POST` | `/mcp` | MCP JSON-RPC 主入口 |
 | `POST` | `/mcp/message` | MCP 兼容入口 |
 | `GET` | `/mcp/tools` | MCP 工具列表 |
 | `GET` | `/mcp/sse` | MCP SSE 传输 |
-| `CRUD` | `/api/v1/agents` | Agent 管理 |
-| `GET` | `/api/v1/agents/:id/config` | Agent 合并配置 |
-| `GET` | `/api/v1/extraction-logs` | 提取审计日志 |
-| `GET` | `/api/v1/health` | 健康检查 |
-| `GET/PATCH` | `/api/v1/config` | 全局配置 |
+| `CRUD` | `/api/v2/agents` | Agent 管理 |
+| `GET` | `/api/v2/agents/:id/config` | Agent 合并配置 |
+| `GET` | `/api/v2/extraction-logs` | 提取审计日志 |
+| `GET` | `/api/v2/health` | 健康检查 |
+| `GET` | `/api/v2/health/components` | 各组件健康详情 |
+| `GET/PATCH` | `/api/v2/config` | 全局配置 |
+| `GET` | `/api/v2/config/export` | 导出当前有效配置 |
+| `GET` | `/api/v2/logs` | 运行日志 |
+| `POST` | `/api/v2/log-level` | 更新日志级别 |
+| `POST` | `/api/v2/import` | 兼容期导入工具 |
+| `GET` | `/api/v2/export` | 兼容期导出工具 |
+| `POST` | `/api/v2/reindex` | 重建索引 |
+| `POST` | `/api/v2/update` | 触发程序更新 |
+| `GET` | `/api/v2/metrics` | Prometheus 指标 |
+| `GET` | `/api/v2/metrics/json` | JSON 指标快照 |
+
+> 过渡期内，认证接口仍保留在 `/api/v1/auth/*`；除此之外，生产版统一使用 `/api/v2/*`。
 
 ## 成本
 

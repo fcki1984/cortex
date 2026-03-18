@@ -46,6 +46,6 @@ ENV TZ=Asia/Tokyo
 EXPOSE 21100
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:21100/api/v1/health || exit 1
+  CMD curl -f http://localhost:21100/api/v2/health || exit 1
 
 CMD ["node", "packages/server/dist/index.js"]

@@ -184,8 +184,8 @@ export function registerAuthMiddleware(app: FastifyInstance, authConfig: AuthCon
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     // Skip health check and auth routes (public)
-    if (req.url === '/api/v1/health') return;
-    if (req.url === '/api/v1/metrics') return;
+    if (req.url === '/api/v2/health') return;
+    if (req.url === '/api/v2/metrics') return;
     if (req.url.startsWith('/api/v1/auth/')) return;
     // Skip non-API routes (dashboard static files)
     if (!req.url.startsWith('/api/') && req.url !== '/mcp' && !req.url.startsWith('/mcp/')) return;
@@ -227,7 +227,7 @@ export function registerAgentEnforcement(app: FastifyInstance, authConfig: AuthC
     if (!req.url.startsWith('/api/')) return;
     // Skip auth/health/system routes
     if (req.url.startsWith('/api/v1/auth/')) return;
-    if (req.url === '/api/v1/health') return;
+    if (req.url === '/api/v2/health') return;
 
     const tokenInfo = req.tokenInfo;
     if (!tokenInfo) return; // No auth configured or public route

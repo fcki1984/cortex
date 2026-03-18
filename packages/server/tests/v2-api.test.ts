@@ -199,13 +199,34 @@ describe('API V2 Integration', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/extraction-logs?agent_id=api-ingest-logs&channel=v2&limit=5',
+      url: '/api/v2/extraction-logs?agent_id=api-ingest-logs&channel=v2&limit=5',
     });
 
     expect(response.statusCode).toBe(200);
     const payload = JSON.parse(response.payload);
     expect(payload.items.length).toBeGreaterThan(0);
     expect(payload.items.every((item: any) => item.channel === 'v2')).toBe(true);
+  });
+
+  it('exposes admin platform routes under /api/v2 and disables non-auth v1 equivalents', async () => {
+    const [configV2, healthV2, logLevelV2, agentsV2, configV1, healthV1, extractionLogsV1] = await Promise.all([
+      app.inject({ method: 'GET', url: '/api/v2/config' }),
+      app.inject({ method: 'GET', url: '/api/v2/health' }),
+      app.inject({ method: 'GET', url: '/api/v2/log-level' }),
+      app.inject({ method: 'GET', url: '/api/v2/agents' }),
+      app.inject({ method: 'GET', url: '/api/v1/config' }),
+      app.inject({ method: 'GET', url: '/api/v1/health' }),
+      app.inject({ method: 'GET', url: '/api/v1/extraction-logs' }),
+    ]);
+
+    expect(configV2.statusCode).toBe(200);
+    expect(healthV2.statusCode).toBe(200);
+    expect(logLevelV2.statusCode).toBe(200);
+    expect(agentsV2.statusCode).toBe(200);
+
+    expect(configV1.statusCode).toBe(404);
+    expect(healthV1.statusCode).toBe(404);
+    expect(extractionLogsV1.statusCode).toBe(404);
   });
 
   it('returns downgrade metadata for ambiguous manual writes', async () => {

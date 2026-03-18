@@ -7,7 +7,7 @@ const log = createLogger('agents');
 
 export function registerAgentRoutes(app: FastifyInstance): void {
   // List all agents
-  app.get('/api/v1/agents', async () => {
+  app.get('/api/v2/agents', async () => {
     const agents = listAgents();
     return {
       agents: agents.map(a => ({
@@ -18,7 +18,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   // Get agent by ID
-  app.get('/api/v1/agents/:id', async (req, reply) => {
+  app.get('/api/v2/agents/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const agent = getAgentById(id);
     if (!agent) {
@@ -35,7 +35,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   // Create agent
-  app.post('/api/v1/agents', async (req, reply) => {
+  app.post('/api/v2/agents', async (req, reply) => {
     const body = req.body as any;
     if (!body.id || !body.name) {
       reply.code(400);
@@ -59,7 +59,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   // Update agent
-  app.patch('/api/v1/agents/:id', async (req, reply) => {
+  app.patch('/api/v2/agents/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as any;
 
@@ -84,7 +84,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   // Delete agent
-  app.delete('/api/v1/agents/:id', async (req, reply) => {
+  app.delete('/api/v2/agents/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     try {
       const result = deleteAgent(id);
@@ -100,7 +100,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   // Get merged effective config for agent
-  app.get('/api/v1/agents/:id/config', async (req, reply) => {
+  app.get('/api/v2/agents/:id/config', async (req, reply) => {
     const { id } = req.params as { id: string };
     const agent = getAgentById(id);
     if (!agent) {

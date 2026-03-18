@@ -22,7 +22,7 @@
 
 | # | 测试项 | 命令 | 预期 |
 |---|--------|------|------|
-| S1 | 无 token 访问 health | `curl http://HOST:PORT/api/v1/health` | 200, `{"status":"ok","version":"..."}` |
+| S1 | 无 token 访问 health | `curl http://HOST:PORT/api/v2/health` | 200, `{"status":"ok","version":"..."}` |
 | S2 | health 返回版本号 | 同上 | version 字段与 package.json 一致 |
 | S3 | health 返回 uptime | 同上 | uptime > 0 |
 
@@ -30,7 +30,7 @@
 
 | # | 测试项 | 命令 | 预期 |
 |---|--------|------|------|
-| S4 | 无 token 环境，所有接口开放 | E1 下 `curl /api/v1/memories?agent_id=test` | 200 |
+| S4 | 无 token 环境，所有接口开放 | E1 下 `curl /api/v2/records?agent_id=test` | 200 |
 | S5 | 有 token 环境，无 header 被拒 | E2 下同上 | 401 |
 | S6 | 错误 token 被拒 | `Authorization: Bearer wrong` | 403 |
 | S7 | 正确 master token | `Authorization: Bearer MASTER` | 200 |
@@ -42,13 +42,13 @@
 
 | # | 测试项 | 预期 |
 |---|--------|------|
-| S11 | POST /api/v1/memories 创建记忆 | 201, 返回 id |
-| S12 | GET /api/v1/memories?agent_id=X&limit=10 | 200, items 数组 |
-| S13 | GET /api/v1/memories?sort=created_at&order=desc | 按时间倒序 |
-| S14 | POST /api/v1/recall 语义搜索 | 200, context + meta |
-| S15 | POST /api/v1/recall 空查询/闲聊 | 200, skipped:true |
-| S16 | POST /api/v1/ingest 对话提取 | 200, extracted 数组 |
-| S17 | GET /api/v1/stats?agent_id=X | 200, total_memories + layers |
+| S11 | POST /api/v2/records 创建 record | 201, 返回 record + normalization 元数据 |
+| S12 | GET /api/v2/records?agent_id=X&limit=10 | 200, items 数组 |
+| S13 | GET /api/v2/records?order_by=created_at&order_dir=desc | 按时间倒序 |
+| S14 | POST /api/v2/recall 结构化召回 | 200, context + meta |
+| S15 | POST /api/v2/recall 空查询/闲聊 | 200, skipped:true |
+| S16 | POST /api/v2/ingest 对话提取 | 200, records 数组 |
+| S17 | GET /api/v2/stats?agent_id=X | 200, totals + distributions |
 
 ---
 
@@ -188,46 +188,46 @@ echo "🧪 Testing Cortex at $CORTEX_URL (agent: $AGENT)"
 
 # S1: Health
 echo -n "S1 Health... "
-STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $CORTEX_URL/api/v1/health)
+STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $CORTEX_URL/api/v2/health)
 [ "$STATUS" = "200" ] && echo "✅" || echo "❌ ($STATUS)"
 
 # S2: Version
 echo -n "S2 Version... "
-VERSION=$(curl -s $CORTEX_URL/api/v1/health | python3 -c "import sys,json;print(json.load(sys.stdin).get('version','?'))")
+VERSION=$(curl -s $CORTEX_URL/api/v2/health | python3 -c "import sys,json;print(json.load(sys.stdin).get('version','?'))")
 echo "✅ $VERSION"
 
 # S11: Create memory
 echo -n "S11 Create... "
-STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' -X POST $CORTEX_URL/api/v1/memories \
+STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' -X POST $CORTEX_URL/api/v2/records \
   -H 'Content-Type: application/json' $AUTH \
-  -d "{\"content\":\"release test $(date +%s)\",\"agent_id\":\"$AGENT\",\"category\":\"fact\",\"layer\":\"working\"}")
+  -d "{\"content\":\"release test $(date +%s)\",\"agent_id\":\"$AGENT\",\"kind\":\"session_note\",\"source_type\":\"user_explicit\"}")
 [ "$STATUS" = "201" ] && echo "✅" || echo "❌ ($STATUS)"
 
 # S12: List memories
 echo -n "S12 List... "
-STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $AUTH "$CORTEX_URL/api/v1/memories?agent_id=$AGENT&limit=1")
+STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $AUTH "$CORTEX_URL/api/v2/records?agent_id=$AGENT&limit=1")
 [ "$STATUS" = "200" ] && echo "✅" || echo "❌ ($STATUS)"
 
 # S14: Recall
 echo -n "S14 Recall... "
-STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' -X POST $CORTEX_URL/api/v1/recall \
+STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' -X POST $CORTEX_URL/api/v2/recall \
   -H 'Content-Type: application/json' $AUTH \
   -d "{\"query\":\"release test\",\"agent_id\":\"$AGENT\"}")
 [ "$STATUS" = "200" ] && echo "✅" || echo "❌ ($STATUS)"
 
 # S17: Stats
 echo -n "S17 Stats... "
-STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $AUTH "$CORTEX_URL/api/v1/stats?agent_id=$AGENT")
+STATUS=$(eval curl -s -o /dev/null -w '%{http_code}' $AUTH "$CORTEX_URL/api/v2/stats?agent_id=$AGENT")
 [ "$STATUS" = "200" ] && echo "✅" || echo "❌ ($STATUS)"
 
 # Auth tests (only if token provided)
 if [ -n "$TOKEN" ]; then
   echo -n "S5 No-auth rejected... "
-  STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$CORTEX_URL/api/v1/memories?agent_id=$AGENT")
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$CORTEX_URL/api/v2/records?agent_id=$AGENT")
   [ "$STATUS" = "401" ] && echo "✅" || echo "❌ ($STATUS)"
 
   echo -n "S6 Wrong token rejected... "
-  STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrongtoken" "$CORTEX_URL/api/v1/memories?agent_id=$AGENT")
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrongtoken" "$CORTEX_URL/api/v2/records?agent_id=$AGENT")
   [ "$STATUS" = "403" ] && echo "✅" || echo "❌ ($STATUS)"
 fi
 

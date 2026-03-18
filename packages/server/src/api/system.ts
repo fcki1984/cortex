@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { getStats, getDb } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { getConfig, updateConfig } from '../utils/config.js';
 import { restartLifecycleScheduler } from '../core/scheduler.js';
 import { createLogger, getLogLevel as _getLogLevel, setLogLevel as _setLogLevel, getLogBuffer } from '../utils/logger.js';
@@ -80,22 +80,22 @@ async function getLatestRelease(forceRefresh = false): Promise<typeof latestRele
 
 export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): void {
   // Metrics endpoint (Prometheus text format)
-  app.get('/api/v1/metrics', async (req, reply) => {
+  app.get('/api/v2/metrics', async (req, reply) => {
     reply.header('Content-Type', 'text/plain; version=0.0.4');
     return metrics.toPrometheus();
   });
 
   // Metrics endpoint (JSON format for Dashboard)
-  app.get('/api/v1/metrics/json', async () => {
+  app.get('/api/v2/metrics/json', async () => {
     return metrics.toJSON();
   });
 
   // Log level
-  app.get('/api/v1/log-level', async () => {
+  app.get('/api/v2/log-level', async () => {
     return { level: _getLogLevel() };
   });
 
-  app.patch('/api/v1/log-level', async (req) => {
+  app.patch('/api/v2/log-level', async (req) => {
     const { level } = req.body as any;
     const valid = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
     if (!valid.includes(level)) {
@@ -106,7 +106,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // System logs (ring buffer)
-  app.get('/api/v1/logs', async (req) => {
+  app.get('/api/v2/logs', async (req) => {
     const query = req.query as any;
     const limit = Math.min(Number(query.limit) || 100, 500);
     const level = query.level || undefined;
@@ -114,7 +114,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Health check (?refresh=true to bypass release cache)
-  app.get('/api/v1/health', async (req) => {
+  app.get('/api/v2/health', async (req) => {
     const query = req.query as any;
     const latest = await getLatestRelease(query.refresh === 'true');
     const latestVersion = latest?.tag?.replace(/^v/, '') ?? null;
@@ -141,7 +141,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   // 2. Spawn a helper container (`docker run -d`) that waits, then runs
   //    `docker compose up -d --force-recreate` to replace us.
   //    The helper is a separate container, so it survives our shutdown.
-  app.post('/api/v1/update', async () => {
+  app.post('/api/v2/update', async () => {
     if (!fs.existsSync('/var/run/docker.sock')) {
       return { ok: false, error: 'Docker socket not mounted.' };
     }
@@ -252,7 +252,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     }
   });
   // Component health status
-  app.get('/api/v1/health/components', async () => {
+  app.get('/api/v2/health/components', async () => {
     const db = getDb();
     const config = getConfig();
     const components: any[] = [];
@@ -343,7 +343,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Test connections
-  app.post('/api/v1/health/test', async () => {
+  app.post('/api/v2/health/test', async () => {
     const config = getConfig();
     const results: Record<string, { ok: boolean; latencyMs: number; error?: string }> = {};
 
@@ -369,14 +369,8 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     return results;
   });
 
-  // Stats
-  app.get('/api/v1/stats', async (req) => {
-    const q = req.query as any;
-    return getStats(q.agent_id);
-  });
-
   // Get config (safe — masks sensitive fields, exposes baseUrl + hasApiKey)
-  app.get('/api/v1/config', async () => {
+  app.get('/api/v2/config', async () => {
     const config = getConfig();
     return {
       ...config,
@@ -422,7 +416,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Export full config (includes secrets — for backup/migration)
-  app.get('/api/v1/config/export', async () => {
+  app.get('/api/v2/config/export', async () => {
     const config = getConfig();
     // Return full config with real apiKeys but strip internal-only fields
     const { ...exportable } = config;
@@ -430,7 +424,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Hot update config
-  app.patch('/api/v1/config', async (req) => {
+  app.patch('/api/v2/config', async (req) => {
     const body = req.body as any;
     const updated = updateConfig(body);
     const reloaded = cortex.reloadProviders(updated);
@@ -442,7 +436,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Test LLM connection
-  app.post('/api/v1/test-llm', async (req) => {
+  app.post('/api/v2/test-llm', async (req) => {
     const body = req.body as any;
     const target: 'extraction' | 'lifecycle' = body?.target === 'lifecycle' ? 'lifecycle' : 'extraction';
     const provider = target === 'extraction' ? cortex.llmExtraction : cortex.llmLifecycle;
@@ -457,7 +451,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Test Embedding connection
-  app.post('/api/v1/test-embedding', async () => {
+  app.post('/api/v2/test-embedding', async () => {
     const providerName = cortex.config.embedding.provider;
     const start = Date.now();
     try {
@@ -474,7 +468,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Test Reranker connection
-  app.post('/api/v1/test-reranker', async () => {
+  app.post('/api/v2/test-reranker', async () => {
     const rerankerConfig = cortex.config.search?.reranker;
     const provider = rerankerConfig?.provider ?? 'none';
     if (provider === 'none') {
@@ -567,7 +561,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Full reindex — rebuilds all vector embeddings
-  app.post('/api/v1/reindex', async (req, reply) => {
+  app.post('/api/v2/reindex', async (req, reply) => {
     const db = getDb();
     const memories = db.prepare('SELECT id, content FROM memories WHERE superseded_by IS NULL').all() as Pick<Memory, 'id' | 'content'>[];
     const activeIds = new Set(memories.map(m => m.id));
