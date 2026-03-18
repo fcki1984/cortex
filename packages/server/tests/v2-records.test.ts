@@ -201,6 +201,69 @@ describe('CortexRecordsV2', () => {
     expect((recall.meta as any).note_candidate_count).toBeGreaterThan(0);
   });
 
+  it('does not let a subject-only profile rule enter relevance basis for a location query', async () => {
+    await service.remember({
+      agent_id: 'subject-only-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    await service.remember({
+      agent_id: 'subject-only-agent',
+      kind: 'profile_rule',
+      content: '我喜欢简洁回答',
+      source_type: 'user_confirmed',
+    });
+
+    const recall = await service.recall({ query: 'Where does the user live?', agent_id: 'subject-only-agent' });
+    const basis = (recall.meta as any).relevance_basis || [];
+
+    expect(recall.facts.some(record => record.content.includes('大阪'))).toBe(true);
+    expect(recall.rules).toHaveLength(0);
+    expect(basis).toHaveLength(1);
+    expect(basis[0]?.kind).toBe('fact_slot');
+  });
+
+  it('does not let a subject-only location fact enter relevance basis for a response-style query', async () => {
+    await service.remember({
+      agent_id: 'subject-only-reverse-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    await service.remember({
+      agent_id: 'subject-only-reverse-agent',
+      kind: 'profile_rule',
+      content: '我喜欢简洁回答',
+      source_type: 'user_confirmed',
+    });
+
+    const recall = await service.recall({ query: 'How should the assistant respond?', agent_id: 'subject-only-reverse-agent' });
+    const basis = (recall.meta as any).relevance_basis || [];
+
+    expect(recall.rules.some(record => record.content.includes('简洁回答'))).toBe(true);
+    expect(recall.facts).toHaveLength(0);
+    expect(basis).toHaveLength(1);
+    expect(basis[0]?.kind).toBe('profile_rule');
+  });
+
+  it('does not bridge note-only queries through generic solution wording', async () => {
+    await service.remember({
+      agent_id: 'generic-solution-agent',
+      kind: 'session_note',
+      content: '最近也许会考虑换方案',
+    });
+
+    const search = await service.search('最近是否要换方案？', { agent_id: 'generic-solution-agent', limit: 10 });
+    expect(search[0]?.intent_match || []).toEqual([]);
+
+    const recall = await service.recall({ query: '最近是否要换方案？', agent_id: 'generic-solution-agent' });
+    expect(recall.context).toBe('');
+    expect(recall.meta.reason).toBe('low_relevance');
+  });
+
   it('keeps agent persona available even when regular recall is skipped', async () => {
     await service.remember({
       agent_id: 'persona-agent',

@@ -76,11 +76,11 @@ const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
 
 const ATTRIBUTE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'location', patterns: [/\blive\b/i, /\blives\b/i, /\bliving\b/i, /\blocation\b/i, /\bresidence\b/i, /住在哪里/i, /住哪/i, /住在/i, /居住/i] },
-  { key: 'response_style', patterns: [/\banswer\b/i, /\brespond\b/i, /\breply\b/i, /\bstyle\b/i, /\btone\b/i, /回答/i, /回复/i, /风格/i, /简洁/i, /简短/i] },
-  { key: 'persona_style', patterns: [/\banswer\b/i, /\brespond\b/i, /\breply\b/i, /\bpersona\b/i, /\bstyle\b/i, /回答/i, /回复/i, /人设/i, /风格/i] },
+  { key: 'response_style', patterns: [/\banswer style\b/i, /\bresponse style\b/i, /\brespond\b/i, /\breply\b/i, /\btone\b/i, /怎么回答/i, /如何回答/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /简洁/i, /简短/i] },
+  { key: 'persona_style', patterns: [/\bpersona\b/i, /\bresponse style\b/i, /\bassistant style\b/i, /人设/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /助手风格/i] },
   { key: 'response_length', patterns: [/\bverbose\b/i, /\blong\b/i, /\bshort\b/i, /\bbrief\b/i, /\bconcise\b/i, /长篇/i, /冗长/i, /简洁/i, /简短/i] },
   { key: 'language_preference', patterns: [/\blanguage\b/i, /\benglish\b/i, /\bchinese\b/i, /\bjapanese\b/i, /语言/i, /中文/i, /英文/i, /日文/i] },
-  { key: 'solution_complexity', patterns: [/\bsimple\b/i, /\blightweight\b/i, /\bcomplex\b/i, /\bsetup\b/i, /\bdeployment\b/i, /\bsolution\b/i, /简单/i, /复杂/i, /部署/i, /方案/i] },
+  { key: 'solution_complexity', patterns: [/\bsimple\b/i, /\blightweight\b/i, /\bcomplex\b/i, /\bsetup\b/i, /\bdeployment\b/i, /\bsolution\b/i, /简单/i, /复杂/i, /部署/i, /解决方案/i, /部署方案/i] },
   { key: 'risk_tolerance', patterns: [/\brisk\b/i, /\btolerance\b/i, /\bprofile\b/i, /风险/i] },
   { key: 'persona_boundary', patterns: [/\bconstraint\b/i, /\brequirement\b/i, /\bmust\b/i, /\bmust not\b/i, /\bavoid\b/i, /不要/i, /必须/i, /约束/i, /要求/i] },
 ];
@@ -256,25 +256,33 @@ function collectIntentMatches(queryIntents: NormalizedRecallIntents, recordInten
   ];
 }
 
+function splitIntentMatches(matches: string[]): { subject_match: string[]; anchor_match: string[] } {
+  return {
+    subject_match: matches.filter(match => match.startsWith('subject:')),
+    anchor_match: matches.filter(match => match.startsWith('attribute:') || match.startsWith('state:')),
+  };
+}
+
 function evaluateDurableEligibility(result: Pick<SearchResult, 'kind' | 'source_type' | 'overlap' | 'lexical_score' | 'vector_score' | 'intent_match'>): DurableEligibility {
   if (!sourceAllowed(result)) {
     return { eligible: false, via: [], excluded_reason: 'source_not_allowed' };
   }
 
+  const { subject_match, anchor_match } = splitIntentMatches(result.intent_match);
   const via: Array<'intent' | 'overlap' | 'lexical' | 'vector'> = [];
-  if (result.intent_match.length > 0) via.push('intent');
+  if (anchor_match.length > 0) via.push('intent');
   if (result.overlap > 0) via.push('overlap');
   if (result.lexical_score >= 0.12) via.push('lexical');
   if (result.vector_score >= 0.62) via.push('vector');
   return {
     eligible: via.length > 0,
     via,
-    excluded_reason: via.length > 0 ? null : 'below_recall_threshold',
+    excluded_reason: via.length > 0 ? null : subject_match.length > 0 ? 'subject_only_match' : 'below_recall_threshold',
   };
 }
 
 function noteMatchesQuery(result: Pick<SearchResult, 'overlap' | 'vector_score' | 'intent_match'>): boolean {
-  return result.overlap > 0 || result.intent_match.length > 0 || result.vector_score >= 0.35;
+  return result.overlap > 0 || splitIntentMatches(result.intent_match).anchor_match.length > 0 || result.vector_score >= 0.35;
 }
 
 function mergeIntentProfiles(records: CortexRecord[]): RecordIntentProfile {
@@ -298,10 +306,8 @@ function noteCanRideAlong(
   durableIntentProfile: RecordIntentProfile,
 ): boolean {
   if (note.overlap > 0) return true;
-  if (note.intent_match.length > 0) return true;
   const noteProfile = buildRecordIntentProfile(note);
   return (
-    intersectSets(noteProfile.subjects, durableIntentProfile.subjects).length > 0 ||
     intersectSets(noteProfile.attributes, durableIntentProfile.attributes).length > 0 ||
     intersectSets(noteProfile.states, durableIntentProfile.states).length > 0 ||
     intersectSets(noteProfile.attributes, queryIntents.attributes).length > 0 ||
@@ -557,13 +563,16 @@ export class CortexRecordsV2 {
       const overlap = countOverlap(query, record.content);
       const directContains = record.content.includes(query);
       const intentMatch = collectIntentMatches(queryIntents, buildRecordIntentProfile(record));
+      const { subject_match, anchor_match } = splitIntentMatches(intentMatch);
       if (!directContains && overlap === 0 && intentMatch.length === 0) continue;
       const current = scoreMap.get(record.id) || { lexical: 0, vector: 0 };
       const lexical = directContains
         ? 0.95
-        : intentMatch.length > 0
-          ? Math.min(0.32 + intentMatch.length * 0.08, 0.72)
-          : Math.min(0.2 + overlap * 0.15, 0.8);
+        : anchor_match.length > 0
+          ? Math.min(0.32 + anchor_match.length * 0.08, 0.72)
+          : overlap > 0
+            ? Math.min(0.2 + overlap * 0.15, 0.8)
+            : Math.min(0.04 + subject_match.length * 0.01, 0.08);
       current.lexical = Math.max(current.lexical, lexical);
       scoreMap.set(record.id, current);
     }
@@ -677,8 +686,9 @@ export class CortexRecordsV2 {
         skipped: false,
         normalized_intents: serializeIntents(queryIntents),
         relevance_basis: durableCandidates.map(result => {
+          const { anchor_match } = splitIntentMatches(result.intent_match);
           const via: Array<'intent' | 'overlap' | 'lexical' | 'vector'> = [];
-          if (result.intent_match.length > 0) via.push('intent');
+          if (anchor_match.length > 0) via.push('intent');
           if (result.overlap > 0) via.push('overlap');
           if (result.lexical_score >= 0.12) via.push('lexical');
           if (result.vector_score >= 0.62) via.push('vector');

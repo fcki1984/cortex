@@ -306,4 +306,86 @@ describe('API V2 Integration', () => {
     expect(parsed.results[0]?.eligible_for_recall).toBe(true);
     expect(parsed.results[0]?.excluded_reason ?? null).toBeNull();
   });
+
+  it('keeps subject-only durable matches out of relevance_basis for location recall', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-subject-only',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '我喜欢简洁回答',
+        agent_id: 'api-subject-only',
+      },
+    });
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-subject-only' },
+    });
+
+    expect(recalled.statusCode).toBe(200);
+    const body = JSON.parse(recalled.payload);
+    expect(body.rules).toHaveLength(0);
+    expect(body.meta.relevance_basis).toHaveLength(1);
+    expect(body.meta.relevance_basis[0]?.kind).toBe('fact_slot');
+  });
+
+  it('marks subject-only search_debug results as excluded from recall', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-subject-only-debug',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '我喜欢简洁回答',
+        agent_id: 'api-subject-only-debug',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: {
+          name: 'cortex_search_debug',
+          arguments: {
+            agent_id: 'api-subject-only-debug',
+            query: 'Where does the user live?',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    const parsed = JSON.parse(body.result?.content?.[0]?.text);
+    const rule = parsed.results.find((item: any) => item.kind === 'profile_rule');
+    expect(rule?.eligible_for_recall).toBe(false);
+    expect(rule?.excluded_reason).toBe('subject_only_match');
+  });
 });
