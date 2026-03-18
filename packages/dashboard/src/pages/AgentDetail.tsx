@@ -846,7 +846,11 @@ def ingest(user_msg: str, assistant_msg: str):
   if (!agent) return <div className="card" style={{ color: 'var(--danger)' }}>{t('agentDetail.notFound')}</div>;
 
   const isBuiltIn = agent.id === 'default' || agent.id === 'mcp';
-  const stats = agent.stats || { layers: {}, total: 0 };
+  const stats = agent.stats || { total: 0, active: 0, inactive: 0, kinds: {}, sources: {} };
+  const activeRecords = stats.active ?? stats.total ?? 0;
+  const inactiveRecords = stats.inactive ?? 0;
+  const kindEntries = Object.entries(stats.kinds || {});
+  const sourceEntries = Object.entries(stats.sources || {});
   const mc = mergedConfig?.config;
 
   return (
@@ -936,43 +940,51 @@ def ingest(user_msg: str, assistant_msg: str):
             )}
           </div>
 
-          {/* Memory Stats */}
+          {/* Record Stats */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.memoryStats')}</h3>
-            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>
-              {stats.total} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>{t('agentDetail.totalMemories')}</span>
+            <h3 style={{ marginBottom: 12 }}>{t('agentDetail.recordStats')}</h3>
+
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 180, padding: 14, borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{activeRecords}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('agentDetail.activeRecords')}</div>
+              </div>
+              <div style={{ minWidth: 180, padding: 14, borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{inactiveRecords}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('agentDetail.inactiveRecords')}</div>
+              </div>
             </div>
 
-            {stats.total > 0 && (
-              <>
-                {/* Layer bar */}
-                <div style={{ display: 'flex', height: 24, borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 12 }}>
-                  {(['working', 'core', 'archive'] as const).map(layer => {
-                    const count = stats.layers[layer] || 0;
-                    const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
-                    if (pct === 0) return null;
-                    const colors: Record<string, string> = { working: '#f59e0b', core: '#3b82f6', archive: '#6b7280' };
-                    return (
-                      <div
-                        key={layer}
-                        title={`${layer}: ${count}`}
-                        style={{ width: `${pct}%`, background: colors[layer], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 500 }}
-                      >
-                        {pct > 10 ? `${layer} (${count})` : ''}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-                  {(['working', 'core', 'archive'] as const).map(layer => (
-                    <div key={layer} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 2, background: layer === 'working' ? '#f59e0b' : layer === 'core' ? '#3b82f6' : '#6b7280' }} />
-                      <span>{layer}: {stats.layers[layer] || 0}</span>
+            {(kindEntries.length > 0 || sourceEntries.length > 0) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+                {kindEntries.length > 0 && (
+                  <div style={{ padding: 14, borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('stats.recordKinds')}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                      {kindEntries.map(([kind, count]) => (
+                        <div key={kind} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{kind}</span>
+                          <span>{count as number}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </>
+                  </div>
+                )}
+
+                {sourceEntries.length > 0 && (
+                  <div style={{ padding: 14, borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('stats.sourceTypes')}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                      {sourceEntries.map(([source, count]) => (
+                        <div key={source} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{source}</span>
+                          <span>{count as number}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

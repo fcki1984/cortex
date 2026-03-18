@@ -11,6 +11,7 @@ import path from 'node:path';
 
 const DASHBOARD_DIST = path.resolve(__dirname, '../../dashboard/dist');
 const ZH_LOCALE = path.resolve(__dirname, '../../dashboard/src/i18n/locales/zh.ts');
+const AGENT_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/AgentDetail.tsx');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -192,6 +193,15 @@ describe('Dashboard Integration', () => {
       expect(zh).not.toContain("rulesSection: '规则与 Persona'");
       expect(zh).not.toContain("subtitle: '审查提取后的记录，标记质量，并在需要时提交 supersede 语义的更正。'");
       expect(zh).not.toContain("correctedHint: '在这里填写修正后的 durable 文本或会话摘要。'");
+    });
+  });
+
+  describe('Agent detail v2 stats rendering', () => {
+    it('should render v2 agent stats without legacy layer references', () => {
+      const src = fs.readFileSync(AGENT_DETAIL_SOURCE, 'utf-8');
+      expect(src).toContain('stats.kinds');
+      expect(src).toContain('stats.sources');
+      expect(src).not.toContain('stats.layers');
     });
   });
 });
