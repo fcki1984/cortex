@@ -4,6 +4,7 @@ import Stats from './pages/Stats.js';
 import MemoryBrowser from './pages/MemoryBrowser.js';
 import RelationGraph from './pages/RelationGraph.js';
 import LifecycleMonitor from './pages/LifecycleMonitor.js';
+import FeedbackReview from './pages/FeedbackReview.js';
 import Settings from './pages/Settings/index.js';
 import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
@@ -643,6 +644,7 @@ function AppContent() {
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '系统' : 'System'}</div>
           <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>
+          <NavLink to="/feedback" className={({ isActive }) => isActive ? 'active' : ''}>🧪 {t('nav.feedback')}</NavLink>
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''}>⚙️ {t('nav.settings')}</NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -675,6 +677,7 @@ function AppContent() {
           <Route path="/extraction-logs" element={<ExtractionLogs />} />
           <Route path="/system-logs" element={<SystemLogs />} />
           <Route path="/lifecycle" element={<LifecycleMonitor />} />
+          <Route path="/feedback" element={<FeedbackReview />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

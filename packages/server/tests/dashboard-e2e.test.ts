@@ -37,9 +37,11 @@ describe('Dashboard Integration', () => {
     it('should find and read JS bundle', () => {
       if (!distExists) return;
       const assets = fs.readdirSync(path.join(DASHBOARD_DIST, 'assets'));
-      const jsFile = assets.find(f => f.endsWith('.js'));
-      expect(jsFile).toBeDefined();
-      js = fs.readFileSync(path.join(DASHBOARD_DIST, 'assets', jsFile!), 'utf-8');
+      const jsFiles = assets.filter(f => f.endsWith('.js'));
+      expect(jsFiles.length).toBeGreaterThan(0);
+      js = jsFiles
+        .map(file => fs.readFileSync(path.join(DASHBOARD_DIST, 'assets', file), 'utf-8'))
+        .join('\n');
       expect(js.length).toBeGreaterThan(0);
     });
 
@@ -101,6 +103,12 @@ describe('Dashboard Integration', () => {
       expect(js).toContain('openclawStep2Title');
       expect(js).toContain('openclawStep3Title');
       expect(js).toContain('openclawStep4Title');
+    });
+
+    it('should expose feedback review navigation and page copy', () => {
+      if (!js) return;
+      expect(js).toContain('Feedback');
+      expect(js).toContain('Feedback Review');
     });
 
     // ── Hooks and tools listed ──
