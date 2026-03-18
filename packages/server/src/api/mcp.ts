@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { MCPServer, type MCPServerDeps } from '../mcp/server.js';
-import { ensureAgent, listRelations } from '../db/index.js';
+import { ensureAgent } from '../db/index.js';
 import { getV2Stats } from '../v2/store.js';
 import { observedRoute } from './observability.js';
 
@@ -60,7 +60,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
     },
 
     listRelations: async (subject, object, limit, agentId) => {
-      return listRelations({ subject, object, limit: limit || 20, agent_id: agentId || 'mcp' });
+      return cortex.relationsV2.listRelations({ subject, object, limit: limit || 20, agent_id: agentId || 'mcp' });
     },
   };
 

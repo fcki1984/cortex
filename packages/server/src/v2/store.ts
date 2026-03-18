@@ -629,6 +629,25 @@ function supersedeRecord(existing: CortexRecord, newId: string): void {
   deleteRecordVector(existing.id);
 }
 
+export function supersedeRecordById(id: string, newId: string): CortexRecord | null {
+  const existing = getRecordById(id);
+  if (!existing) return null;
+  const db = getDb();
+  db.transaction(() => {
+    supersedeRecord(existing, newId);
+    updateRegistryTimestamp(existing.id);
+  })();
+  return getRecordById(id);
+}
+
+export function deactivateRecord(id: string): CortexRecord | null {
+  const existing = getRecordById(id);
+  if (!existing) return null;
+  updateRegistryCommon(id, { is_active: 0 });
+  deleteRecordVector(id);
+  return getRecordById(id);
+}
+
 function equivalentContent(candidate: RecordCandidate, existing: CortexRecord): boolean {
   const left = recordContent(candidate).trim();
   const right = existing.content.trim();

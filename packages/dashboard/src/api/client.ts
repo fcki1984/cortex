@@ -256,3 +256,29 @@ export const recallV2 = (data: any) =>
 
 export const ingestV2 = (data: any) =>
   requestV2('/ingest', { method: 'POST', body: JSON.stringify(data) });
+
+export const listRelationsV2 = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return requestV2(`/relations${qs}`);
+};
+
+export const createRelationV2 = (data: any) =>
+  requestV2('/relations', { method: 'POST', body: JSON.stringify(data) });
+
+export const deleteRelationV2 = (id: string) =>
+  requestV2(`/relations/${id}`, { method: 'DELETE' });
+
+export const previewLifecycleV2 = (agentId?: string) =>
+  requestV2(`/lifecycle/preview${agentId ? `?agent_id=${agentId}` : ''}`);
+
+export const runLifecycleV2 = (agentId?: string) =>
+  requestV2('/lifecycle/run', { method: 'POST', body: JSON.stringify({ agent_id: agentId }) });
+
+export const getLifecycleLogsV2 = (limit = 50, agentId?: string, offset = 0) =>
+  requestV2(`/lifecycle/log?limit=${limit}&offset=${offset}${agentId ? `&agent_id=${agentId}` : ''}`);
+
+export const submitFeedbackV2 = (data: any) =>
+  requestV2('/feedback', { method: 'POST', body: JSON.stringify(data) });
+
+export const getFeedbackStatsV2 = (agentId?: string) =>
+  requestV2(`/feedback/stats${agentId ? `?agent_id=${agentId}` : ''}`);

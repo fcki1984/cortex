@@ -15,6 +15,9 @@ import type { VectorBackend } from './vector/interface.js';
 import type { LLMProvider } from './llm/interface.js';
 import type { EmbeddingProvider } from './embedding/interface.js';
 import { CortexRecordsV2 } from './v2/service.js';
+import { CortexRelationsV2 } from './v2/relations.js';
+import { CortexLifecycleV2 } from './v2/lifecycle.js';
+import { CortexFeedbackV2 } from './v2/feedback.js';
 
 const log = createLogger('app');
 
@@ -26,6 +29,9 @@ export class CortexApp {
   searchEngine: HybridSearchEngine | null;
   exporter: MarkdownExporter | null;
   recordsV2: CortexRecordsV2;
+  relationsV2: CortexRelationsV2;
+  lifecycleV2: CortexLifecycleV2;
+  feedbackV2: CortexFeedbackV2;
   readonly vectorBackend: VectorBackend;
   llmExtraction: LLMProvider;
   llmLifecycle: LLMProvider;
@@ -48,6 +54,9 @@ export class CortexApp {
     this.exporter = null;
     this.rebuildLegacyEngines(config);
     this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
+    this.relationsV2 = new CortexRelationsV2();
+    this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
+    this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
 
     log.info('CortexApp initialized');
   }
@@ -94,6 +103,9 @@ export class CortexApp {
     if (reloaded.length > 0) {
       this.rebuildLegacyEngines(newConfig);
       this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
+      this.relationsV2 = new CortexRelationsV2();
+      this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
+      this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
       log.info({ reloaded }, 'Rebuilt dependent engines');
     }
 

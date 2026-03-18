@@ -110,7 +110,7 @@ const TOOLS: MCPTool[] = [
   },
   {
     name: 'cortex_relations',
-    description: 'List entity relationships from memory (e.g. who knows whom, who uses what)',
+    description: 'List Cortex V2 relations that are traced back to source records and evidence.',
     inputSchema: {
       type: 'object',
       properties: {

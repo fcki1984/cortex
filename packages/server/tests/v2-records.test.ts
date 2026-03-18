@@ -13,6 +13,36 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
+function createVectorOnlyEmbedding(): EmbeddingProvider {
+  const vector = [1, 0, 0, 0];
+  return {
+    name: 'vector-only-mock',
+    dimensions: 4,
+    embed: vi.fn().mockImplementation(async (text: string) => {
+      if (
+        text.includes('我住大阪') ||
+        text.includes('我喜欢简洁回答') ||
+        text.includes('最近也许会考虑换方案') ||
+        text.includes('最近是否要换方案')
+      ) {
+        return vector;
+      }
+      return [];
+    }),
+    embedBatch: vi.fn().mockImplementation(async (texts: string[]) => texts.map(text => {
+      if (
+        text.includes('我住大阪') ||
+        text.includes('我喜欢简洁回答') ||
+        text.includes('最近也许会考虑换方案') ||
+        text.includes('最近是否要换方案')
+      ) {
+        return vector;
+      }
+      return [];
+    })),
+  };
+}
+
 function createMockLLM(): LLMProvider {
   return {
     name: 'mock',
@@ -262,6 +292,40 @@ describe('CortexRecordsV2', () => {
     const recall = await service.recall({ query: '最近是否要换方案？', agent_id: 'generic-solution-agent' });
     expect(recall.context).toBe('');
     expect(recall.meta.reason).toBe('low_relevance');
+  });
+
+  it('does not let vector-only durable matches promote a note-only recall', async () => {
+    const vectorService = new CortexRecordsV2(createMockLLM(), createVectorOnlyEmbedding());
+    await vectorService.initialize();
+
+    await vectorService.remember({
+      agent_id: 'vector-only-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    await vectorService.remember({
+      agent_id: 'vector-only-agent',
+      kind: 'profile_rule',
+      content: '我喜欢简洁回答',
+      source_type: 'user_confirmed',
+    });
+    await vectorService.remember({
+      agent_id: 'vector-only-agent',
+      kind: 'session_note',
+      content: '最近也许会考虑换方案',
+    });
+
+    const recall = await vectorService.recall({ query: '最近是否要换方案？', agent_id: 'vector-only-agent' });
+
+    expect(recall.context).toBe('');
+    expect(recall.rules).toHaveLength(0);
+    expect(recall.facts).toHaveLength(0);
+    expect(recall.session_notes).toHaveLength(0);
+    expect(recall.meta.reason).toBe('low_relevance');
+    expect((recall.meta as any).durable_candidate_count).toBe(0);
+    expect((recall.meta as any).relevance_basis).toEqual([]);
   });
 
   it('keeps agent persona available even when regular recall is skipped', async () => {

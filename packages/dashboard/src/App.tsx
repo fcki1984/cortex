@@ -635,14 +635,14 @@ function AppContent() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>📊 {t('nav.dashboard')}</NavLink>
           <NavLink to="/memories" className={({ isActive }) => isActive ? 'active' : ''}>🗂️ {t('nav.memories')}</NavLink>
           <NavLink to="/agents" className={({ isActive }) => isActive ? 'active' : ''}>🤖 {t('nav.agents')}</NavLink>
-          {legacyMode && <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>}
+          <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '日志' : 'Logs'}</div>
           <NavLink to="/extraction-logs" className={({ isActive }) => isActive ? 'active' : ''}>📋 {t('nav.extractionLogs')}</NavLink>
           <NavLink to="/system-logs" className={({ isActive }) => isActive ? 'active' : ''}>🖥️ {t('nav.systemLogs')}</NavLink>
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '系统' : 'System'}</div>
-          {legacyMode && <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>}
+          <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''}>⚙️ {t('nav.settings')}</NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -671,10 +671,10 @@ function AppContent() {
           <Route path="/memories" element={<MemoryBrowser />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetail />} />
-          <Route path="/relations" element={legacyMode ? <RelationGraph /> : <Navigate to="/" replace />} />
+          <Route path="/relations" element={<RelationGraph />} />
           <Route path="/extraction-logs" element={<ExtractionLogs />} />
           <Route path="/system-logs" element={<SystemLogs />} />
-          <Route path="/lifecycle" element={legacyMode ? <LifecycleMonitor /> : <Navigate to="/" replace />} />
+          <Route path="/lifecycle" element={<LifecycleMonitor />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

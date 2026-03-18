@@ -273,11 +273,17 @@ function evaluateDurableEligibility(result: Pick<SearchResult, 'kind' | 'source_
   if (anchor_match.length > 0) via.push('intent');
   if (result.overlap > 0) via.push('overlap');
   if (result.lexical_score >= 0.12) via.push('lexical');
-  if (result.vector_score >= 0.62) via.push('vector');
+  if (result.vector_score >= 0.62 && via.length > 0) via.push('vector');
   return {
     eligible: via.length > 0,
     via,
-    excluded_reason: via.length > 0 ? null : subject_match.length > 0 ? 'subject_only_match' : 'below_recall_threshold',
+    excluded_reason: via.length > 0
+      ? null
+      : result.vector_score >= 0.62
+        ? 'vector_only_match'
+        : subject_match.length > 0
+          ? 'subject_only_match'
+          : 'below_recall_threshold',
   };
 }
 

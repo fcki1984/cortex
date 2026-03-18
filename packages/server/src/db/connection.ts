@@ -652,6 +652,49 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_extraction_logs_agent ON extraction_logs(agent_id, created_at);
     `,
   },
+  {
+    name: '015_v2_relations_feedback',
+    sql: `
+      CREATE TABLE IF NOT EXISTS record_relations_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        source_record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
+        source_evidence_id INTEGER REFERENCES record_evidence(id) ON DELETE SET NULL,
+        subject_key TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object_key TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_record_relations_v2_unique
+        ON record_relations_v2(agent_id, source_record_id, subject_key, predicate, object_key);
+      CREATE INDEX IF NOT EXISTS idx_record_relations_v2_agent
+        ON record_relations_v2(agent_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_record_relations_v2_subject
+        ON record_relations_v2(agent_id, subject_key);
+      CREATE INDEX IF NOT EXISTS idx_record_relations_v2_object
+        ON record_relations_v2(agent_id, object_key);
+
+      CREATE TABLE IF NOT EXISTS record_feedback_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
+        evidence_id INTEGER REFERENCES record_evidence(id) ON DELETE SET NULL,
+        extraction_log_id TEXT REFERENCES extraction_logs(id) ON DELETE SET NULL,
+        feedback TEXT NOT NULL CHECK (feedback IN ('good', 'bad', 'corrected')),
+        reason TEXT,
+        corrected_content TEXT,
+        correction_record_id TEXT REFERENCES record_registry(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_record_feedback_v2_agent
+        ON record_feedback_v2(agent_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_record_feedback_v2_record
+        ON record_feedback_v2(record_id, created_at DESC);
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

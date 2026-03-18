@@ -5,6 +5,38 @@ import { loadConfig } from '../src/utils/config.js';
 import { initDatabase, closeDatabase } from '../src/db/index.js';
 import { CortexApp } from '../src/app.js';
 import { registerAllRoutes } from '../src/api/router.js';
+import { CortexRecordsV2 } from '../src/v2/service.js';
+import type { EmbeddingProvider } from '../src/embedding/interface.js';
+
+function createVectorOnlyEmbedding(): EmbeddingProvider {
+  const vector = [1, 0, 0, 0];
+  return {
+    name: 'vector-only-mock',
+    dimensions: 4,
+    embed: async (text: string) => {
+      if (
+        text.includes('我住大阪') ||
+        text.includes('我喜欢简洁回答') ||
+        text.includes('最近也许会考虑换方案') ||
+        text.includes('最近是否要换方案')
+      ) {
+        return vector;
+      }
+      return [];
+    },
+    embedBatch: async (texts: string[]) => texts.map(text => {
+      if (
+        text.includes('我住大阪') ||
+        text.includes('我喜欢简洁回答') ||
+        text.includes('最近也许会考虑换方案') ||
+        text.includes('最近是否要换方案')
+      ) {
+        return vector;
+      }
+      return [];
+    }),
+  };
+}
 
 describe('API V2 Integration', () => {
   let app: FastifyInstance;
@@ -387,5 +419,230 @@ describe('API V2 Integration', () => {
     const rule = parsed.results.find((item: any) => item.kind === 'profile_rule');
     expect(rule?.eligible_for_recall).toBe(false);
     expect(rule?.excluded_reason).toBe('subject_only_match');
+  });
+
+  it('keeps vector-only durable matches out of note-only recall results', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(cortex.llmExtraction, createVectorOnlyEmbedding());
+    await cortex.recordsV2.initialize();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-vector-only',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '我喜欢简洁回答',
+        agent_id: 'api-vector-only',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '最近也许会考虑换方案',
+        agent_id: 'api-vector-only',
+      },
+    });
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: '最近是否要换方案？', agent_id: 'api-vector-only' },
+    });
+
+    expect(recalled.statusCode).toBe(200);
+    const body = JSON.parse(recalled.payload);
+    expect(body.context).toBe('');
+    expect(body.rules).toHaveLength(0);
+    expect(body.facts).toHaveLength(0);
+    expect(body.session_notes).toHaveLength(0);
+    expect(body.meta.reason).toBe('low_relevance');
+    expect(body.meta.durable_candidate_count).toBe(0);
+    expect(body.meta.relevance_basis).toEqual([]);
+
+    cortex.recordsV2 = originalRecordsV2;
+  });
+
+  it('creates traceable v2 relations bound to source records', async () => {
+    const createdRecord = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-v2-relations',
+      },
+    });
+    const recordBody = JSON.parse(createdRecord.payload);
+
+    const createdRelation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/relations',
+      payload: {
+        agent_id: 'api-v2-relations',
+        source_record_id: recordBody.record.id,
+        subject_key: 'user',
+        predicate: 'lives_in',
+        object_key: 'osaka',
+      },
+    });
+
+    expect(createdRelation.statusCode).toBe(201);
+    const relationBody = JSON.parse(createdRelation.payload);
+    expect(relationBody.source_record_id).toBe(recordBody.record.id);
+    expect(relationBody.subject_key).toBe('user');
+    expect(relationBody.object_key).toBe('osaka');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relations?agent_id=api-v2-relations',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items).toHaveLength(1);
+    expect(listedBody.items[0]?.source_record?.content).toContain('大阪');
+  });
+
+  it('runs lifecycle maintenance only on session notes', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '需要确认部署窗口',
+        session_id: 'session-lifecycle',
+        agent_id: 'api-v2-lifecycle',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '要检查迁移顺序',
+        session_id: 'session-lifecycle',
+        agent_id: 'api-v2-lifecycle',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '需要安排回滚预案',
+        session_id: 'session-lifecycle',
+        agent_id: 'api-v2-lifecycle',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-v2-lifecycle',
+      },
+    });
+
+    const preview = await app.inject({
+      method: 'GET',
+      url: '/api/v2/lifecycle/preview?agent_id=api-v2-lifecycle',
+    });
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.summary.compression_groups).toBe(1);
+    expect(previewBody.summary.expire_count).toBe(0);
+
+    const run = await app.inject({
+      method: 'POST',
+      url: '/api/v2/lifecycle/run',
+      payload: { agent_id: 'api-v2-lifecycle' },
+    });
+    expect(run.statusCode).toBe(200);
+    const runBody = JSON.parse(run.payload);
+    expect(runBody.summary.compressed_notes).toBe(3);
+    expect(runBody.summary.written_notes).toBe(1);
+
+    const activeNotes = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-v2-lifecycle&kind=session_note',
+    });
+    const activeNotesBody = JSON.parse(activeNotes.payload);
+    expect(activeNotesBody.items).toHaveLength(1);
+    expect(activeNotesBody.items[0]?.tags).toContain('lifecycle_compressed');
+
+    const facts = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-v2-lifecycle&kind=fact_slot',
+    });
+    const factsBody = JSON.parse(facts.payload);
+    expect(factsBody.items).toHaveLength(1);
+    expect(factsBody.items[0]?.content).toContain('大阪');
+  });
+
+  it('records v2 feedback corrections as superseding records instead of in-place edits', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-v2-feedback',
+      },
+    });
+    const createdBody = JSON.parse(created.payload);
+
+    const corrected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/feedback',
+      payload: {
+        agent_id: 'api-v2-feedback',
+        record_id: createdBody.record.id,
+        feedback: 'corrected',
+        corrected_content: '我住大阪',
+        reason: 'user corrected residence',
+      },
+    });
+
+    expect(corrected.statusCode).toBe(201);
+    const correctedBody = JSON.parse(corrected.payload);
+    expect(correctedBody.feedback.feedback).toBe('corrected');
+    expect(correctedBody.correction.record.content).toContain('大阪');
+    expect(correctedBody.correction.previous_record_id).toBe(createdBody.record.id);
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-v2-feedback' },
+    });
+    const recallBody = JSON.parse(recalled.payload);
+    expect(recallBody.facts).toHaveLength(1);
+    expect(recallBody.facts[0]?.content).toContain('大阪');
+
+    const stats = await app.inject({
+      method: 'GET',
+      url: '/api/v2/feedback/stats?agent_id=api-v2-feedback',
+    });
+    expect(stats.statusCode).toBe(200);
+    const statsBody = JSON.parse(stats.payload);
+    expect(statsBody.corrected).toBe(1);
   });
 });
