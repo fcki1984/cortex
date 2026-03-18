@@ -10,6 +10,7 @@ import path from 'node:path';
  */
 
 const DASHBOARD_DIST = path.resolve(__dirname, '../../dashboard/dist');
+const ZH_LOCALE = path.resolve(__dirname, '../../dashboard/src/i18n/locales/zh.ts');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -171,6 +172,26 @@ describe('Dashboard Integration', () => {
       expect(cssFile).toBeDefined();
       const css = fs.readFileSync(path.join(DASHBOARD_DIST, 'assets', cssFile!), 'utf-8');
       expect(css.length).toBeGreaterThan(100);
+    });
+  });
+
+  describe('Chinese locale copy', () => {
+    it('should not leave newly added settings and feedback labels in English', () => {
+      const zh = fs.readFileSync(ZH_LOCALE, 'utf-8');
+      expect(zh).toContain("topAgents: '最活跃智能体'");
+      expect(zh).toContain("legacyModeOn: '兼容模式已开启'");
+      expect(zh).toContain("recallDurableCandidates: '{{count}} 条持久记录候选'");
+      expect(zh).toContain("recallNoteCandidates: '{{count}} 条会话笔记候选'");
+      expect(zh).toContain("rulesSection: '规则与人设'");
+      expect(zh).toContain("subtitle: '审查提取后的记录，标记质量，并在需要时提交替代语义的更正。'");
+      expect(zh).toContain("correctedHint: '在这里填写修正后的持久记录文本或会话摘要。'");
+      expect(zh).not.toContain("topAgents: 'Top 智能体'");
+      expect(zh).not.toContain("legacyModeOn: 'Legacy 兼容开启'");
+      expect(zh).not.toContain("recallDurableCandidates: '{{count}} 条 durable 候选'");
+      expect(zh).not.toContain("recallNoteCandidates: '{{count}} 条 note 候选'");
+      expect(zh).not.toContain("rulesSection: '规则与 Persona'");
+      expect(zh).not.toContain("subtitle: '审查提取后的记录，标记质量，并在需要时提交 supersede 语义的更正。'");
+      expect(zh).not.toContain("correctedHint: '在这里填写修正后的 durable 文本或会话摘要。'");
     });
   });
 });
