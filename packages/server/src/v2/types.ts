@@ -203,8 +203,22 @@ export interface RecallOptions {
 export interface RecallMeta {
   query: string;
   total_candidates: number;
+  durable_candidate_count: number;
+  note_candidate_count: number;
   injected_count: number;
   skipped: boolean;
+  normalized_intents: {
+    subjects: string[];
+    attributes: string[];
+    states: string[];
+    tokens: string[];
+  };
+  relevance_basis: Array<{
+    record_id: string;
+    kind: Exclude<RecordKind, 'session_note'>;
+    via: Array<'intent' | 'overlap' | 'lexical' | 'vector'>;
+    intent_match: string[];
+  }>;
   reason?: string;
   latency_ms: number;
 }

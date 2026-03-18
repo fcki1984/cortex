@@ -100,6 +100,42 @@ describe('API V2 Integration', () => {
     expect(body.context).toContain('大阪');
   });
 
+  it('returns structured recall metadata for cross-language durable matches and excludes unrelated notes', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-cross-language',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'session_note',
+        content: '最近也许会考虑换方案',
+        agent_id: 'api-cross-language',
+      },
+    });
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-cross-language' },
+    });
+    expect(recalled.statusCode).toBe(200);
+    const body = JSON.parse(recalled.payload);
+    expect(body.facts.some((item: any) => item.content.includes('大阪'))).toBe(true);
+    expect(body.session_notes).toHaveLength(0);
+    expect(body.meta.normalized_intents.attributes).toContain('location');
+    expect(body.meta.durable_candidate_count).toBeGreaterThan(0);
+    expect(Array.isArray(body.meta.relevance_basis)).toBe(true);
+  });
+
   it('ingests v2 records from fast channel signals', async () => {
     const ingested = await app.inject({
       method: 'POST',
@@ -229,5 +265,45 @@ describe('API V2 Integration', () => {
     expect(parsed.requested_kind).toBe('fact_slot');
     expect(parsed.written_kind).toBe('session_note');
     expect(parsed.reason_code).toBe('insufficient_structure');
+  });
+
+  it('includes recall eligibility metadata in cortex_search_debug results', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-mcp-search-debug',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'cortex_search_debug',
+          arguments: {
+            agent_id: 'api-mcp-search-debug',
+            query: 'Where does the user live?',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    const text = body.result?.content?.[0]?.text;
+    const parsed = JSON.parse(text);
+    expect(Array.isArray(parsed.results)).toBe(true);
+    expect(parsed.results[0]?.intent_match).toBeDefined();
+    expect(parsed.results[0]?.eligible_for_recall).toBe(true);
+    expect(parsed.results[0]?.excluded_reason ?? null).toBeNull();
   });
 });

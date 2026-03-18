@@ -29,6 +29,7 @@ import {
 import type {
   CortexRecord,
   NormalizedRecordCandidate,
+  ProfileRuleRecord,
   RecallOptions,
   RecallResponse,
   RecordKind,
@@ -44,7 +45,55 @@ type SearchResult = CortexRecord & {
   vector_score: number;
   overlap: number;
   final_score: number;
+  intent_match: string[];
+  eligible_for_recall: boolean;
+  excluded_reason: string | null;
 };
+
+type NormalizedRecallIntents = {
+  subjects: Set<string>;
+  attributes: Set<string>;
+  states: Set<string>;
+  tokens: Set<string>;
+};
+
+type RecordIntentProfile = {
+  subjects: Set<string>;
+  attributes: Set<string>;
+  states: Set<string>;
+};
+
+type DurableEligibility = {
+  eligible: boolean;
+  via: Array<'intent' | 'overlap' | 'lexical' | 'vector'>;
+  excluded_reason: string | null;
+};
+
+const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
+  { key: 'user', patterns: [/\buser\b/i, /\bi\b/i, /\bme\b/i, /\bmy\b/i, /用户/i, /我/i, /我的/i] },
+  { key: 'agent', patterns: [/\bagent\b/i, /\bassistant\b/i, /\byou\b/i, /助手/i, /你/i, /回答方式/i] },
+];
+
+const ATTRIBUTE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
+  { key: 'location', patterns: [/\blive\b/i, /\blives\b/i, /\bliving\b/i, /\blocation\b/i, /\bresidence\b/i, /住在哪里/i, /住哪/i, /住在/i, /居住/i] },
+  { key: 'response_style', patterns: [/\banswer\b/i, /\brespond\b/i, /\breply\b/i, /\bstyle\b/i, /\btone\b/i, /回答/i, /回复/i, /风格/i, /简洁/i, /简短/i] },
+  { key: 'persona_style', patterns: [/\banswer\b/i, /\brespond\b/i, /\breply\b/i, /\bpersona\b/i, /\bstyle\b/i, /回答/i, /回复/i, /人设/i, /风格/i] },
+  { key: 'response_length', patterns: [/\bverbose\b/i, /\blong\b/i, /\bshort\b/i, /\bbrief\b/i, /\bconcise\b/i, /长篇/i, /冗长/i, /简洁/i, /简短/i] },
+  { key: 'language_preference', patterns: [/\blanguage\b/i, /\benglish\b/i, /\bchinese\b/i, /\bjapanese\b/i, /语言/i, /中文/i, /英文/i, /日文/i] },
+  { key: 'solution_complexity', patterns: [/\bsimple\b/i, /\blightweight\b/i, /\bcomplex\b/i, /\bsetup\b/i, /\bdeployment\b/i, /\bsolution\b/i, /简单/i, /复杂/i, /部署/i, /方案/i] },
+  { key: 'risk_tolerance', patterns: [/\brisk\b/i, /\btolerance\b/i, /\bprofile\b/i, /风险/i] },
+  { key: 'persona_boundary', patterns: [/\bconstraint\b/i, /\brequirement\b/i, /\bmust\b/i, /\bmust not\b/i, /\bavoid\b/i, /不要/i, /必须/i, /约束/i, /要求/i] },
+];
+
+const STATE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
+  { key: 'current_goal', patterns: [/\bgoal\b/i, /\bplan\b/i, /\bwant\b/i, /\btarget\b/i, /目标/i, /计划/i, /打算/i, /想要/i] },
+  { key: 'current_decision', patterns: [/\bdecision\b/i, /\bdecide\b/i, /\bchoose\b/i, /决定/i, /选定/i] },
+  { key: 'open_todo', patterns: [/\btodo\b/i, /\bto do\b/i, /\bremember\b/i, /\bremind\b/i, /待办/i, /记得/i, /别忘了/i] },
+  { key: 'project_status', patterns: [/\bstatus\b/i, /\bproject\b/i, /\bprogress\b/i, /状态/i, /项目/i, /进度/i] },
+  { key: 'refactor_status', patterns: [/\brefactor\b/i, /\brewrite\b/i, /重构/i, /改写/i] },
+  { key: 'deployment_status', patterns: [/\bdeploy\b/i, /\bdeployment\b/i, /部署/i] },
+  { key: 'migration_status', patterns: [/\bmigrate\b/i, /\bmigration\b/i, /迁移/i] },
+];
 
 function dedupeKey(candidate: NormalizedRecordCandidate): string {
   const record = candidate.candidate;
@@ -76,8 +125,13 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-function sourceAllowed(record: CortexRecord): boolean {
-  if (record.kind === 'profile_rule' && record.owner_scope === 'agent' && record.attribute_key.startsWith('persona')) {
+function sourceAllowed(record: Pick<CortexRecord, 'kind' | 'source_type'> & Partial<Pick<ProfileRuleRecord, 'owner_scope' | 'attribute_key'>>): boolean {
+  if (
+    record.kind === 'profile_rule' &&
+    record.owner_scope === 'agent' &&
+    typeof record.attribute_key === 'string' &&
+    record.attribute_key.startsWith('persona')
+  ) {
     return true;
   }
   return record.source_type === 'user_explicit' || record.source_type === 'user_confirmed';
@@ -127,6 +181,132 @@ function sourceWeight(sourceType: SourceType): number {
     case 'system_derived':
       return 0.6;
   }
+}
+
+function addIntentMatches(text: string, defs: Array<{ key: string; patterns: RegExp[] }>, target: Set<string>) {
+  for (const def of defs) {
+    if (def.patterns.some(pattern => pattern.test(text))) {
+      target.add(def.key);
+    }
+  }
+}
+
+function normalizeRecallIntents(text: string): NormalizedRecallIntents {
+  const raw = text.trim();
+  const subjects = new Set<string>();
+  const attributes = new Set<string>();
+  const states = new Set<string>();
+  const tokens = new Set<string>(extractEntityTokens(raw));
+
+  addIntentMatches(raw, SUBJECT_INTENT_PATTERNS, subjects);
+  addIntentMatches(raw, ATTRIBUTE_INTENT_PATTERNS, attributes);
+  addIntentMatches(raw, STATE_INTENT_PATTERNS, states);
+
+  return { subjects, attributes, states, tokens };
+}
+
+function serializeIntents(intents: NormalizedRecallIntents) {
+  return {
+    subjects: Array.from(intents.subjects),
+    attributes: Array.from(intents.attributes),
+    states: Array.from(intents.states),
+    tokens: Array.from(intents.tokens),
+  };
+}
+
+function intersectSets(left: Set<string>, right: Set<string>): string[] {
+  const matches: string[] = [];
+  for (const value of left) {
+    if (right.has(value)) matches.push(value);
+  }
+  return matches;
+}
+
+function buildRecordIntentProfile(record: CortexRecord): RecordIntentProfile {
+  const inferred = normalizeRecallIntents(record.content);
+  switch (record.kind) {
+    case 'profile_rule':
+      return {
+        subjects: new Set<string>([...inferred.subjects, record.owner_scope === 'agent' ? 'agent' : record.subject_key]),
+        attributes: new Set<string>([...inferred.attributes, record.attribute_key]),
+        states: inferred.states,
+      };
+    case 'fact_slot':
+      return {
+        subjects: new Set<string>([...inferred.subjects, record.entity_key]),
+        attributes: new Set<string>([...inferred.attributes, record.attribute_key]),
+        states: inferred.states,
+      };
+    case 'task_state':
+      return {
+        subjects: new Set<string>([...inferred.subjects, record.subject_key]),
+        attributes: inferred.attributes,
+        states: new Set<string>([...inferred.states, record.state_key]),
+      };
+    case 'session_note':
+      return inferred;
+  }
+}
+
+function collectIntentMatches(queryIntents: NormalizedRecallIntents, recordIntents: RecordIntentProfile): string[] {
+  return [
+    ...intersectSets(queryIntents.subjects, recordIntents.subjects).map(match => `subject:${match}`),
+    ...intersectSets(queryIntents.attributes, recordIntents.attributes).map(match => `attribute:${match}`),
+    ...intersectSets(queryIntents.states, recordIntents.states).map(match => `state:${match}`),
+  ];
+}
+
+function evaluateDurableEligibility(result: Pick<SearchResult, 'kind' | 'source_type' | 'overlap' | 'lexical_score' | 'vector_score' | 'intent_match'>): DurableEligibility {
+  if (!sourceAllowed(result)) {
+    return { eligible: false, via: [], excluded_reason: 'source_not_allowed' };
+  }
+
+  const via: Array<'intent' | 'overlap' | 'lexical' | 'vector'> = [];
+  if (result.intent_match.length > 0) via.push('intent');
+  if (result.overlap > 0) via.push('overlap');
+  if (result.lexical_score >= 0.12) via.push('lexical');
+  if (result.vector_score >= 0.62) via.push('vector');
+  return {
+    eligible: via.length > 0,
+    via,
+    excluded_reason: via.length > 0 ? null : 'below_recall_threshold',
+  };
+}
+
+function noteMatchesQuery(result: Pick<SearchResult, 'overlap' | 'vector_score' | 'intent_match'>): boolean {
+  return result.overlap > 0 || result.intent_match.length > 0 || result.vector_score >= 0.35;
+}
+
+function mergeIntentProfiles(records: CortexRecord[]): RecordIntentProfile {
+  const merged: RecordIntentProfile = {
+    subjects: new Set<string>(),
+    attributes: new Set<string>(),
+    states: new Set<string>(),
+  };
+  for (const record of records) {
+    const profile = buildRecordIntentProfile(record);
+    for (const value of profile.subjects) merged.subjects.add(value);
+    for (const value of profile.attributes) merged.attributes.add(value);
+    for (const value of profile.states) merged.states.add(value);
+  }
+  return merged;
+}
+
+function noteCanRideAlong(
+  note: SearchResult,
+  queryIntents: NormalizedRecallIntents,
+  durableIntentProfile: RecordIntentProfile,
+): boolean {
+  if (note.overlap > 0) return true;
+  if (note.intent_match.length > 0) return true;
+  const noteProfile = buildRecordIntentProfile(note);
+  return (
+    intersectSets(noteProfile.subjects, durableIntentProfile.subjects).length > 0 ||
+    intersectSets(noteProfile.attributes, durableIntentProfile.attributes).length > 0 ||
+    intersectSets(noteProfile.states, durableIntentProfile.states).length > 0 ||
+    intersectSets(noteProfile.attributes, queryIntents.attributes).length > 0 ||
+    intersectSets(noteProfile.states, queryIntents.states).length > 0
+  );
 }
 
 function formatRuleLabel(record: CortexRecord): string {
@@ -340,6 +520,7 @@ export class CortexRecordsV2 {
   }
 
   async search(query: string, opts: { agent_id?: string; limit?: number; recall_only?: boolean } = {}): Promise<SearchResult[]> {
+    const queryIntents = normalizeRecallIntents(query);
     const fts = searchFts(query, { agent_id: opts.agent_id, limit: Math.max(20, (opts.limit || 10) * 3) });
     let vectorHits: Array<{ id: string; score: number }> = [];
 
@@ -364,31 +545,45 @@ export class CortexRecordsV2 {
       scoreMap.set(hit.id, current);
     }
 
-    if (fts.length === 0) {
-      const fallbackPool = listRecords({
-        agent_id: opts.agent_id,
-        include_inactive: false,
-        limit: Math.max(50, getRecordsCount(opts.agent_id) + 10),
-        order_by: 'updated_at',
-        order_dir: 'desc',
-      }).items;
+    const fallbackPool = listRecords({
+      agent_id: opts.agent_id,
+      include_inactive: false,
+      limit: Math.max(50, getRecordsCount(opts.agent_id) + 10),
+      order_by: 'updated_at',
+      order_dir: 'desc',
+    }).items;
 
-      for (const record of fallbackPool) {
-        const overlap = countOverlap(query, record.content);
-        const directContains = record.content.includes(query);
-        if (!directContains && overlap === 0) continue;
-        const current = scoreMap.get(record.id) || { lexical: 0, vector: 0 };
-        const lexical = directContains ? 0.95 : Math.min(0.2 + overlap * 0.15, 0.8);
-        current.lexical = Math.max(current.lexical, lexical);
-        scoreMap.set(record.id, current);
-      }
+    for (const record of fallbackPool) {
+      const overlap = countOverlap(query, record.content);
+      const directContains = record.content.includes(query);
+      const intentMatch = collectIntentMatches(queryIntents, buildRecordIntentProfile(record));
+      if (!directContains && overlap === 0 && intentMatch.length === 0) continue;
+      const current = scoreMap.get(record.id) || { lexical: 0, vector: 0 };
+      const lexical = directContains
+        ? 0.95
+        : intentMatch.length > 0
+          ? Math.min(0.32 + intentMatch.length * 0.08, 0.72)
+          : Math.min(0.2 + overlap * 0.15, 0.8);
+      current.lexical = Math.max(current.lexical, lexical);
+      scoreMap.set(record.id, current);
     }
 
     const results = Array.from(scoreMap.entries())
       .map(([id, score]) => {
         const record = getRecordById(id);
         if (!record || !recordIsActive(record)) return null;
+        const intentMatch = collectIntentMatches(queryIntents, buildRecordIntentProfile(record));
         const overlap = countOverlap(query, record.content);
+        const durability = record.kind === 'session_note'
+          ? { eligible: false, via: [] as Array<'intent' | 'overlap' | 'lexical' | 'vector'>, excluded_reason: noteMatchesQuery({ overlap, vector_score: score.vector, intent_match: intentMatch }) ? 'session_note_requires_durable_match' : 'below_recall_threshold' }
+          : evaluateDurableEligibility({
+              kind: record.kind,
+              source_type: record.source_type,
+              overlap,
+              lexical_score: score.lexical,
+              vector_score: score.vector,
+              intent_match: intentMatch,
+            });
         const final = (score.lexical * 0.6 + score.vector * 0.4) * kindWeight(record.kind) * sourceWeight(record.source_type);
         return {
           ...record,
@@ -396,15 +591,17 @@ export class CortexRecordsV2 {
           vector_score: score.vector,
           overlap,
           final_score: final,
+          intent_match: intentMatch,
+          eligible_for_recall: durability.eligible,
+          excluded_reason: durability.excluded_reason,
         } satisfies SearchResult;
       })
       .filter((result): result is SearchResult => !!result);
 
     const filtered = opts.recall_only
       ? results.filter(result => {
-          if (!sourceAllowed(result)) return false;
-          if (result.kind === 'session_note') return result.final_score >= 0.18 || result.overlap > 0;
-          return result.overlap > 0 || result.vector_score >= 0.55 || result.lexical_score >= 0.12;
+          if (result.kind === 'session_note') return noteMatchesQuery(result);
+          return result.eligible_for_recall;
         })
       : results;
 
@@ -417,6 +614,7 @@ export class CortexRecordsV2 {
     const start = Date.now();
     const query = stripInjectedContent(opts.query).trim();
     const persona = listAgentPersona(opts.agent_id);
+    const queryIntents = normalizeRecallIntents(query);
 
     if (!query || isSmallTalk(query)) {
       const context = this.packContext(persona, [], [], [], opts.max_tokens || 800);
@@ -429,8 +627,12 @@ export class CortexRecordsV2 {
         meta: {
           query,
           total_candidates: 0,
+          durable_candidate_count: 0,
+          note_candidate_count: 0,
           injected_count: context ? context.split('\n').filter(line => line.startsWith('[')).length : 0,
           skipped: true,
+          normalized_intents: serializeIntents(queryIntents),
+          relevance_basis: [],
           reason: 'small_talk',
           latency_ms: Date.now() - start,
         },
@@ -438,18 +640,23 @@ export class CortexRecordsV2 {
     }
 
     const searchResults = await this.search(query, { agent_id: opts.agent_id, limit: 12, recall_only: true });
-    const relevancePassed = searchResults.some(result => result.overlap > 0 || result.vector_score >= 0.62 || result.lexical_score >= 0.16);
+    const durableCandidates = searchResults.filter((result): result is SearchResult & { kind: 'profile_rule' | 'fact_slot' | 'task_state' } =>
+      result.kind !== 'session_note' && result.eligible_for_recall,
+    );
+    const noteCandidates = searchResults.filter((result): result is SearchResult & { kind: 'session_note' } => result.kind === 'session_note');
+    const relevancePassed = durableCandidates.length > 0;
 
-    const rules = searchResults
+    const rules = durableCandidates
       .filter((result): result is SearchResult & { kind: 'profile_rule' } => result.kind === 'profile_rule')
       .map(result => result as SearchResult & { kind: 'profile_rule' })
       .filter(result => !(result.owner_scope === 'agent' && result.attribute_key.startsWith('persona')));
 
-    const facts = searchResults.filter((result): result is SearchResult & { kind: 'fact_slot' } => result.kind === 'fact_slot');
-    const taskState = searchResults.filter((result): result is SearchResult & { kind: 'task_state' } => result.kind === 'task_state');
-    const notes = searchResults
-      .filter((result): result is SearchResult & { kind: 'session_note' } => result.kind === 'session_note')
-      .slice(0, 1);
+    const facts = durableCandidates.filter((result): result is SearchResult & { kind: 'fact_slot' } => result.kind === 'fact_slot');
+    const taskState = durableCandidates.filter((result): result is SearchResult & { kind: 'task_state' } => result.kind === 'task_state');
+    const durableIntentProfile = mergeIntentProfiles(durableCandidates);
+    const notes = relevancePassed
+      ? noteCandidates.filter(note => noteCanRideAlong(note, queryIntents, durableIntentProfile)).slice(0, 1)
+      : [];
 
     const context = relevancePassed
       ? this.packContext(persona, rules, facts, [...taskState, ...notes], opts.max_tokens || 800)
@@ -464,8 +671,24 @@ export class CortexRecordsV2 {
       meta: {
         query,
         total_candidates: searchResults.length,
+        durable_candidate_count: durableCandidates.length,
+        note_candidate_count: noteCandidates.length,
         injected_count: context ? context.split('\n').filter(line => line.startsWith('[')).length : 0,
         skipped: false,
+        normalized_intents: serializeIntents(queryIntents),
+        relevance_basis: durableCandidates.map(result => {
+          const via: Array<'intent' | 'overlap' | 'lexical' | 'vector'> = [];
+          if (result.intent_match.length > 0) via.push('intent');
+          if (result.overlap > 0) via.push('overlap');
+          if (result.lexical_score >= 0.12) via.push('lexical');
+          if (result.vector_score >= 0.62) via.push('vector');
+          return {
+            record_id: result.id,
+            kind: result.kind,
+            via,
+            intent_match: result.intent_match,
+          };
+        }),
         ...(relevancePassed ? {} : { reason: 'low_relevance' }),
         latency_ms: Date.now() - start,
       },

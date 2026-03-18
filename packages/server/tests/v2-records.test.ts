@@ -71,6 +71,36 @@ describe('CortexRecordsV2', () => {
     expect(recall.facts.some(record => record.content.includes('东京'))).toBe(false);
   });
 
+  it('recalls a Chinese durable fact for an English location query via intent bridging', async () => {
+    await service.remember({
+      agent_id: 'cross-language-fact-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+
+    const recall = await service.recall({ query: 'Where does the user live?', agent_id: 'cross-language-fact-agent' });
+    expect(recall.facts.some(record => record.content.includes('大阪'))).toBe(true);
+    expect(recall.context).toContain('大阪');
+    expect((recall.meta as any).normalized_intents?.attributes).toContain('location');
+    expect((recall.meta as any).relevance_basis?.some((item: any) => item.kind === 'fact_slot')).toBe(true);
+  });
+
+  it('recalls an English response-style rule for a Chinese recall query via intent bridging', async () => {
+    await service.remember({
+      agent_id: 'cross-language-rule-agent',
+      kind: 'profile_rule',
+      content: 'I prefer concise answers.',
+      source_type: 'user_confirmed',
+    });
+
+    const recall = await service.recall({ query: '你应该怎么回答？', agent_id: 'cross-language-rule-agent' });
+    expect(recall.rules.some(record => record.content.includes('concise answers'))).toBe(true);
+    expect(recall.context).toContain('concise answers');
+    expect((recall.meta as any).normalized_intents?.attributes?.some((item: string) => item === 'response_style' || item === 'persona_style')).toBe(true);
+  });
+
   it('does not recall assistant inferred durable records by default', async () => {
     await service.remember({
       agent_id: 'inferred-agent',
@@ -134,6 +164,41 @@ describe('CortexRecordsV2', () => {
     expect(result.record.kind).toBe('session_note');
     expect(result.written_kind).toBe('session_note');
     expect(result.reason_code).toBe('assistant_only_evidence');
+  });
+
+  it('does not let a session note ride along with an unrelated durable recall', async () => {
+    await service.remember({
+      agent_id: 'note-boundary-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    await service.remember({
+      agent_id: 'note-boundary-agent',
+      kind: 'session_note',
+      content: '最近也许会考虑换方案',
+    });
+
+    const recall = await service.recall({ query: 'Where does the user live?', agent_id: 'note-boundary-agent' });
+    expect(recall.facts.some(record => record.content.includes('大阪'))).toBe(true);
+    expect(recall.session_notes).toHaveLength(0);
+    expect(recall.context).not.toContain('换方案');
+  });
+
+  it('does not treat session-note-only hits as sufficient recall relevance', async () => {
+    await service.remember({
+      agent_id: 'notes-only-agent',
+      kind: 'session_note',
+      content: '最近也许会考虑换方案',
+    });
+
+    const recall = await service.recall({ query: '最近是否要换方案？', agent_id: 'notes-only-agent' });
+    expect(recall.context).toBe('');
+    expect(recall.session_notes).toHaveLength(0);
+    expect(recall.meta.reason).toBe('low_relevance');
+    expect((recall.meta as any).durable_candidate_count).toBe(0);
+    expect((recall.meta as any).note_candidate_count).toBeGreaterThan(0);
   });
 
   it('keeps agent persona available even when regular recall is skipped', async () => {

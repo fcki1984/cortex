@@ -387,10 +387,26 @@ export default function Stats() {
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <span>{t('stats.recallFound', { total: recallResults.meta?.total_candidates || 0 })}</span>
+              <span>{t('stats.recallDurableCandidates', { count: recallResults.meta?.durable_candidate_count || 0 })}</span>
+              <span>{t('stats.recallNoteCandidates', { count: recallResults.meta?.note_candidate_count || 0 })}</span>
               <span>{t('stats.recallInjected', { count: recallResults.meta?.injected_count || 0 })}</span>
               <span>⏱ {recallResults.meta?.latency_ms || 0}ms</span>
               {recallResults.meta?.reason && <span>{t('stats.recallReason', { reason: recallResults.meta.reason })}</span>}
             </div>
+            {(((recallResults.meta?.normalized_intents?.subjects?.length || 0) > 0 ||
+              (recallResults.meta?.normalized_intents?.attributes?.length || 0) > 0 ||
+              (recallResults.meta?.normalized_intents?.states?.length || 0) > 0) ||
+              (recallResults.meta?.relevance_basis?.length || 0) > 0) && (
+              <details style={{ background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '10px 12px' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{t('stats.recallDebugMeta')}</summary>
+                <pre className="json-debug" style={{ margin: '10px 0 0 0', whiteSpace: 'pre-wrap' }}>
+{JSON.stringify({
+  normalized_intents: recallResults.meta?.normalized_intents || {},
+  relevance_basis: recallResults.meta?.relevance_basis || [],
+}, null, 2)}
+                </pre>
+              </details>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
               <RecallSection title={t('stats.rulesSection')} items={recallResults.rules || []} color="#3b82f6" />
               <RecallSection title={t('stats.factsSection')} items={recallResults.facts || []} color="#22c55e" />
