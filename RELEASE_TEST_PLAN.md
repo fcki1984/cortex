@@ -54,6 +54,19 @@
 
 ## 三、cortex-bridge 插件测试
 
+### 3.0 Windows Host Runtime Gate
+
+> OpenClaw 如果部署在 Windows 主机，必须直接在 Windows 宿主环境完成最终验收，WSL/Linux 侧检查不能替代这一步。
+
+| # | 测试项 | 入口 | 预期 |
+|---|--------|------|------|
+| P0-1 | 打开 OpenClaw 聊天页 | `http://localhost:18790/chat?session=main` | 页面正常进入会话 |
+| P0-2 | slash command 状态检查 | `/cortex_status` | 显示 Cortex 在线，允许“在线但部分状态降级” |
+| P0-3 | slash command 写入规则 | `/cortex_remember 请用中文回答` | 写入 durable 语言偏好规则 |
+| P0-4 | slash command 搜索规则 | `/cortex_search What language should the assistant use?` | 召回中文回答规则 |
+| P0-5 | slash command 最近记录 | `/cortex_recent` | 能看到刚写入的记录 |
+| P0-6 | 真实会话链路 | 同一 session 连续两轮对话 | 第 2 轮 before_agent_start 可召回，第 1 轮结束后 agent_end ingest 生效 |
+
 ### 3.1 配置优先级
 
 | # | 测试项 | 配置 | 预期 agentId |
@@ -72,7 +85,7 @@
 | P7 | cortex_recall 正常查询 | 返回相关记忆 context |
 | P8 | cortex_recall 无结果 | "No relevant memories found." |
 | P9 | cortex_recall Cortex 不可达 | 返回错误信息，不崩溃 |
-| P10 | cortex_remember 存储 | "Remembered: ..." |
+| P10 | cortex_remember 存储 | 返回 V2 requested kind / written kind 语义 |
 | P11 | cortex_remember 无 token 时（E1） | 正常工作 |
 | P12 | cortex_remember 错误 token | 返回 HTTP 401/403 错误 |
 | P13 | cortex_ingest 提取对话 | "Conversation ingested — N memories extracted" |
@@ -85,13 +98,13 @@
 
 | # | 测试项 | 命令 | 预期 |
 |---|--------|------|------|
-| P18 | cortex_status 在线 | `/cortex_status` | ✅ + version + uptime + memories + agent + url |
+| P18 | cortex_status 在线 | `/cortex_status` | ✅ + version + uptime + memories + agent + url；若次级请求超时则显示在线降级态 |
 | P19 | cortex_status 离线 | 停 Cortex 后执行 | ❌ offline 信息 |
 | P20 | cortex_search 有结果 | `/cortex_search 关键词` | 🔍 + 数量 + 耗时 + 内容 |
 | P21 | cortex_search 无结果 | `/cortex_search xyzabc` | "没有找到相关记忆" |
 | P22 | cortex_search 无参数 | `/cortex_search` | 用法提示 |
 | P23 | cortex_search 长耗时 | 复杂查询 | 15秒内返回，不超时 |
-| P24 | cortex_remember 成功 | `/cortex_remember 测试内容` | ✅ 已记住 |
+| P24 | cortex_remember 成功 | `/cortex_remember 测试内容` | ✅ 已记住，requested kind 符合 V2 语义 |
 | P25 | cortex_remember 无参数 | `/cortex_remember` | 用法提示 |
 | P26 | cortex_recent 有数据 | `/cortex_recent` | 最近 N 条 + 时间 + 分类 |
 | P27 | cortex_recent 空库 | 新 agent 下执行 | "暂无记忆" |
@@ -168,6 +181,7 @@
 - [ ] write normalization 能将稳定事实写入 durable（如“我住大阪”）
 - [ ] relation candidate -> confirm -> formal relation 流程通过
 - [ ] lifecycle 仅处理 `session_note`，不再自动写回 summary note
+- [ ] Windows host 上 `http://localhost:18790/chat?session=main` 的 OpenClaw 运行时联调通过
 - [ ] E2 场景（单 token）端到端通过
 - [ ] E3 场景（多 agent token）端到端通过
 - [ ] cortex-bridge 插件 npm publish

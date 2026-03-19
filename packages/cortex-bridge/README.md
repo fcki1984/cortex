@@ -20,6 +20,27 @@ Plugin config via OpenClaw settings or environment variables:
 | `agentId` | — | `openclaw` | Agent identifier for memory isolation |
 | `debug` | `CORTEX_DEBUG` | `false` | Enable debug logging |
 
+## Windows host-side runtime validation
+
+Before treating OpenClaw integration as release-ready, validate it from the Windows host that actually runs OpenClaw rather than from WSL.
+
+Open this page in the Windows browser:
+
+`http://localhost:18790/chat?session=main`
+
+Then complete this minimum gate:
+
+1. Run `/cortex_status` and confirm Cortex is shown as online.
+2. Run `/cortex_remember 请用中文回答`.
+3. Run `/cortex_search What language should the assistant use?` and confirm the remembered rule is recalled.
+4. Run `/cortex_recent` and confirm the remembered item is visible.
+5. Complete one real conversation round-trip:
+   - first turn writes a memorable fact
+   - second turn verifies `before_agent_start` recall
+   - conversation end verifies `agent_end` ingest
+
+If any of those steps fail on the Windows host, treat the bridge as a release blocker even if WSL-side smoke checks pass.
+
 ## Tools
 
 These tools are always available and work reliably:
@@ -27,13 +48,16 @@ These tools are always available and work reliably:
 | Tool | Description |
 |------|-------------|
 | `cortex_recall` | Search long-term memory for relevant past conversations, facts, and preferences |
-| `cortex_remember` | Store a fact, preference, or decision (supports category: fact, preference, skill, identity, etc.) |
+| `cortex_remember` | Store a V2 record request. Clear facts, preferences, constraints, and task state become durable records; ambiguous input is downgraded to `session_note`. |
 | `cortex_ingest` | Send a conversation pair for automatic LLM memory extraction |
 | `cortex_health` | Check if the Cortex memory server is reachable (optional) |
 
 ### Slash Command
 
-- `/cortex-status` — Quick check if Cortex server is online
+- `/cortex_status` — Quick check if Cortex server is online
+- `/cortex_search` — Search recalled memories for the current agent
+- `/cortex_remember` — Store a memory request using V2 semantics
+- `/cortex_recent` — Show recent records for the current agent
 
 ## Hooks
 
@@ -42,18 +66,18 @@ The plugin registers lifecycle hooks for automatic memory management:
 | Hook | Status | Description |
 |------|--------|-------------|
 | `before_agent_start` | **Working** | Recalls relevant memories and injects as context before each response |
-| `agent_end` | **Not working** | Should auto-ingest conversations after each response (see Known Issues) |
+| `agent_end` | **Best-effort** | Auto-ingests meaningful user/assistant turns when the host runtime dispatches the hook |
 | `before_compaction` | Best-effort | Emergency flush before context compression |
 
 ## Known Issues
 
-### `agent_end` hook not firing in streaming mode
+### `agent_end` hook can still be skipped by the host runtime
 
 **Status:** Upstream bug — [openclaw/openclaw#21863](https://github.com/openclaw/openclaw/issues/21863)
 
 In streaming mode (used by Telegram and other gateway channels), the `agent_end` hook is not dispatched to plugins. The `handleAgentEnd()` function in OpenClaw's streaming event handler does not call `hookRunner.runAgentEnd()`.
 
-This means **automatic conversation ingestion does not work** in streaming mode. Memory recall (`before_agent_start`) works correctly.
+This means automatic conversation ingestion may be skipped in some host/runtime combinations even though memory recall (`before_agent_start`) works correctly.
 
 **Workarounds:**
 

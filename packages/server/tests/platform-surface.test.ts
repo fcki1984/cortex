@@ -50,4 +50,15 @@ describe('Platform surface migration', () => {
       expect(doc).not.toContain('/api/v1/config');
     }
   });
+
+  it('documents Windows host-side OpenClaw runtime validation before release', () => {
+    const bridgeReadme = fs.readFileSync(path.join(ROOT, 'packages/cortex-bridge/README.md'), 'utf8');
+    const releasePlan = fs.readFileSync(RELEASE_PLAN, 'utf8');
+    expect(bridgeReadme).toContain('http://localhost:18790/chat?session=main');
+    expect(bridgeReadme).toContain('Windows host');
+    expect(bridgeReadme).toContain('/cortex_status');
+    expect(releasePlan).toContain('http://localhost:18790/chat?session=main');
+    expect(releasePlan).toContain('/cortex_status');
+    expect(releasePlan).toContain('/cortex_remember 请用中文回答');
+  });
 });

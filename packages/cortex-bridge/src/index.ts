@@ -14,7 +14,8 @@ const PLUGIN_VERSION = '0.5.1';
 // ── Timeouts ────────────────────────────────────────────
 const RECALL_TIMEOUT = 8000;
 const INGEST_TIMEOUT = 12000;
-const HEALTH_TIMEOUT = 2000;
+const HEALTH_TIMEOUT = 5000;
+const NETWORK_RETRY_LIMIT = 1;
 
 // ── OpenClaw Plugin API types (minimal subset) ──────────
 interface PluginApi {
@@ -132,6 +133,38 @@ function isDebug(config: Record<string, any>): boolean {
   return config.debug === true || process.env.CORTEX_DEBUG === 'true';
 }
 
+function isRetryableBridgeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /fetch failed|timeout|aborted|connect/i.test(message);
+}
+
+type BridgeFetchInit = RequestInit & { timeoutMs?: number };
+
+function buildFetchAttemptInit(init: BridgeFetchInit): RequestInit {
+  const { timeoutMs, ...rest } = init;
+  return {
+    ...rest,
+    signal: rest.signal ?? (timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined),
+  };
+}
+
+async function fetchWithRetry(
+  input: string,
+  init: BridgeFetchInit,
+  retries = NETWORK_RETRY_LIMIT,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetch(input, buildFetchAttemptInit(init));
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries || !isRetryableBridgeError(error)) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 async function cortexRecall(
   cortexUrl: string,
   query: string,
@@ -169,11 +202,11 @@ async function cortexIngest(
     if (messages && messages.length > 0) {
       payload.messages = messages;
     }
-    const res = await fetch(`${cortexUrl}/api/v2/ingest`, {
+    const res = await fetchWithRetry(`${cortexUrl}/api/v2/ingest`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(INGEST_TIMEOUT),
+      timeoutMs: INGEST_TIMEOUT,
     });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     try {
@@ -206,7 +239,7 @@ async function cortexFlush(
 async function cortexHealthCheck(cortexUrl: string): Promise<{ ok: boolean; latency_ms: number; error?: string }> {
   const start = Date.now();
   try {
-    const res = await fetch(`${cortexUrl}/api/v2/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT) });
+    const res = await fetchWithRetry(`${cortexUrl}/api/v2/health`, { timeoutMs: HEALTH_TIMEOUT });
     const data = (await res.json()) as any;
     return { ok: data.status === 'ok', latency_ms: Date.now() - start };
   } catch (e) {
@@ -238,10 +271,62 @@ function categoryToRequestedKind(category?: string): 'profile_rule' | 'fact_slot
   }
 }
 
+function inferRequestedKind(content: string, category?: string): 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note' {
+  const trimmed = content.trim();
+  const lower = trimmed.toLowerCase();
+
+  const profileRulePatterns = [
+    /请用(?:中文|英文|英语|日文|日语|汉语|普通话)回答/,
+    /用(?:中文|英文|英语|日文|日语|汉语|普通话)回答/,
+    /^(?:请)?不要.+/,
+    /^(?:必须|需要).+/,
+    /(?:喜欢|偏好|倾向).+(?:回答|方案|风格|格式|语言)/,
+    /(?:先给结论|简洁回答|简明回答|详细回答|详细说明)/,
+    /(?:respond|answer).*(?:in chinese|in english|briefly|concisely|short)/i,
+    /(?:avoid|do not use|must use)/i,
+  ];
+  if (profileRulePatterns.some((pattern) => pattern.test(trimmed))) {
+    return 'profile_rule';
+  }
+
+  const taskStatePatterns = [
+    /^(?:当前任务|当前目标|当前项目|当前工作).*(?:是|为)/,
+    /^(?:任务|目标|待办|todo).*(?:是|为|包括)/i,
+    /(?:current task|current goal|todo|working on|next step)/i,
+    /(?:重构|修复|迁移|部署).*(?:cortex|recall|memory|agent)/i,
+  ];
+  if (taskStatePatterns.some((pattern) => pattern.test(trimmed))) {
+    return 'task_state';
+  }
+
+  const factPatterns = [
+    /^(?:我|用户)?住(?:在)?\S+/,
+    /^(?:我|用户)?在.+(?:工作|上班|任职)/,
+    /^(?:i|the user)\s+(?:live|lives|work|works)\b/i,
+    /^(?:我|用户).+(?:是|来自|位于).+/,
+  ];
+  if (factPatterns.some((pattern) => pattern.test(trimmed))) {
+    return 'fact_slot';
+  }
+
+  if (category) {
+    if (category === 'fact' || category === 'entity' || category === 'relationship') {
+      return 'session_note';
+    }
+    return categoryToRequestedKind(category);
+  }
+
+  if (lower.length < 24 || /也许|可能|maybe|perhaps|考虑/.test(lower)) {
+    return 'session_note';
+  }
+
+  return 'session_note';
+}
+
 function buildRecordWritePayload(content: string, category: string | undefined, agentId: string): Record<string, unknown> {
   return {
     content,
-    kind: categoryToRequestedKind(category),
+    kind: inferRequestedKind(content, category),
     agent_id: agentId,
     source_type: 'user_explicit',
     priority: 0.7,
@@ -337,11 +422,11 @@ export default {
       },
       async execute(_id: string, params: { content: string; category?: string }) {
         try {
-          const res = await fetch(`${cortexUrl}/api/v2/records`, {
+          const res = await fetchWithRetry(`${cortexUrl}/api/v2/records`, {
             method: 'POST',
             headers: getHeaders(config),
             body: JSON.stringify(buildRecordWritePayload(params.content, params.category, agentId)),
-            signal: AbortSignal.timeout(INGEST_TIMEOUT),
+            timeoutMs: INGEST_TIMEOUT,
           });
           if (res.ok) {
             const data = await res.json() as any;
@@ -413,9 +498,9 @@ export default {
             const headers: Record<string, string> = {};
             const token = getAuthToken(config);
             if (token) headers['Authorization'] = `Bearer ${token}`;
-            const res = await fetch(`${cortexUrl}/api/v2/relations?${query.toString()}`, {
+            const res = await fetchWithRetry(`${cortexUrl}/api/v2/relations?${query.toString()}`, {
               headers,
-              signal: AbortSignal.timeout(RECALL_TIMEOUT),
+              timeoutMs: RECALL_TIMEOUT,
             });
             if (!res.ok) return { content: [{ type: 'text', text: `Failed to fetch relations: HTTP ${res.status}` }] };
             const data = await res.json() as { items?: any[] } | any[];
@@ -459,13 +544,12 @@ export default {
 
         // Fetch additional stats
         const lines: string[] = [];
+        const degraded: string[] = [];
         lines.push(`✅ Cortex is online (${health.latency_ms}ms)`);
 
         try {
           // Health details (version, uptime)
-          const healthRes = await fetch(`${cortexUrl}/api/v2/health`, {
-            signal: AbortSignal.timeout(HEALTH_TIMEOUT),
-          });
+          const healthRes = await fetchWithRetry(`${cortexUrl}/api/v2/health`, { timeoutMs: HEALTH_TIMEOUT });
           if (healthRes.ok) {
             const data = (await healthRes.json()) as any;
             if (data.version) lines.push(`📦 Version: ${data.version}`);
@@ -478,13 +562,15 @@ export default {
               lines.push(`🆕 Update available: ${data.latestRelease.version}`);
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          degraded.push('health details timeout');
+        }
 
         try {
           // Memory stats
-          const statsRes = await fetch(`${cortexUrl}/api/v2/stats?agent_id=${encodeURIComponent(agentId)}`, {
+          const statsRes = await fetchWithRetry(`${cortexUrl}/api/v2/stats?agent_id=${encodeURIComponent(agentId)}`, {
             headers: getHeaders(config),
-            signal: AbortSignal.timeout(HEALTH_TIMEOUT),
+            timeoutMs: HEALTH_TIMEOUT,
           });
           if (statsRes.ok) {
             const stats = (await statsRes.json()) as any;
@@ -495,7 +581,9 @@ export default {
               lines.push(`📂 Kinds: ${kindParts.join(', ')}`);
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          degraded.push('stats timeout');
+        }
 
         lines.push(`🤖 Agent: ${agentId}`);
         lines.push(`🌐 URL: ${cortexUrl}`);
@@ -503,9 +591,7 @@ export default {
 
         // Version compatibility check
         try {
-          const healthRes2 = await fetch(`${cortexUrl}/api/v2/health`, {
-            signal: AbortSignal.timeout(HEALTH_TIMEOUT),
-          });
+          const healthRes2 = await fetchWithRetry(`${cortexUrl}/api/v2/health`, { timeoutMs: HEALTH_TIMEOUT });
           if (healthRes2.ok) {
             const hd = (await healthRes2.json()) as any;
             const serverMajor = parseInt((hd.version || '0').split('.')[1] || '0');
@@ -514,7 +600,13 @@ export default {
               lines.push(`⚠️ 版本差异较大: server v${hd.version} vs plugin v${PLUGIN_VERSION}，建议更新`);
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          degraded.push('version check timeout');
+        }
+
+        if (degraded.length > 0) {
+          lines.push(`⚠️ 状态降级: ${degraded.join(', ')}`);
+        }
 
         return { text: lines.join('\n') };
       },
@@ -531,11 +623,11 @@ export default {
           return { text: '用法: /cortex_search <关键词>' };
         }
         try {
-          const res = await fetch(`${cortexUrl}/api/v2/recall`, {
+          const res = await fetchWithRetry(`${cortexUrl}/api/v2/recall`, {
             method: 'POST',
             headers: getHeaders(config),
             body: JSON.stringify({ query, agent_id: agentId }),
-            signal: AbortSignal.timeout(15000),
+            timeoutMs: 15000,
           });
           if (!res.ok) return { text: `❌ 搜索失败 (HTTP ${res.status})` };
           const data = (await res.json()) as any;
@@ -552,7 +644,7 @@ export default {
     // ── Command: /cortex_remember ───────────────────────
     api.registerCommand({
       name: 'cortex_remember',
-      description: 'Store a memory in Cortex',
+      description: 'Store information in Cortex using V2 semantics. Clear facts, preferences, constraints, and task state become durable records; uncertain content is downgraded to session notes.',
       acceptsArgs: true,
       handler: async (ctx: any) => {
         const content = (ctx.args || ctx.text || '').trim();
@@ -560,11 +652,11 @@ export default {
           return { text: '用法: /cortex_remember <要记住的内容>' };
         }
         try {
-          const res = await fetch(`${cortexUrl}/api/v2/records`, {
+          const res = await fetchWithRetry(`${cortexUrl}/api/v2/records`, {
             method: 'POST',
             headers: getHeaders(config),
-            body: JSON.stringify(buildRecordWritePayload(content, 'fact', agentId)),
-            signal: AbortSignal.timeout(INGEST_TIMEOUT),
+            body: JSON.stringify(buildRecordWritePayload(content, undefined, agentId)),
+            timeoutMs: INGEST_TIMEOUT,
           });
           if (res.ok) {
             const data = await res.json() as any;
@@ -586,9 +678,9 @@ export default {
           const headers: Record<string, string> = {};
           const token = getAuthToken(config);
           if (token) headers['Authorization'] = `Bearer ${token}`;
-          const res = await fetch(
+          const res = await fetchWithRetry(
             `${cortexUrl}/api/v2/records?agent_id=${encodeURIComponent(agentId)}&limit=10&order_by=created_at&order_dir=desc`,
-            { headers, signal: AbortSignal.timeout(10000) },
+            { headers, timeoutMs: 10000 },
           );
           if (!res.ok) {
             return { text: `❌ 获取失败 (HTTP ${res.status})` };
