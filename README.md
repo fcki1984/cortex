@@ -51,10 +51,11 @@ No manual tagging. No "save this." It just works.
 
 | | Cortex | Mem0 | Zep | LangMem |
 |---|---|---|---|---|
-| **Memory lifecycle** | ✅ 3-tier auto-promotion/decay/archive | ❌ Flat store | Partial | ❌ |
-| **Knowledge graph** | ✅ Neo4j + multi-hop reasoning | ✅ Basic | ❌ | ❌ |
+| **Structured memory model** | ✅ Facts / rules / task state / session notes | ❌ Flat store | Partial | ❌ |
+| **Memory lifecycle** | ✅ Note retention + forgetting-first | ❌ Flat store | Partial | ❌ |
+| **Relations** | ✅ Record-bound, evidence-traceable | ✅ Basic | ❌ | ❌ |
 | **Self-hosted** | ✅ Single Docker container | Cloud-first | Cloud-first | Framework-bound |
-| **Data ownership** | ✅ Your SQLite + Neo4j | Their cloud | Their cloud | Varies |
+| **Data ownership** | ✅ Your SQLite database | Their cloud | Their cloud | Varies |
 | **Dashboard** | ✅ Full management UI | ❌ | Partial | ❌ |
 | **MCP support** | ✅ Native | ❌ | ❌ | ❌ |
 | **Multi-agent** | ✅ Isolated namespaces | ✅ | ✅ | ❌ |
@@ -62,21 +63,20 @@ No manual tagging. No "save this." It just works.
 
 ## Key Features
 
-### 🧬 Three-Layer Memory Lifecycle
-Memories aren't just stored — they **live**.
+### 🧬 V2 Record Model + Note Retention
+V2 separates durable truth from disposable session context.
 
 ```
-Working Memory (48h) ──promote──→ Core Memory ──decay──→ Archive
-         ↑                              ↑                   │
-         │                         read refreshes       compress
-         │                         decay counter     back to Core
-         └──────────── nothing is ever truly lost ──────────┘
+profile_rule / fact_slot / task_state  → durable truth
+session_note                           → short-lived context
+
+active → dormant → stale → purge
 ```
 
-- **Working → Core**: Frequently accessed or high-value memories get promoted
-- **Core → Archive**: Unused memories decay over time, get compressed
-- **Archive → Core**: Compressed memories return when relevant again
-- Time decay + read refresh + access frequency = organic memory behavior
+- **Durable records** keep stable user facts, rules, and task state
+- **Session notes** are the only lifecycle-managed objects
+- **Forgetting-first**: old notes retire and purge instead of becoming auto-written summaries
+- **Supersede over decay**: durable truth is updated explicitly, not "forgotten"
 
 ### 🔍 Hybrid Search with Multi-Stage Ranking
 
@@ -92,45 +92,44 @@ Query → BM25 (keywords) + Vector (semantics) → RRF Fusion
 - **Reranker**: LLM, Cohere, Voyage AI, Jina AI, or SiliconFlow re-scores for relevance
 - **Smart injection**: constraints and persona always injected first, never truncated
 
-### 🕸️ Knowledge Graph (Neo4j)
-Memories form connections. Cortex builds a knowledge graph automatically.
+### 🕸️ Relation Candidates + Confirmed Relations
+Relations are traceable, auditable, and tied to source records.
 
 ```
-Alex ──uses──→ Rust ──related_to──→ Backend
-  │                                    │
-  └──works_at──→ Acme ──deploys_on──→ AWS
+candidate relation ──review/confirm──→ confirmed relation
+         │                                      │
+         └──── source record + evidence ────────┘
 ```
 
-- Auto-extracted entity relations from every conversation
-- **Multi-hop reasoning**: 2-hop graph traversal during recall
-- Relations injected alongside memories for richer context
-- Entity normalization + confidence scoring
+- Auto extraction produces **relation candidates**, not formal truth
+- Confirmed relations are stored in `record_relations_v2`
+- Formal relations must point back to a source record and evidence
+- Neo4j, if enabled, is a derived graph index, not the formal truth source
 
-### 🛡️ Intelligent Extraction (SIEVE)
+### 🛡️ Structured Extraction + Durable Admissibility
 
 ```
-Conversation ──→ Fast Channel (regex, 0ms) ──→ Merge ──→ 4-tier Dedup ──→ Store
-             ──→ Deep Channel (LLM, 2-5s) ──┘          │ exact → skip
-                                                        │ near-exact → replace
-                                                        │ semantic → LLM judge
-                                                        └ new → insert
+Conversation ──→ Fast Signals (regex) ──→ Merge ──→ Normalize ──→ Upsert
+             ──→ Deep Extraction (LLM) ──┘              │ durable fact/rule/state
+                                                        │ or downgrade to session_note
+                                                        └ evidence + reason codes
 ```
 
-- **20 memory categories**: identity, preferences, constraints, goals, skills, relationships...
-- **Batch dedup**: prevents "I like coffee" from becoming 50 memories
-- **Smart update**: preference changes are updates, not new entries
-- **Entity relations**: auto-extracted knowledge graph edges
+- **Stable-key upsert**: explicit updates supersede old truth instead of piling up duplicates
+- **Reasoned downgrades**: ambiguous input is accepted but stored as `session_note`
+- **Evidence-first**: every durable record stays tied to conversation evidence
+- **Relation candidates**: extraction suggests relations for review instead of auto-writing formal truth
 
 ### 📊 Full Dashboard
-Every memory, searchable. Every extraction, auditable.
+Every record is searchable. Every write, relation, and lifecycle action is auditable.
 
-- Memory browser with search, filter by category/status/agent
-- Search debugger — see BM25/vector/fusion scores for every query
-- Extraction logs — what was extracted, why, confidence scores
-- Lifecycle preview — dry-run promotion/decay before it happens
-- Relation graph — interactive knowledge graph visualization (sigma.js)
-- Multi-agent management with per-agent config
-- One-click updates with version detection
+- Memory browser with V2 record kinds, normalization metadata, and agent filters
+- Recall tester with durable/note candidate counts, normalized intents, and relevance basis
+- Extraction logs with requested/written kind, normalization result, and reason code
+- Relation review with candidate approval flow and confirmed-relation audit trail
+- Lifecycle monitor focused on note retention: active, dormant, stale, purge
+- Feedback review for good/bad/corrected outcomes and supersede chains
+- Multi-agent management with per-agent config and health visibility
 
 ### 🔌 Works Everywhere
 
@@ -148,39 +147,40 @@ Every memory, searchable. Every extraction, auditable.
 
 ### Write Path — every conversation turn
 ```
-Conversation ──→ Fast Channel (regex) + Deep Channel (LLM)
+Conversation ──→ Fast signals + Deep extraction
                           ↓
-                 Extracted memories (categorized into 20 types)
+                 Normalize into profile_rule / fact_slot / task_state / session_note
                           ↓
-                 4-tier dedup (exact → skip / near-exact → replace / semantic → LLM judge / new → insert)
+                 Durable admissibility gate
+                 (stable fact/rule/state or downgrade to session_note)
                           ↓
-                 Store as Working (48h) or Core (permanent)
+                 Upsert record + evidence + conversation refs
                           ↓
-                 Extract entity relations → Neo4j knowledge graph
+                 Derive relation candidates (pending review)
 ```
 
 ### Read Path — every conversation turn
 ```
-User message ──→ Query Expansion (LLM generates 2-3 search variants)
+User message ──→ FTS + Vector candidate retrieval
                           ↓
-                 BM25 (keywords) + Vector (semantics) → RRF Fusion
+                 Intent normalization
+                 (subject + attribute/state anchors)
                           ↓
-                 Multi-hit boost (memories found by multiple variants rank higher)
+                 Durable-first eligibility gate
+                 (anchor / lexical first, vector only boosts)
                           ↓
-                 LLM Reranker (optional, re-scores for relevance)
+                 Optional 1 related session note ride-along
                           ↓
-                 Neo4j multi-hop traversal (discovers indirect associations)
-                          ↓
-                 Priority inject → AI context
-                 (constraints & persona first, then by relevance)
+                 Context packing → persona → durable records → note
 ```
 
 ### Lifecycle — runs daily
 ```
-Working Memory (48h) ──promote──→ Core Memory ──decay──→ Archive ──compress──→ back to Core
-                                        ↑
-                               read refreshes decay counter
-                               (nothing is ever truly lost)
+session_note only:
+
+active ──retire──→ dormant ──age──→ stale ──expire──→ purge
+
+profile_rule / fact_slot / task_state stay outside lifecycle truth management
 ```
 
 ---
@@ -199,25 +199,24 @@ Working Memory (48h) ──promote──→ Core Memory ──decay──→ Arc
                               ▼
 ┌─ Cortex Server (:21100) ───────────────────────────────────────────┐
 │                                                                     │
-│  ┌─ Memory Gate ─────────┐    ┌─ Memory Sieve ──────────────────┐  │
-│  │ Query Expansion       │    │ Fast Channel (regex)             │  │
-│  │ BM25 + Vector Search  │    │ Deep Channel (LLM)              │  │
-│  │ RRF Fusion            │    │ 4-tier Dedup                    │  │
-│  │ LLM Reranker          │    │ Entity Relation Extraction      │  │
-│  │ Neo4j Graph Traversal │    │ Category Classification (×20)   │  │
-│  │ Priority Injection    │    │ Smart Update Detection          │  │
+│  ┌─ Recall Engine ───────┐    ┌─ Write Engine ──────────────────┐  │
+│  │ FTS + Vector Search   │    │ Fast Signals + Deep Extraction  │  │
+│  │ Intent Normalization  │    │ Durable Admissibility Gate      │  │
+│  │ Durable Eligibility   │    │ Stable-key Upsert               │  │
+│  │ Note Ride-along       │    │ Evidence + Conversation Refs    │  │
+│  │ Context Packing       │    │ Relation Candidate Derivation   │  │
 │  └───────────────────────┘    └─────────────────────────────────┘  │
 │                                                                     │
-│  ┌─ Lifecycle Engine ────┐    ┌─ Storage ───────────────────────┐  │
-│  │ Promote / Decay       │    │ SQLite + FTS5 (memories)        │  │
-│  │ Archive / Compress    │    │ sqlite-vec (embeddings)         │  │
-│  │ Read Refresh          │    │ Neo4j 5 (knowledge graph)       │  │
-│  │ Cron Scheduler        │    │                                 │  │
+│  ┌─ Lifecycle V2 ────────┐    ┌─ Storage ───────────────────────┐  │
+│  │ Note Retention        │    │ SQLite + FTS5 (records)         │  │
+│  │ Retire / Stale / Purge│    │ sqlite-vec (embeddings)         │  │
+│  │ Scheduler             │    │ record_relations_v2             │  │
+│  │ Audit Logs            │    │ relation_candidates_v2          │  │
 │  └───────────────────────┘    └─────────────────────────────────┘  │
 │                                                                     │
 │  ┌─ Dashboard (React SPA) ──────────────────────────────────────┐  │
-│  │ Memory Browser │ Search Debug │ Extraction Logs │ Graph View  │  │
-│  │ Lifecycle Preview │ Agent Config │ One-click Update           │  │
+│  │ Memory Browser │ Recall Tester │ Extraction Logs │ Feedback   │  │
+│  │ Relation Review │ Lifecycle Monitor │ Agent Config            │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -551,10 +550,11 @@ For Cortex V2 record writes, durable kinds are reserved for clear, updateable us
 | `POST` | `/api/v2/ingest` | Extract and write V2 records from a conversation turn |
 | `CRUD` | `/api/v2/records` | V2 record management |
 | `GET` | `/api/v2/stats` | V2 record and runtime statistics |
-| `CRUD` | `/api/v2/relations` | Record-bound relations for audit and enrichment |
+| `CRUD` | `/api/v2/relation-candidates` | Review relation candidates before confirmation |
+| `CRUD` | `/api/v2/relations` | Confirmed record-bound relations |
 | `POST` | `/api/v2/lifecycle/run` | Run note-only lifecycle maintenance |
-| `GET` | `/api/v2/lifecycle/preview` | Preview note compression and expiry |
-| `GET` | `/api/v2/lifecycle/logs` | Lifecycle execution history |
+| `GET` | `/api/v2/lifecycle/preview` | Preview dormant/stale/purge note transitions |
+| `GET` | `/api/v2/lifecycle/log` | Lifecycle execution history |
 | `POST` | `/api/v2/feedback` | Review or correct a record |
 | `GET` | `/api/v2/feedback` | Feedback history and aggregates |
 | `CRUD` | `/api/v2/agents` | Agent management |

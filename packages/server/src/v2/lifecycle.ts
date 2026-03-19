@@ -1,40 +1,67 @@
 import { insertLifecycleLog, getLifecycleLogs, countLifecycleLogs } from '../db/index.js';
-import { supersedeRecordById, deactivateRecord } from './store.js';
-import type { CortexRecord } from './types.js';
+import { deleteRecord, updateSessionNoteLifecycle } from './store.js';
+import type { CortexRecord, SessionNoteRecord } from './types.js';
 import type { CortexRecordsV2 } from './service.js';
 
-const COMPRESSION_GROUP_MIN = 3;
+const ACTIVE_RETIRE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+const DORMANT_TO_STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 type LifecycleNoteRecord = Extract<CortexRecord, { kind: 'session_note' }>;
 
-function noteIsExpired(note: LifecycleNoteRecord): boolean {
-  return !!note.expires_at && new Date(note.expires_at).getTime() <= Date.now();
+function asTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? null : ts;
 }
 
-function compressionGroups(notes: LifecycleNoteRecord[]): LifecycleNoteRecord[][] {
-  const groups = new Map<string, LifecycleNoteRecord[]>();
-  for (const note of notes) {
-    if (note.tags.includes('lifecycle_compressed')) continue;
-    const key = `${note.agent_id}:${note.session_id || 'global'}`;
-    const bucket = groups.get(key) || [];
-    bucket.push(note);
-    groups.set(key, bucket);
-  }
-  return Array.from(groups.values()).filter(group => group.length >= COMPRESSION_GROUP_MIN);
+function dormantCutoff(now = Date.now()): number {
+  return now - ACTIVE_RETIRE_AFTER_MS;
 }
 
-function buildSummary(group: LifecycleNoteRecord[]): string {
-  const lines = group
-    .slice(0, 6)
-    .map(note => note.summary.trim())
-    .filter(Boolean);
-  return `Lifecycle summary: ${lines.join(' | ')}`.slice(0, 500);
+function staleCutoff(now = Date.now()): number {
+  return now - DORMANT_TO_STALE_AFTER_MS;
+}
+
+function purgeDeadline(now = Date.now()): string {
+  return new Date(now + PURGE_AFTER_MS).toISOString();
+}
+
+function retireNote(note: LifecycleNoteRecord, now = Date.now()): boolean {
+  if (note.lifecycle_state !== 'active') return false;
+  const expiresAt = asTimestamp(note.expires_at);
+  const updatedAt = asTimestamp(note.updated_at);
+  return (expiresAt !== null && expiresAt <= now) || (updatedAt !== null && updatedAt <= dormantCutoff(now));
+}
+
+function staleNote(note: LifecycleNoteRecord, now = Date.now()): boolean {
+  if (note.lifecycle_state !== 'dormant') return false;
+  const retiredAt = asTimestamp(note.retired_at);
+  return retiredAt !== null && retiredAt <= staleCutoff(now);
+}
+
+function purgeNote(note: LifecycleNoteRecord, now = Date.now()): boolean {
+  if (note.lifecycle_state !== 'stale') return false;
+  const purgeAfter = asTimestamp(note.purge_after);
+  return purgeAfter !== null && purgeAfter <= now;
+}
+
+function summarizeNote(note: LifecycleNoteRecord) {
+  return {
+    id: note.id,
+    summary: note.summary,
+    session_id: note.session_id,
+    expires_at: note.expires_at,
+    lifecycle_state: note.lifecycle_state,
+    retired_at: note.retired_at,
+    purge_after: note.purge_after,
+  };
 }
 
 export class CortexLifecycleV2 {
   constructor(private records: CortexRecordsV2) {}
 
-  private activeNotes(agentId?: string): LifecycleNoteRecord[] {
+  private notes(agentId?: string): LifecycleNoteRecord[] {
     return this.records.listRecords({
       agent_id: agentId,
       kind: 'session_note',
@@ -46,87 +73,98 @@ export class CortexLifecycleV2 {
   }
 
   preview(agentId?: string) {
-    const notes = this.activeNotes(agentId);
-    const expired = notes.filter(noteIsExpired);
-    const groups = compressionGroups(notes.filter(note => !noteIsExpired(note)));
+    const notes = this.notes(agentId);
+    const now = Date.now();
+    const activeNotes = notes.filter(note => note.lifecycle_state === 'active');
+    const dormantCandidates = activeNotes.filter(note => retireNote(note, now));
+    const staleCandidates = notes.filter(note => staleNote(note, now));
+    const purgeCandidates = notes.filter(note => purgeNote(note, now));
 
     return {
       agent_id: agentId || 'all',
       summary: {
-        active_notes: notes.length,
-        expire_count: expired.length,
-        compression_groups: groups.length,
-        notes_to_compress: groups.reduce((sum, group) => sum + group.length, 0),
+        active_notes: activeNotes.length,
+        dormant_candidates: dormantCandidates.length,
+        stale_candidates: staleCandidates.length,
+        purge_candidates: purgeCandidates.length,
       },
-      expire_candidates: expired.map(note => ({
-        id: note.id,
-        summary: note.summary,
-        session_id: note.session_id,
-        expires_at: note.expires_at,
-      })),
-      compression_candidates: groups.map(group => ({
-        session_id: group[0]?.session_id || null,
-        note_ids: group.map(note => note.id),
-        summaries: group.map(note => note.summary),
-        replacement_summary: buildSummary(group),
-      })),
+      dormant_candidates: dormantCandidates.map(summarizeNote),
+      stale_candidates: staleCandidates.map(summarizeNote),
+      purge_candidates: purgeCandidates.map(summarizeNote),
     };
   }
 
   async run(agentId?: string) {
     const preview = this.preview(agentId);
-    const expiredIds: string[] = [];
-    const compressedIds: string[] = [];
-    const writtenNoteIds: string[] = [];
+    const nowIso = new Date().toISOString();
+    const retiredIds: string[] = [];
+    const staledIds: string[] = [];
+    const purgedIds: string[] = [];
 
-    for (const note of preview.expire_candidates) {
-      if (deactivateRecord(note.id)) expiredIds.push(note.id);
+    for (const note of preview.dormant_candidates) {
+      const updated = updateSessionNoteLifecycle(note.id, {
+        lifecycle_state: 'dormant',
+        retired_at: nowIso,
+        purge_after: purgeDeadline(),
+      });
+      if (updated) retiredIds.push(updated.id);
     }
 
-    for (const group of preview.compression_candidates) {
-      const firstNote = this.activeNotes(agentId).find(note => note.id === group.note_ids[0]);
-      if (!firstNote) continue;
-      const result = await this.records.remember({
-        kind: 'session_note',
-        agent_id: firstNote.agent_id,
-        session_id: firstNote.session_id ?? undefined,
-        content: group.replacement_summary,
-        source_type: 'system_derived',
-        tags: ['lifecycle_compressed'],
-        priority: 0.35,
+    for (const note of preview.stale_candidates) {
+      const updated = updateSessionNoteLifecycle(note.id, {
+        lifecycle_state: 'stale',
       });
-      writtenNoteIds.push(result.record.id);
-      for (const noteId of group.note_ids) {
-        supersedeRecordById(noteId, result.record.id);
-        compressedIds.push(noteId);
-      }
-      insertLifecycleLog('v2_note_compress', [...group.note_ids, result.record.id], {
-        agent_id: agentId || firstNote.agent_id,
-        session_id: firstNote.session_id,
-        compressed_count: group.note_ids.length,
-        replacement_record_id: result.record.id,
+      if (updated) staledIds.push(updated.id);
+    }
+
+    for (const note of preview.purge_candidates) {
+      if (deleteRecord(note.id)) purgedIds.push(note.id);
+    }
+
+    if (retiredIds.length > 0) {
+      insertLifecycleLog('v2_note_retire', retiredIds, {
+        agent_id: agentId || 'all',
+        retired_notes: retiredIds.length,
+      });
+    }
+    if (staledIds.length > 0) {
+      insertLifecycleLog('v2_note_stale', staledIds, {
+        agent_id: agentId || 'all',
+        staled_notes: staledIds.length,
+      });
+    }
+    if (purgedIds.length > 0) {
+      insertLifecycleLog('v2_note_purge', purgedIds, {
+        agent_id: agentId || 'all',
+        purged_notes: purgedIds.length,
       });
     }
 
-    insertLifecycleLog('v2_lifecycle_run', [...expiredIds, ...compressedIds, ...writtenNoteIds], {
+    insertLifecycleLog('v2_lifecycle_run', [...retiredIds, ...staledIds, ...purgedIds], {
       agent_id: agentId || 'all',
-      expired_notes: expiredIds.length,
-      compressed_notes: compressedIds.length,
-      written_notes: writtenNoteIds.length,
-      compression_groups: preview.summary.compression_groups,
+      retired_notes: retiredIds.length,
+      staled_notes: staledIds.length,
+      purged_notes: purgedIds.length,
+      active_notes: preview.summary.active_notes,
+      dormant_candidates: preview.summary.dormant_candidates,
+      stale_candidates: preview.summary.stale_candidates,
+      purge_candidates: preview.summary.purge_candidates,
     });
 
     return {
       agent_id: agentId || 'all',
       summary: {
-        expired_notes: expiredIds.length,
-        compressed_notes: compressedIds.length,
-        written_notes: writtenNoteIds.length,
-        compression_groups: preview.summary.compression_groups,
+        active_notes: preview.summary.active_notes,
+        dormant_candidates: preview.summary.dormant_candidates,
+        stale_candidates: preview.summary.stale_candidates,
+        purge_candidates: preview.summary.purge_candidates,
+        retired_notes: retiredIds.length,
+        staled_notes: staledIds.length,
+        purged_notes: purgedIds.length,
       },
-      expired_note_ids: expiredIds,
-      compressed_note_ids: compressedIds,
-      written_note_ids: writtenNoteIds,
+      retired_note_ids: retiredIds,
+      staled_note_ids: staledIds,
+      purged_note_ids: purgedIds,
     };
   }
 

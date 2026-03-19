@@ -69,16 +69,16 @@ export default function GateSection({
       ) : (
         <table>
           <tbody>
-            {displayRow(`📌 ${t('settings.fixedBudget')}`, `${config.gate?.fixedInjectionTokens ?? 500} tokens`, t('settings.fixedBudgetDesc'))}
-            {displayRow(`💉 ${t('settings.memoryBudget')}`, `${config.gate?.maxInjectionTokens ?? 1000} tokens`, t('settings.memoryBudgetDesc'))}
+            {displayRow(`📌 ${t('settings.fixedBudget')}`, `${config.gate?.fixedInjectionTokens ?? 500} ${t('settings.tokenUnit')}`, t('settings.fixedBudgetDesc'))}
+            {displayRow(`💉 ${t('settings.memoryBudget')}`, `${config.gate?.maxInjectionTokens ?? 1000} ${t('settings.tokenUnit')}`, t('settings.memoryBudgetDesc'))}
             {displayRow(`🕸️ ${t('settings.relationInjection')}`, config.gate?.relationInjection ? t('common.on') : t('common.off'), t('settings.relationInjectionDesc'))}
-            {displayRow(`🔗 ${t('settings.relationBudget')}`, `${config.gate?.relationBudget ?? 100} tokens`, t('settings.relationBudgetDesc'))}
+            {displayRow(`🔗 ${t('settings.relationBudget')}`, `${config.gate?.relationBudget ?? 100} ${t('settings.tokenUnit')}`, t('settings.relationBudgetDesc'))}
             {displayRow(`🔍 ${t('settings.searchCandidates')}`, config.gate?.searchLimit ?? 30, t('settings.searchCandidatesDesc'))}
             {displayRow(t('settings.skipSmallTalk'), config.gate?.skipSmallTalk ? t('common.on') : t('common.off'), t('settings.skipSmallTalkDesc'))}
             {displayRow(`✂️ ${t('settings.cliffFilter')}`, `${t('settings.cliffAbsolute')}: ${config.gate?.cliffAbsolute ?? 0.4} · ${t('settings.cliffGap')}: ${config.gate?.cliffGap ?? 0.6} · ${t('settings.cliffFloor')}: ${config.gate?.cliffFloor ?? 0.05}`)}
             {displayRow(`⏱️ ${t('settings.recallTimeouts')}`, `${t('settings.queryExpansionTimeoutMs')}: ${config.gate?.queryExpansionTimeoutMs ?? 5000}ms · ${t('settings.rerankerTimeoutMs')}: ${config.gate?.rerankerTimeoutMs ?? 8000}ms · ${t('settings.relationTimeoutMs')}: ${config.gate?.relationTimeoutMs ?? 5000}ms`)}
-            {displayRow(`🧭 ${t('settings.relevanceGateTitle')}`, `${config.gate?.relevanceGate?.enabled ? t('common.on') : t('common.off')} · topK: ${config.gate?.relevanceGate?.inspectTopK ?? 3} · semantic: ${config.gate?.relevanceGate?.minSemanticScore ?? 0.55} · fused: ${config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15}`, t('settings.relevanceGateEnabledDesc'))}
-            {displayRow(`🔄 ${t('settings.queryExpansion')}`, config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} variants)` : t('common.off'), t('settings.queryExpansionDesc'))}
+            {displayRow(`🧭 ${t('settings.relevanceGateTitle')}`, `${config.gate?.relevanceGate?.enabled ? t('common.on') : t('common.off')} · ${t('settings.topKShort')}: ${config.gate?.relevanceGate?.inspectTopK ?? 3} · ${t('settings.semanticScoreShort')}: ${config.gate?.relevanceGate?.minSemanticScore ?? 0.55} · ${t('settings.fusedScoreShort')}: ${config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15}`, t('settings.relevanceGateEnabledDesc'))}
+            {displayRow(`🔄 ${t('settings.queryExpansion')}`, config.gate?.queryExpansion?.enabled ? `${t('common.on')} (${config.gate.queryExpansion.maxVariants} ${t('settings.variantsShort')})` : t('common.off'), t('settings.queryExpansionDesc'))}
           </tbody>
         </table>
       )}

@@ -296,10 +296,13 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
         lastRun: latestRun?.executed_at || null,
         latencyMs: details.durationMs || null,
         details: {
-          expiredNotes: details.expired_notes ?? 0,
-          compressedNotes: details.compressed_notes ?? 0,
-          writtenNotes: details.written_notes ?? 0,
-          compressionGroups: details.compression_groups ?? 0,
+          activeNotes: details.active_notes ?? 0,
+          dormantCandidates: details.dormant_candidates ?? 0,
+          staleCandidates: details.stale_candidates ?? 0,
+          purgeCandidates: details.purge_candidates ?? 0,
+          retiredNotes: details.retired_notes ?? 0,
+          staledNotes: details.staled_notes ?? 0,
+          purgedNotes: details.purged_notes ?? 0,
         },
       });
     } catch { components.push({ id: 'lifecycle', name: 'Lifecycle V2', status: 'error' }); }

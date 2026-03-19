@@ -18,6 +18,7 @@ import type {
   RecordListOptions,
   RecordUpsertResult,
   RecordNormalization,
+  SessionNoteLifecycleState,
   SessionNoteCandidate,
   SessionNoteRecord,
   SourceType,
@@ -336,6 +337,9 @@ function getSessionNoteById(base: RegistryRow): SessionNoteRecord | null {
     summary: string;
     confidence: number;
     expires_at: string | null;
+    lifecycle_state: SessionNoteLifecycleState;
+    retired_at: string | null;
+    purge_after: string | null;
     superseded_by: string | null;
     metadata: string | null;
   } | undefined;
@@ -351,6 +355,9 @@ function getSessionNoteById(base: RegistryRow): SessionNoteRecord | null {
     summary: row.summary,
     confidence: row.confidence,
     expires_at: row.expires_at,
+    lifecycle_state: row.lifecycle_state,
+    retired_at: row.retired_at,
+    purge_after: row.purge_after,
     superseded_by: row.superseded_by,
     metadata: row.metadata,
   };
@@ -549,8 +556,8 @@ function insertSessionNote(id: string, candidate: SessionNoteCandidate): void {
   const db = getDb();
   db.prepare(`
     INSERT INTO session_notes (
-      id, agent_id, session_id, summary, confidence, expires_at, superseded_by, metadata
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+      id, agent_id, session_id, summary, confidence, expires_at, lifecycle_state, retired_at, purge_after, superseded_by, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
   `).run(
     id,
     candidate.agent_id,
@@ -558,6 +565,9 @@ function insertSessionNote(id: string, candidate: SessionNoteCandidate): void {
     candidate.summary,
     candidate.confidence,
     candidate.expires_at || null,
+    candidate.lifecycle_state || 'active',
+    candidate.retired_at || null,
+    candidate.purge_after || null,
     candidate.metadata || null,
   );
 }
@@ -602,9 +612,18 @@ function updateExistingContent(candidate: RecordCandidate, existing: CortexRecor
   } else if (candidate.kind === 'session_note' && existing.kind === 'session_note') {
     db.prepare(`
       UPDATE session_notes
-      SET summary = ?, confidence = ?, expires_at = ?, metadata = ?
+      SET summary = ?, confidence = ?, expires_at = ?, lifecycle_state = ?, retired_at = ?, purge_after = ?, metadata = ?
       WHERE id = ?
-    `).run(candidate.summary, candidate.confidence, candidate.expires_at || null, candidate.metadata || null, existing.id);
+    `).run(
+      candidate.summary,
+      candidate.confidence,
+      candidate.expires_at || null,
+      candidate.lifecycle_state || existing.lifecycle_state,
+      candidate.retired_at || existing.retired_at,
+      candidate.purge_after || existing.purge_after,
+      candidate.metadata || null,
+      existing.id,
+    );
   }
 }
 
@@ -915,6 +934,34 @@ export function updateRecord(
   })();
 
   return getRecordById(id);
+}
+
+export function updateSessionNoteLifecycle(
+  id: string,
+  patch: {
+    lifecycle_state?: SessionNoteLifecycleState;
+    retired_at?: string | null;
+    purge_after?: string | null;
+    expires_at?: string | null;
+  },
+): SessionNoteRecord | null {
+  const existing = getRecordById(id);
+  if (!existing || existing.kind !== 'session_note') return null;
+
+  const db = getDb();
+  db.prepare(`
+    UPDATE session_notes
+    SET lifecycle_state = ?, retired_at = ?, purge_after = ?, expires_at = ?
+    WHERE id = ?
+  `).run(
+    patch.lifecycle_state || existing.lifecycle_state,
+    patch.retired_at === undefined ? existing.retired_at : patch.retired_at,
+    patch.purge_after === undefined ? existing.purge_after : patch.purge_after,
+    patch.expires_at === undefined ? existing.expires_at : patch.expires_at,
+    id,
+  );
+  updateRegistryTimestamp(id);
+  return getRecordById(id) as SessionNoteRecord | null;
 }
 
 export function deleteRecord(id: string): boolean {

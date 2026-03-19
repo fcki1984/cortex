@@ -39,6 +39,21 @@ export function formatWriteDecisionLabel(t: TranslateFn, decision?: string | nul
   return labelOrFallback(t, `terms.writeDecisions.${decision}`, decision);
 }
 
+export function formatLifecycleStateLabel(t: TranslateFn, state?: string | null): string {
+  if (!state) return '—';
+  return labelOrFallback(t, `terms.lifecycleStates.${state}`, state);
+}
+
+export function formatRelationCandidateStatusLabel(t: TranslateFn, status?: string | null): string {
+  if (!status) return '—';
+  return labelOrFallback(t, `terms.relationCandidateStatus.${status}`, status);
+}
+
+export function formatComponentStatusLabel(t: TranslateFn, status?: string | null): string {
+  if (!status) return '—';
+  return labelOrFallback(t, `terms.componentStatus.${status}`, status);
+}
+
 export function formatFeedbackKindLabel(t: TranslateFn, feedback?: string | null): string {
   if (!feedback) return '—';
   return labelOrFallback(t, `feedback.${feedback}`, feedback);

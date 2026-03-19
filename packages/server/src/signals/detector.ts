@@ -154,7 +154,7 @@ const HIGH_SIGNAL_PATTERNS: {
       // Korean identity
       /저는.{1,20}(입니다|이에요|예요)/,
       /제 이름은/,
-      /我住在/,
+      /(?:我)?住(?:在)?[^，。！？\n]{1,20}/,
       /i live in/i,
       /我在[^，。！？\n]{1,20}工作/,
       /i work (?:at|for|in)/i,

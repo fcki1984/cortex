@@ -1,5 +1,6 @@
 export type RecordKind = 'profile_rule' | 'fact_slot' | 'task_state' | 'session_note';
 export type RecordNormalization = 'durable' | 'downgraded_to_session_note';
+export type SessionNoteLifecycleState = 'active' | 'dormant' | 'stale';
 export type RecordReasonCode =
   | 'assistant_only_evidence'
   | 'unstable_attribute'
@@ -77,6 +78,9 @@ export interface SessionNoteRecord extends BaseRecord {
   summary: string;
   confidence: number;
   expires_at: string | null;
+  lifecycle_state: SessionNoteLifecycleState;
+  retired_at: string | null;
+  purge_after: string | null;
   superseded_by: string | null;
   metadata: string | null;
 }
@@ -139,6 +143,9 @@ export interface SessionNoteCandidate extends BaseCandidate {
   summary: string;
   confidence: number;
   expires_at?: string | null;
+  lifecycle_state?: SessionNoteLifecycleState;
+  retired_at?: string | null;
+  purge_after?: string | null;
   metadata?: string | null;
 }
 

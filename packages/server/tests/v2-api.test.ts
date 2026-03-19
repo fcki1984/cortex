@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { loadConfig } from '../src/utils/config.js';
 import { initDatabase, closeDatabase } from '../src/db/index.js';
+import { getDb } from '../src/db/connection.js';
 import { CortexApp } from '../src/app.js';
 import { registerAllRoutes } from '../src/api/router.js';
 import { registerAuthRoutes } from '../src/api/security.js';
@@ -318,6 +319,34 @@ describe('API V2 Integration', () => {
     expect(body.normalization).toBe('downgraded_to_session_note');
     expect(body.reason_code).toBe('insufficient_structure');
     expect(body.record.kind).toBe('session_note');
+  });
+
+  it('admits plain location statements as durable facts through the public write API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        agent_id: 'api-plain-location',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const body = JSON.parse(created.payload);
+    expect(body.record.kind).toBe('fact_slot');
+    expect(body.record.attribute_key).toBe('location');
+    expect(body.normalization).toBe('durable');
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-plain-location' },
+    });
+    expect(recalled.statusCode).toBe(200);
+    const recallBody = JSON.parse(recalled.payload);
+    expect(recallBody.facts).toHaveLength(1);
+    expect(recallBody.facts[0]?.content).toContain('大阪');
   });
 
   it('exposes MCP endpoint metadata on GET /mcp', async () => {
@@ -674,8 +703,60 @@ describe('API V2 Integration', () => {
     expect(listedBody.items[0]?.source_record?.content).toContain('大阪');
   });
 
-  it('runs lifecycle maintenance only on session notes', async () => {
-    await app.inject({
+  it('creates relation candidates during v2 ingest and only materializes formal relations after confirmation', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'api-v2-relation-candidates',
+        user_message: '我住大阪',
+        assistant_message: '记住了',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    const factRecord = ingestBody.records.find((item: any) => item.written_kind === 'fact_slot');
+    expect(factRecord).toBeTruthy();
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-relation-candidates',
+    });
+    expect(candidates.statusCode).toBe(200);
+    const candidatesBody = JSON.parse(candidates.payload);
+    expect(candidatesBody.items).toHaveLength(1);
+    expect(candidatesBody.items[0]?.status).toBe('pending');
+    expect(candidatesBody.items[0]?.source_record_id).toBe(factRecord.record_id);
+    expect(candidatesBody.items[0]?.source_evidence_id).toBeTruthy();
+
+    const relationsBeforeConfirm = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relations?agent_id=api-v2-relation-candidates',
+    });
+    const relationsBeforeBody = JSON.parse(relationsBeforeConfirm.payload);
+    expect(relationsBeforeBody.items).toHaveLength(0);
+
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: `/api/v2/relation-candidates/${candidatesBody.items[0].id}/confirm`,
+    });
+    expect(confirmed.statusCode).toBe(201);
+    const confirmedBody = JSON.parse(confirmed.payload);
+    expect(confirmedBody.candidate.status).toBe('confirmed');
+    expect(confirmedBody.relation.source_record_id).toBe(factRecord.record_id);
+
+    const relationsAfterConfirm = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relations?agent_id=api-v2-relation-candidates',
+    });
+    const relationsAfterBody = JSON.parse(relationsAfterConfirm.payload);
+    expect(relationsAfterBody.items).toHaveLength(1);
+    expect(relationsAfterBody.items[0]?.source_record?.content).toContain('大阪');
+  });
+
+  it('runs forgetting-first lifecycle maintenance only on session notes', async () => {
+    const activeNote = await app.inject({
       method: 'POST',
       url: '/api/v2/records',
       payload: {
@@ -685,7 +766,7 @@ describe('API V2 Integration', () => {
         agent_id: 'api-v2-lifecycle',
       },
     });
-    await app.inject({
+    const dormantNote = await app.inject({
       method: 'POST',
       url: '/api/v2/records',
       payload: {
@@ -695,7 +776,7 @@ describe('API V2 Integration', () => {
         agent_id: 'api-v2-lifecycle',
       },
     });
-    await app.inject({
+    const staleNote = await app.inject({
       method: 'POST',
       url: '/api/v2/records',
       payload: {
@@ -717,14 +798,46 @@ describe('API V2 Integration', () => {
       },
     });
 
+    const activeBody = JSON.parse(activeNote.payload);
+    const dormantBody = JSON.parse(dormantNote.payload);
+    const staleBody = JSON.parse(staleNote.payload);
+    const db = getDb();
+    const now = Date.now();
+    db.prepare(`
+      UPDATE session_notes
+      SET expires_at = ?, lifecycle_state = 'active', retired_at = NULL, purge_after = NULL
+      WHERE id = ?
+    `).run(new Date(now - 60_000).toISOString(), activeBody.record.id);
+    db.prepare(`
+      UPDATE session_notes
+      SET lifecycle_state = 'dormant', retired_at = ?, purge_after = ?
+      WHERE id = ?
+    `).run(
+      new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(now + 15 * 24 * 60 * 60 * 1000).toISOString(),
+      dormantBody.record.id,
+    );
+    db.prepare(`
+      UPDATE session_notes
+      SET lifecycle_state = 'stale', retired_at = ?, purge_after = ?
+      WHERE id = ?
+    `).run(
+      new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(now - 60_000).toISOString(),
+      staleBody.record.id,
+    );
+
     const preview = await app.inject({
       method: 'GET',
       url: '/api/v2/lifecycle/preview?agent_id=api-v2-lifecycle',
     });
     expect(preview.statusCode).toBe(200);
     const previewBody = JSON.parse(preview.payload);
-    expect(previewBody.summary.compression_groups).toBe(1);
-    expect(previewBody.summary.expire_count).toBe(0);
+    expect(previewBody.summary.active_notes).toBe(1);
+    expect(previewBody.summary.dormant_candidates).toBe(1);
+    expect(previewBody.summary.stale_candidates).toBe(1);
+    expect(previewBody.summary.purge_candidates).toBe(1);
+    expect(previewBody.summary.compression_groups).toBeUndefined();
 
     const run = await app.inject({
       method: 'POST',
@@ -733,16 +846,20 @@ describe('API V2 Integration', () => {
     });
     expect(run.statusCode).toBe(200);
     const runBody = JSON.parse(run.payload);
-    expect(runBody.summary.compressed_notes).toBe(3);
-    expect(runBody.summary.written_notes).toBe(1);
+    expect(runBody.summary.retired_notes).toBe(1);
+    expect(runBody.summary.purged_notes).toBe(1);
+    expect(runBody.summary.compressed_notes).toBeUndefined();
+    expect(runBody.summary.written_notes).toBeUndefined();
 
     const activeNotes = await app.inject({
       method: 'GET',
       url: '/api/v2/records?agent_id=api-v2-lifecycle&kind=session_note',
     });
     const activeNotesBody = JSON.parse(activeNotes.payload);
-    expect(activeNotesBody.items).toHaveLength(1);
-    expect(activeNotesBody.items[0]?.tags).toContain('lifecycle_compressed');
+    expect(activeNotesBody.items).toHaveLength(2);
+    expect(activeNotesBody.items.some((item: any) => item.lifecycle_state === 'dormant')).toBe(true);
+    expect(activeNotesBody.items.some((item: any) => item.lifecycle_state === 'stale')).toBe(true);
+    expect(activeNotesBody.items.every((item: any) => !item.tags.includes('lifecycle_compressed'))).toBe(true);
 
     const facts = await app.inject({
       method: 'GET',

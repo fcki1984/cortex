@@ -98,9 +98,9 @@ export default function LlmSection({
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>
                   {config.search?.reranker?.provider === 'none' || !config.search?.reranker?.provider
-                    ? 'Disabled'
+                    ? t('settings.disabled')
                     : config.search?.reranker?.provider === 'llm'
-                      ? `LLM (extraction model)${config.search?.reranker?.timeoutMs ? ` · ${config.search.reranker.timeoutMs}ms` : ''}`
+                      ? `${t('settings.rerankerLlmLabel')}${config.search?.reranker?.timeoutMs ? ` · ${config.search.reranker.timeoutMs}ms` : ''}`
                       : formatProvider(config.search.reranker.provider, config.search.reranker.model, config.search.reranker.timeoutMs)
                   }
                 </span>

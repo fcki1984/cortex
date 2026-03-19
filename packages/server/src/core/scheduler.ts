@@ -48,10 +48,13 @@ export function startLifecycleScheduler(cortex: CortexApp): void {
         const report = await cortex.lifecycleV2.run();
         log.info(
           {
-            expired_notes: report.summary.expired_notes,
-            compressed_notes: report.summary.compressed_notes,
-            written_notes: report.summary.written_notes,
-            compression_groups: report.summary.compression_groups,
+            active_notes: report.summary.active_notes,
+            dormant_candidates: report.summary.dormant_candidates,
+            stale_candidates: report.summary.stale_candidates,
+            purge_candidates: report.summary.purge_candidates,
+            retired_notes: report.summary.retired_notes,
+            staled_notes: report.summary.staled_notes,
+            purged_notes: report.summary.purged_notes,
           },
           'Lifecycle v2 cron completed',
         );

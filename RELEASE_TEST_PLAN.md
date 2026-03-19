@@ -1,4 +1,4 @@
-# Cortex v0.5.0 发布测试计划
+# Cortex v2.0 Release Candidate 发布测试计划
 
 > 目标：确保不同用户环境下 Cortex + cortex-bridge 插件 + Dashboard 集成面板稳定可用
 
@@ -124,7 +124,7 @@
 
 | # | 测试项 | 预期 |
 |---|--------|------|
-| D1 | 中文界面 | 所有文案正确显示 |
+| D1 | 中文界面 | 主要用户文案为中文，术语显示符合 V2 架构 |
 | D2 | 英文界面 | 所有文案正确显示 |
 | D3 | cortexUrl 动态生成 | 代码示例中的 URL 与当前访问地址一致 |
 | D4 | agentId 动态生成 | 代码示例中的 agent_id 与当前智能体一致 |
@@ -149,6 +149,8 @@
 | D13 | JS 代码示例 | 语法正确，URL/agentId 动态 |
 | D14 | Python 代码示例 | 语法正确，URL/agentId 动态 |
 | D15 | MCP 面板配置示例 | 包含 CORTEX_AGENT_ID 环境变量 |
+| D16 | Relations 页面 | 默认展示候选关系审查流 |
+| D17 | Lifecycle 页面 | 展示 active/dormant/stale/purge，而非压缩摘要 |
 
 ---
 
@@ -162,6 +164,10 @@
 - [ ] Docker 镜像构建通过
 - [ ] `git diff` 确认所有改动
 - [ ] 单元测试通过 (`pnpm test`)
+- [ ] `/api/v1/*` 全部返回 `404`
+- [ ] write normalization 能将稳定事实写入 durable（如“我住大阪”）
+- [ ] relation candidate -> confirm -> formal relation 流程通过
+- [ ] lifecycle 仅处理 `session_note`，不再自动写回 summary note
 - [ ] E2 场景（单 token）端到端通过
 - [ ] E3 场景（多 agent token）端到端通过
 - [ ] cortex-bridge 插件 npm publish

@@ -583,6 +583,15 @@ export default function Settings() {
   };
 
   const renderProviderBlock = useMemo(() => {
+    const localizeProviderLabel = (key: string, label: string) => {
+      if (key === 'none') return t('settings.disabled');
+      if (key === 'llm') return t('settings.rerankerLlmLabel');
+      if (label === 'Ollama (Local)') return t('settings.providerOllamaLocal');
+      if (label === 'Voyage AI (200M free tokens)') return t('settings.providerVoyageFree');
+      if (label === 'Jina AI (multilingual, 1M free tokens)') return t('settings.providerJinaFree');
+      return label;
+    };
+
     return (title: string, prefix: string, providerMap: Record<string, ProviderPreset>) => {
       let value: any = draft;
       for (const key of prefix.split('.')) value = value?.[key];
@@ -634,7 +643,7 @@ export default function Settings() {
             <label>{t('settings.provider')}</label>
             <select value={provider} onChange={e => handleProviderChange(e.target.value)}>
               {Object.entries(providerMap).map(([key, item]) => (
-                <option key={key} value={key}>{item.label}</option>
+                <option key={key} value={key}>{localizeProviderLabel(key, item.label)}</option>
               ))}
             </select>
           </div>

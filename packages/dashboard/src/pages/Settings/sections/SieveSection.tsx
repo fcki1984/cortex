@@ -17,7 +17,7 @@ export default function SieveSection({
 }: SieveSectionProps) {
   return (
     <div className="card">
-      {sectionHeader(t('settings.contextMessages').replace(/ ?\(.*$/, '').split(' ').slice(0, 2).join(' ') || 'Sieve', 'sieve')}
+      {sectionHeader(t('settings.sieveTitle'), 'sieve')}
       {editing ? (
         <div style={{ padding: '4px 0' }}>
           {renderToggleField(t('settings.fastChannelEnabled'), t('settings.fastChannelEnabledDesc'), 'fastChannelEnabled')}

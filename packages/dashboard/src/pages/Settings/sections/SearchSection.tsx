@@ -88,7 +88,12 @@ export default function SearchSection({
             {displayRow(t('settings.textWeight'), config.search?.textWeight?.toFixed(2))}
             {displayRow(t('settings.recencyBoostWindow'), humanizeDuration(config.search?.recencyBoostWindow), t('settings.recencyBoostWindowDesc'))}
             {displayRow(`🎚️ ${t('settings.minSimilarity')}`, `${((config.search?.minSimilarity ?? 0.2) * 100).toFixed(0)}%`, t('settings.minSimilarityDesc'))}
-            {displayRow(t('settings.rerankerTitle'), config.search?.reranker?.enabled ? `On (top ${config.search.reranker.topN}, weight ${((config.search.reranker.weight ?? 0.5) * 100).toFixed(0)}%)` : 'Off')}
+            {displayRow(
+              t('settings.rerankerTitle'),
+              config.search?.reranker?.enabled
+                ? `${t('common.on')} (${t('settings.topKShort')} ${config.search.reranker.topN}, ${t('settings.weightShort')} ${((config.search.reranker.weight ?? 0.5) * 100).toFixed(0)}%)`
+                : t('common.off'),
+            )}
           </tbody>
         </table>
       )}

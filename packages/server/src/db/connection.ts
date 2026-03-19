@@ -695,6 +695,40 @@ const migrations = [
         ON record_feedback_v2(record_id, created_at DESC);
     `,
   },
+  {
+    name: '016_v2_relation_candidates_and_note_retention',
+    sql: `
+      ALTER TABLE session_notes ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'
+        CHECK (lifecycle_state IN ('active', 'dormant', 'stale'));
+      ALTER TABLE session_notes ADD COLUMN retired_at TEXT;
+      ALTER TABLE session_notes ADD COLUMN purge_after TEXT;
+      CREATE INDEX IF NOT EXISTS idx_session_notes_lifecycle
+        ON session_notes(agent_id, lifecycle_state, purge_after);
+
+      CREATE TABLE IF NOT EXISTS relation_candidates_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        source_record_id TEXT NOT NULL REFERENCES record_registry(id) ON DELETE CASCADE,
+        source_evidence_id INTEGER REFERENCES record_evidence(id) ON DELETE SET NULL,
+        subject_key TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object_key TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_relation_candidates_v2_unique
+        ON relation_candidates_v2(agent_id, source_record_id, subject_key, predicate, object_key);
+      CREATE INDEX IF NOT EXISTS idx_relation_candidates_v2_agent
+        ON relation_candidates_v2(agent_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_relation_candidates_v2_subject
+        ON relation_candidates_v2(agent_id, subject_key);
+      CREATE INDEX IF NOT EXISTS idx_relation_candidates_v2_object
+        ON relation_candidates_v2(agent_id, object_key);
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

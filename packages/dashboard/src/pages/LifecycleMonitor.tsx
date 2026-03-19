@@ -2,7 +2,58 @@ import React, { useEffect, useState } from 'react';
 import { getLifecycleLogsV2, listAgents, previewLifecycleV2, runLifecycleV2 } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { toLocal } from '../utils/time.js';
-import { formatAgentNameLabel } from '../utils/v2Display.js';
+import { formatAgentNameLabel, formatLifecycleStateLabel } from '../utils/v2Display.js';
+
+type LifecyclePreviewNote = {
+  id: string;
+  summary: string;
+  session_id?: string | null;
+  expires_at?: string | null;
+  lifecycle_state: 'active' | 'dormant' | 'stale';
+  retired_at?: string | null;
+  purge_after?: string | null;
+};
+
+function NoteList({
+  title,
+  notes,
+  t,
+}: {
+  title: string;
+  notes: LifecyclePreviewNote[];
+  t: (key: string, params?: any) => string;
+}) {
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginBottom: 12 }}>{title}</h3>
+      {notes.length === 0 ? (
+        <div className="empty">{t('common.noData')}</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {notes.map(note => (
+            <div key={note.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {t('lifecycle.sessionSummary', {
+                    session: note.session_id || t('lifecycle.global'),
+                    state: formatLifecycleStateLabel(t, note.lifecycle_state),
+                  })}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{note.id}</div>
+              </div>
+              <div style={{ color: 'var(--text)', marginBottom: 8 }}>{note.summary}</div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+                {note.expires_at && <span>{t('lifecycle.expiresAt')}: {toLocal(note.expires_at)}</span>}
+                {note.retired_at && <span>{t('lifecycle.retiredAt')}: {toLocal(note.retired_at)}</span>}
+                {note.purge_after && <span>{t('lifecycle.purgeAfter')}: {toLocal(note.purge_after)}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function LifecycleMonitor() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -59,7 +110,11 @@ export default function LifecycleMonitor() {
             <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('lifecycle.agent')}</label>
             <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }}>
               <option value="">{t('lifecycle.allAgents')}</option>
-              {agents.map((agent: any) => <option key={agent.id} value={agent.id}>{formatAgentNameLabel(t, agent.id, agent.name)}</option>)}
+              {agents.map((agent: any) => (
+                <option key={agent.id} value={agent.id}>
+                  {formatAgentNameLabel(t, agent.id, agent.name)}
+                </option>
+              ))}
             </select>
             <button className="btn" onClick={refresh} disabled={loading}>{loading ? t('lifecycle.refreshing') : t('lifecycle.refresh')}</button>
             <button className="btn" onClick={handleRun} disabled={running}>{running ? t('lifecycle.running') : t('lifecycle.runNow')}</button>
@@ -73,40 +128,22 @@ export default function LifecycleMonitor() {
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.activeNotes')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.expire_count ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.expiredCandidates')}</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.dormant_candidates ?? 0}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.dormantCandidates')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.compression_groups ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.compressionGroups')}</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.stale_candidates ?? 0}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.staleCandidates')}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.notes_to_compress ?? 0}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.notesToCompress')}</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{preview?.summary?.purge_candidates ?? 0}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('lifecycle.purgeCandidates')}</div>
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 12 }}>{t('lifecycle.compressionPreview')}</h3>
-        {!preview?.compression_candidates?.length ? (
-          <div className="empty">{t('lifecycle.noCompressionCandidates')}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {preview.compression_candidates.map((candidate: any, index: number) => (
-              <div key={`${candidate.session_id || 'global'}-${index}`} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                  {t('lifecycle.sessionSummary', {
-                    session: candidate.session_id || t('lifecycle.global'),
-                    count: candidate.note_ids.length,
-                  })}
-                </div>
-                <div style={{ marginBottom: 8, color: 'var(--text)' }}>{candidate.replacement_summary}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{candidate.summaries.join(' | ')}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <NoteList title={t('lifecycle.dormantTitle')} notes={preview?.dormant_candidates || []} t={t} />
+      <NoteList title={t('lifecycle.staleTitle')} notes={preview?.stale_candidates || []} t={t} />
+      <NoteList title={t('lifecycle.purgeTitle')} notes={preview?.purge_candidates || []} t={t} />
 
       <div className="card">
         <h3 style={{ marginBottom: 12 }}>{t('lifecycle.logTitle')}</h3>
@@ -124,15 +161,15 @@ export default function LifecycleMonitor() {
               return (
                 <div key={`${log.id}-${log.executed_at}`} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                    <strong>{log.action}</strong>
+                    <strong>{t(`lifecycle.logAction.${log.action}`)}</strong>
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{toLocal(log.executed_at)}</span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {t('lifecycle.logSummary', {
                       agent: details.agent_id || t('lifecycle.global'),
-                      expired: details.expired_notes ?? 0,
-                      compressed: details.compressed_notes ?? details.compressed_count ?? 0,
-                      written: details.written_notes ?? 0,
+                      retired: details.retired_notes ?? 0,
+                      staled: details.staled_notes ?? 0,
+                      purged: details.purged_notes ?? 0,
                     })}
                   </div>
                 </div>

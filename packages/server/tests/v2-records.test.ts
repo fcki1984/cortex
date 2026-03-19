@@ -131,6 +131,23 @@ describe('CortexRecordsV2', () => {
     expect((recall.meta as any).normalized_intents?.attributes?.some((item: string) => item === 'response_style' || item === 'persona_style')).toBe(true);
   });
 
+  it('normalizes plain residence statements into durable location facts', async () => {
+    const result = await service.remember({
+      agent_id: 'plain-location-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+    });
+
+    expect(result.record.kind).toBe('fact_slot');
+    expect(result.record.attribute_key).toBe('location');
+    expect(result.normalization).toBe('durable');
+
+    const recall = await service.recall({ query: 'Where does the user live?', agent_id: 'plain-location-agent' });
+    expect(recall.facts).toHaveLength(1);
+    expect(recall.facts[0]?.content).toContain('大阪');
+    expect(recall.meta.reason).toBeUndefined();
+  });
+
   it('does not recall assistant inferred durable records by default', async () => {
     await service.remember({
       agent_id: 'inferred-agent',

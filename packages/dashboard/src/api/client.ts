@@ -26,6 +26,7 @@ const V2 = {
   recall: '/api/v2/recall',
   ingest: '/api/v2/ingest',
   records: '/api/v2/records',
+  relationCandidates: '/api/v2/relation-candidates',
   relations: '/api/v2/relations',
   lifecycle: '/api/v2/lifecycle',
   feedback: '/api/v2/feedback',
@@ -256,6 +257,23 @@ export const listRelationsV2 = (params?: Record<string, string>) => {
   const qs = params ? '?' + new URLSearchParams(params).toString() : '';
   return request(`${V2.relations}${qs}`);
 };
+
+export const listRelationCandidatesV2 = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return request(`${V2.relationCandidates}${qs}`);
+};
+
+export const createRelationCandidateV2 = (data: any) =>
+  request(V2.relationCandidates, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateRelationCandidateV2 = (id: string, data: any) =>
+  request(`${V2.relationCandidates}/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+
+export const confirmRelationCandidateV2 = (id: string) =>
+  request(`${V2.relationCandidates}/${id}/confirm`, { method: 'POST' });
+
+export const deleteRelationCandidateV2 = (id: string) =>
+  request(`${V2.relationCandidates}/${id}`, { method: 'DELETE' });
 
 export const createRelationV2 = (data: any) =>
   request(V2.relations, { method: 'POST', body: JSON.stringify(data) });

@@ -6,6 +6,7 @@ import type {
   RecordCandidate,
   RecordKind,
   RecordReasonCode,
+  SessionNoteLifecycleState,
   SessionNoteCandidate,
   SourceType,
   FactSlotCandidate,
@@ -92,6 +93,10 @@ type ManualInput = {
   owner_scope?: 'user' | 'agent';
   status?: string;
   session_id?: string;
+  expires_at?: string;
+  lifecycle_state?: SessionNoteLifecycleState;
+  retired_at?: string;
+  purge_after?: string;
 };
 
 type PartialExtractedRecord = {
@@ -118,6 +123,10 @@ interface BaseNormalizationInput {
   priority: number;
   confidence: number;
   sessionId?: string;
+  expiresAt?: string;
+  lifecycleState?: SessionNoteLifecycleState;
+  retiredAt?: string;
+  purgeAfter?: string;
 }
 
 interface ManualProfileRuleInput extends BaseNormalizationInput {
@@ -206,6 +215,10 @@ function buildSessionNote(
       tags: input.tags,
       priority: input.priority,
       confidence: input.confidence,
+      expires_at: input.expiresAt,
+      lifecycle_state: input.lifecycleState,
+      retired_at: input.retiredAt,
+      purge_after: input.purgeAfter,
     } satisfies SessionNoteCandidate,
     requestedKind,
     reasonCode,
@@ -296,7 +309,7 @@ function inferProfileAttribute(content: string, ownerScope: 'user' | 'agent'): s
 }
 
 function inferFactAttribute(content: string): string | null {
-  if (/我住在|住在|live in|lives in|位于|来自|from/i.test(content)) return 'location';
+  if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
   if (/我在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
     return 'occupation';
@@ -622,6 +635,10 @@ export function normalizeManualInput(agentId: string, input: ManualInput): Norma
     priority,
     confidence: 0.95,
     sessionId: input.session_id,
+    expiresAt: input.expires_at,
+    lifecycleState: input.lifecycle_state,
+    retiredAt: input.retired_at,
+    purgeAfter: input.purge_after,
   };
 
   if (input.kind && !isRecordKind(input.kind)) {

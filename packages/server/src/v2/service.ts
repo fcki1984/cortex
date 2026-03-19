@@ -5,6 +5,7 @@ import { detectHighSignals, isSmallTalk } from '../signals/index.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
+import { CortexRelationsV2 } from './relations.js';
 import {
   deleteRecord,
   getRecordById,
@@ -147,6 +148,7 @@ function recordIsActive(record: CortexRecord): boolean {
   if (record.kind === 'fact_slot') return !record.valid_to;
   if (record.kind === 'task_state') return !record.valid_to;
   if (record.kind === 'session_note') {
+    if (record.lifecycle_state !== 'active') return false;
     if (!record.expires_at) return true;
     return new Date(record.expires_at).getTime() > Date.now();
   }
@@ -355,6 +357,8 @@ function formatRuleLabel(record: CortexRecord): string {
 }
 
 export class CortexRecordsV2 {
+  private readonly relations = new CortexRelationsV2();
+
   constructor(
     private llm: LLMProvider,
     private embeddingProvider: EmbeddingProvider,
@@ -513,6 +517,9 @@ export class CortexRecordsV2 {
         evidence,
       }, normalized);
       insertEvidence(result.record.id, agentId, normalized.candidate.source_type, evidence);
+      if (normalized.candidate.source_type === 'user_explicit' || normalized.candidate.source_type === 'user_confirmed') {
+        this.relations.createDerivedCandidates(result.record.id);
+      }
       await this.indexRecord(result.record).catch((error: Error) => {
         log.debug({ id: result.record.id, error: error.message }, 'V2 vector indexing failed');
       });
@@ -549,6 +556,10 @@ export class CortexRecordsV2 {
     owner_scope?: 'user' | 'agent';
     status?: string;
     session_id?: string;
+    expires_at?: string;
+    lifecycle_state?: 'active' | 'dormant' | 'stale';
+    retired_at?: string;
+    purge_after?: string;
   }): Promise<RecordUpsertResult> {
     const normalized = normalizeManualInput(input.agent_id || 'default', input);
     const result = upsertRecord(normalized.candidate, normalized);

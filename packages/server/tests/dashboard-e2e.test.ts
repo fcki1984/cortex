@@ -248,6 +248,8 @@ describe('Dashboard Integration', () => {
       const extractionLogs = fs.readFileSync(EXTRACTION_LOGS_SOURCE, 'utf-8');
       const stats = fs.readFileSync(STATS_SOURCE, 'utf-8');
 
+      expect(relations).toContain('listRelationCandidatesV2');
+      expect(relations).toContain('confirmRelationCandidateV2');
       expect(relations).not.toContain('Create V2 Relation');
       expect(relations).not.toContain('No V2 relations yet.');
       expect(relations).not.toContain('Delete this relation?');
@@ -259,6 +261,17 @@ describe('Dashboard Integration', () => {
       expect(extractionLogs).not.toContain('reason:');
       expect(extractionLogs).not.toContain('imp:');
       expect(stats).not.toContain('item.source_type} · {item.kind}');
+    });
+
+    it('should switch lifecycle monitor to forgetting-first retention semantics', () => {
+      const lifecycle = fs.readFileSync(path.resolve(__dirname, '../../dashboard/src/pages/LifecycleMonitor.tsx'), 'utf-8');
+
+      expect(lifecycle).toContain('dormant_candidates');
+      expect(lifecycle).toContain('stale_candidates');
+      expect(lifecycle).toContain('purge_candidates');
+      expect(lifecycle).not.toContain('compression_candidates');
+      expect(lifecycle).not.toContain('notes_to_compress');
+      expect(lifecycle).not.toContain('compression_groups');
     });
   });
 
