@@ -349,6 +349,81 @@ describe('API V2 Integration', () => {
     expect(recallBody.facts[0]?.content).toContain('大阪');
   });
 
+  it('admits imperative language preference and constraint statements as durable profile rules', async () => {
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-plain-profile-rules',
+      },
+    });
+    const constraint = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '不要复杂方案',
+        agent_id: 'api-plain-profile-rules',
+      },
+    });
+
+    expect(language.statusCode).toBe(201);
+    expect(constraint.statusCode).toBe(201);
+
+    const languageBody = JSON.parse(language.payload);
+    const constraintBody = JSON.parse(constraint.payload);
+    expect(languageBody.record.kind).toBe('profile_rule');
+    expect(languageBody.record.attribute_key).toBe('language_preference');
+    expect(languageBody.normalization).toBe('durable');
+    expect(constraintBody.record.kind).toBe('profile_rule');
+    expect(constraintBody.record.attribute_key).toBe('solution_complexity');
+    expect(constraintBody.normalization).toBe('durable');
+  });
+
+  it('bridges cross-language organization and task queries into durable recall', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-cross-language-extended',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        agent_id: 'api-cross-language-extended',
+      },
+    });
+
+    const organizationRecall = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user work?', agent_id: 'api-cross-language-extended' },
+    });
+    const taskRecall = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'What is the current task?', agent_id: 'api-cross-language-extended' },
+    });
+
+    expect(organizationRecall.statusCode).toBe(200);
+    expect(taskRecall.statusCode).toBe(200);
+
+    const organizationBody = JSON.parse(organizationRecall.payload);
+    const taskBody = JSON.parse(taskRecall.payload);
+    expect(organizationBody.facts).toHaveLength(1);
+    expect(organizationBody.facts[0]?.content).toContain('OpenAI');
+    expect(taskBody.task_state).toHaveLength(1);
+    expect(taskBody.task_state[0]?.content).toContain('重构 Cortex recall');
+  });
+
   it('exposes MCP endpoint metadata on GET /mcp', async () => {
     const response = await app.inject({
       method: 'GET',

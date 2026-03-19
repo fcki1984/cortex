@@ -82,6 +82,7 @@ const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
 
 const ATTRIBUTE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'location', patterns: [/\blive\b/i, /\blives\b/i, /\bliving\b/i, /\blocation\b/i, /\bresidence\b/i, /住在哪里/i, /住哪/i, /住在/i, /居住/i] },
+  { key: 'organization', patterns: [/\bwork\b/i, /\bworks\b/i, /\bworking\b/i, /\bemployer\b/i, /\bcompany\b/i, /\borganization\b/i, /工作单位/i, /在哪.*工作/i, /在哪里上班/i, /为谁工作/i] },
   { key: 'response_style', patterns: [/\banswer style\b/i, /\bresponse style\b/i, /\brespond\b/i, /\breply\b/i, /\btone\b/i, /怎么回答/i, /如何回答/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /简洁/i, /简短/i] },
   { key: 'persona_style', patterns: [/\bpersona\b/i, /\bresponse style\b/i, /\bassistant style\b/i, /人设/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /助手风格/i] },
   { key: 'response_length', patterns: [/\bverbose\b/i, /\blong\b/i, /\bshort\b/i, /\bbrief\b/i, /\bconcise\b/i, /长篇/i, /冗长/i, /简洁/i, /简短/i] },
@@ -92,6 +93,7 @@ const ATTRIBUTE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
 ];
 
 const STATE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
+  { key: 'current_task', patterns: [/\bcurrent task\b/i, /\bactive task\b/i, /\bcurrent work\b/i, /\bworking on\b/i, /当前任务/i, /现在.*任务/i, /正在做什么/i] },
   { key: 'current_goal', patterns: [/\bgoal\b/i, /\bplan\b/i, /\bwant\b/i, /\btarget\b/i, /目标/i, /计划/i, /打算/i, /想要/i] },
   { key: 'current_decision', patterns: [/\bdecision\b/i, /\bdecide\b/i, /\bchoose\b/i, /决定/i, /选定/i] },
   { key: 'open_todo', patterns: [/\btodo\b/i, /\bto do\b/i, /\bremember\b/i, /\bremind\b/i, /待办/i, /记得/i, /别忘了/i] },
@@ -245,10 +247,20 @@ function buildRecordIntentProfile(record: CortexRecord): RecordIntentProfile {
         states: inferred.states,
       };
     case 'task_state':
+      const taskStates = new Set<string>([...inferred.states, record.state_key]);
+      if (
+        record.state_key === 'current_goal' ||
+        record.state_key === 'project_status' ||
+        record.state_key === 'refactor_status' ||
+        record.state_key === 'deployment_status' ||
+        record.state_key === 'migration_status'
+      ) {
+        taskStates.add('current_task');
+      }
       return {
         subjects: new Set<string>([...inferred.subjects, record.subject_key]),
         attributes: inferred.attributes,
-        states: new Set<string>([...inferred.states, record.state_key]),
+        states: taskStates,
       };
     case 'session_note':
       return inferred;

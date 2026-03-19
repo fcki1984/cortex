@@ -363,16 +363,15 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
   const sourceReason = sourceAllowsProfileRule(input.sourceType, ownerScope);
   if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
 
-  const subjectKey = ownerScope === 'agent'
-    ? normalizeKey(input.subjectKey || 'agent', 'agent')
-    : stableSubject(input.subjectKey, input.content);
-  if (!subjectKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));
-
   const attributeKey = firstDefined(
     normalizeProfileAttribute(input.attributeKey),
     inferProfileAttribute(input.content, ownerScope),
   );
   if (!attributeKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+
+  const subjectKey = ownerScope === 'agent'
+    ? normalizeKey(input.subjectKey || 'agent', 'agent')
+    : stableSubject(input.subjectKey, input.content) || 'user';
 
   return outcome(
     {

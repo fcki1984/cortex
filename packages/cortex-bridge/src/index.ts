@@ -13,7 +13,7 @@ const PLUGIN_VERSION = '0.5.1';
 
 // ── Timeouts ────────────────────────────────────────────
 const RECALL_TIMEOUT = 8000;
-const INGEST_TIMEOUT = 5000;
+const INGEST_TIMEOUT = 12000;
 const HEALTH_TIMEOUT = 2000;
 
 // ── OpenClaw Plugin API types (minimal subset) ──────────
