@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getDb } from '../db/index.js';
 import { getConfig, updateConfig } from '../utils/config.js';
-import { restartLifecycleScheduler } from '../core/scheduler.js';
 import { createLogger, getLogLevel as _getLogLevel, setLogLevel as _setLogLevel, getLogBuffer } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import type { CortexApp } from '../app.js';
@@ -424,16 +423,16 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     return exportable;
   });
 
-  // Hot update config
+  // Persist config only. Runtime changes require restart/redeploy to apply.
   app.patch('/api/v2/config', async (req) => {
     const body = req.body as any;
     const updated = updateConfig(body);
-    const reloaded = cortex.reloadProviders(updated);
-    // Restart lifecycle scheduler if schedule changed
-    if (body.lifecycle?.schedule !== undefined) {
-      restartLifecycleScheduler(cortex);
-    }
-    return { ok: true, config: updated, reloaded_providers: reloaded };
+    return {
+      ok: true,
+      config: updated,
+      requires_restart: true,
+      runtime_applied: false,
+    };
   });
 
   // Test LLM connection

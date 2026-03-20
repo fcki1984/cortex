@@ -362,6 +362,16 @@ export default function Settings() {
     setDraft({});
   };
 
+  const handleConfigSaveSuccess = async (response: any) => {
+    const refreshed = await getConfig();
+    setConfig(refreshed);
+    cancelEdit();
+    setToast({
+      message: response?.requires_restart ? t('settings.toastConfigSavedRestart') : t('settings.toastConfigSaved'),
+      type: 'success',
+    });
+  };
+
   const saveSection = async (section: SectionKey) => {
     if (!config) return;
 
@@ -412,11 +422,8 @@ export default function Settings() {
       };
 
       try {
-        await updateConfig(payload);
-        const refreshed = await getConfig();
-        setConfig(refreshed);
-        cancelEdit();
-        setToast({ message: t('settings.toastConfigSaved'), type: 'success' });
+        const response = await updateConfig(payload);
+        await handleConfigSaveSuccess(response);
       } catch (e: any) {
         setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
       }
@@ -459,11 +466,8 @@ export default function Settings() {
       };
 
       try {
-        await updateConfig(payload);
-        const refreshed = await getConfig();
-        setConfig(refreshed);
-        cancelEdit();
-        setToast({ message: t('settings.toastConfigSaved'), type: 'success' });
+        const response = await updateConfig(payload);
+        await handleConfigSaveSuccess(response);
       } catch (e: any) {
         setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
       }
@@ -500,11 +504,8 @@ export default function Settings() {
       };
 
       try {
-        await updateConfig(payload);
-        const refreshed = await getConfig();
-        setConfig(refreshed);
-        cancelEdit();
-        setToast({ message: t('settings.toastConfigSaved'), type: 'success' });
+        const response = await updateConfig(payload);
+        await handleConfigSaveSuccess(response);
       } catch (e: any) {
         setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
       }
@@ -528,11 +529,8 @@ export default function Settings() {
       };
 
       try {
-        await updateConfig(payload);
-        const refreshed = await getConfig();
-        setConfig(refreshed);
-        cancelEdit();
-        setToast({ message: t('settings.toastConfigSaved'), type: 'success' });
+        const response = await updateConfig(payload);
+        await handleConfigSaveSuccess(response);
       } catch (e: any) {
         setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
       }

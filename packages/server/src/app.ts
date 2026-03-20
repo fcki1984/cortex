@@ -61,58 +61,6 @@ export class CortexApp {
     log.info('CortexApp initialized');
   }
 
-  /**
-   * Reload LLM/Embedding providers and dependent engines when config changes.
-   * Only recreates providers whose config actually changed.
-   * vectorBackend is NOT reloaded (requires restart).
-   */
-  reloadProviders(newConfig: CortexConfig): string[] {
-    const reloaded: string[] = [];
-
-    // Check extraction LLM
-    if (hasProviderChanged(this.config.llm.extraction, newConfig.llm.extraction)) {
-      this.llmExtraction = createCascadeLLM(newConfig.llm.extraction);
-      reloaded.push('llm.extraction');
-      log.info('Reloaded extraction LLM provider');
-    }
-
-    // Check lifecycle LLM
-    if (hasProviderChanged(this.config.llm.lifecycle, newConfig.llm.lifecycle)) {
-      this.llmLifecycle = createCascadeLLM(newConfig.llm.lifecycle);
-      reloaded.push('llm.lifecycle');
-      log.info('Reloaded lifecycle LLM provider');
-    }
-
-    // Check embedding
-    if (hasProviderChanged(this.config.embedding, newConfig.embedding)) {
-      const baseEmbedding = createCascadeEmbedding(newConfig.embedding);
-      this.embeddingProvider = new CachedEmbeddingProvider(baseEmbedding, 2000);
-      reloaded.push('embedding');
-      log.info('Reloaded embedding provider');
-    }
-
-    // Check if search/gate config changed (reranker, query expansion, etc.)
-    const searchConfigChanged = JSON.stringify(this.config.search) !== JSON.stringify(newConfig.search);
-    const gateConfigChanged = JSON.stringify(this.config.gate) !== JSON.stringify(newConfig.gate);
-    const runtimeChanged = JSON.stringify(this.config.runtime) !== JSON.stringify(newConfig.runtime);
-    if (searchConfigChanged) reloaded.push('search');
-    if (gateConfigChanged) reloaded.push('gate');
-    if (runtimeChanged) reloaded.push('runtime');
-
-    // Rebuild dependent engines if any provider or config changed
-    if (reloaded.length > 0) {
-      this.rebuildLegacyEngines(newConfig);
-      this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
-      this.relationsV2 = new CortexRelationsV2();
-      this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
-      this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
-      log.info({ reloaded }, 'Rebuilt dependent engines');
-    }
-
-    this.config = newConfig;
-    return reloaded;
-  }
-
   async initialize(): Promise<void> {
     // Initialize vector backend
     await this.vectorBackend.initialize(this.embeddingProvider.dimensions || 1536);
@@ -146,19 +94,4 @@ export class CortexApp {
     this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, config);
     this.exporter = new MarkdownExporter(config);
   }
-}
-
-/** Compare old vs new provider config to decide if provider needs recreation */
-function hasProviderChanged(
-  oldCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number; dimensions?: number },
-  newCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number; dimensions?: number },
-): boolean {
-  if (newCfg.provider !== oldCfg.provider) return true;
-  if (newCfg.model !== oldCfg.model) return true;
-  if (newCfg.dimensions !== oldCfg.dimensions) return true;
-  if (newCfg.baseUrl !== oldCfg.baseUrl) return true;
-  if (newCfg.timeoutMs !== oldCfg.timeoutMs) return true;
-  // Only compare apiKey if the new config actually provides one (non-empty)
-  if (newCfg.apiKey && newCfg.apiKey !== oldCfg.apiKey) return true;
-  return false;
 }

@@ -221,7 +221,7 @@ describe('API Integration', () => {
   });
 
   describe('PATCH /api/v2/config', () => {
-    it('should reload providers when timeout changes', async () => {
+    it('should persist provider timeout changes without applying them at runtime', async () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/v2/config',
@@ -236,8 +236,10 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.ok).toBe(true);
-      expect(body.reloaded_providers).toContain('llm.extraction');
+      expect(body.requires_restart).toBe(true);
+      expect(body.runtime_applied).toBe(false);
       expect(body.config.llm.extraction.timeoutMs).toBe(9999);
+      expect(cortex.config.llm.extraction.timeoutMs).toBe(1111);
     });
 
     it('should persist relevance gate settings', async () => {
@@ -258,10 +260,13 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.ok).toBe(true);
+      expect(body.requires_restart).toBe(true);
+      expect(body.runtime_applied).toBe(false);
       expect(body.config.gate.relevanceGate.enabled).toBe(false);
       expect(body.config.gate.relevanceGate.inspectTopK).toBe(2);
       expect(body.config.gate.relevanceGate.minSemanticScore).toBe(0.71);
       expect(body.config.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.19);
+      expect(cortex.config.gate.relevanceGate.enabled).toBe(true);
     });
   });
 });

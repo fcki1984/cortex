@@ -488,6 +488,7 @@ export default {
     confirmReset: '确定重置为全局配置？这将移除此智能体的所有配置覆盖。',
     toastUpdated: '智能体已更新',
     toastConfigSaved: '配置已保存',
+    toastConfigSavedRestart: '配置已保存，重启或重新部署后生效',
     toastConfigReset: '已重置为全局配置',
   },
   searchDebug: {
@@ -876,6 +877,7 @@ export default {
     markdownExportMemoryMd: '导出 MEMORY.md',
     markdownExportMemoryMdDesc: '将核心层记忆包含在导出的 MEMORY.md 文件中。',
     toastConfigSaved: '配置保存成功',
+    toastConfigSavedRestart: '配置已保存，重启或重新部署后生效',
     toastSaveFailed: '保存失败：{{message}}',
     importConfig: '导入',
     confirmImportConfig: '从文件导入配置？这将覆盖当前设置（服务器地址、认证和存储路径除外）。',

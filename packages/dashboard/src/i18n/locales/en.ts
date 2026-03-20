@@ -488,6 +488,7 @@ export default {
     confirmReset: 'Reset to global configuration? This will remove all config overrides for this agent.',
     toastUpdated: 'Agent updated',
     toastConfigSaved: 'Configuration saved',
+    toastConfigSavedRestart: 'Configuration saved. Restart or redeploy to apply it.',
     toastConfigReset: 'Configuration reset to global',
   },
   searchDebug: {
@@ -876,6 +877,7 @@ export default {
     markdownExportMemoryMd: 'Export MEMORY.md',
     markdownExportMemoryMdDesc: 'Include Core layer memories in the exported MEMORY.md file.',
     toastConfigSaved: 'Configuration saved successfully',
+    toastConfigSavedRestart: 'Configuration saved. Restart or redeploy to apply it.',
     toastSaveFailed: 'Save failed: {{message}}',
     importConfig: 'Import',
     confirmImportConfig: 'Import configuration from file? This will overwrite current settings (except server, auth, and storage).',
