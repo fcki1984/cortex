@@ -6,11 +6,12 @@ Commit baseline: `07ee3da`
 
 ## Gate Status
 
-Release candidate status: **BLOCKED**
+Core release-candidate status: **IN FREEZE**
 
 Rule:
 
-- No production freeze while `Recall / Relations / Lifecycle` still contain architecture blockers.
+- Cortex core may proceed through RC freeze once the core gate passes.
+- OpenClaw host-side validation is tracked separately and no longer blocks Cortex code freeze by itself.
 
 ## Architecture Blockers
 
@@ -84,3 +85,4 @@ Rule:
 - `Neo4j` is not a release gate by itself. It becomes a blocker only if it remains part of the formal truth path.
 - `Import/Export v2` remains post-release work and does not block release candidate.
 - Documentation pages for terminology and architecture remain post-release work; only inline clarity and release-facing docs matter now.
+- OpenClaw is no longer part of the Cortex code-critical release gate. It is a separate Windows host signoff item.

@@ -366,7 +366,7 @@ NEO4J_PASSWORD=your-password
 
 > 💡 If you set `CORTEX_AUTH_TOKEN`, include it in every client config below. Examples show both with and without auth.
 
-### OpenClaw (Recommended)
+### OpenClaw (Optional bridge)
 
 ```bash
 openclaw plugins install @cortexmem/openclaw
@@ -383,6 +383,8 @@ Configure in OpenClaw's plugin settings (Dashboard or `openclaw.json`):
 ```
 
 > Without auth: omit `authToken`. Without custom agent: omit `agentId` (defaults to `"openclaw"`).
+>
+> Production note: OpenClaw is validated separately from the Cortex core release gate. Final signoff should be performed on the Windows host runtime; WSL is useful for debugging, but not the final acceptance environment.
 
 The plugin auto-hooks into OpenClaw's lifecycle:
 

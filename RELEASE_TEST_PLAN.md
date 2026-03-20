@@ -1,6 +1,24 @@
 # Cortex v2.0 Release Candidate 发布测试计划
 
-> 目标：确保不同用户环境下 Cortex + cortex-bridge 插件 + Dashboard 集成面板稳定可用
+> 目标：先完成 Cortex v2 核心服务的生产候选验收，再对 OpenClaw 做独立宿主机签收。
+
+## 0. RC 冻结规则
+
+- 当前阶段默认冻结 Cortex v2 主架构。
+- 不再新增 schema、公开 API、Dashboard 产品页、Recall 增强链或 OpenClaw bridge 功能。
+- 允许的改动仅限：
+  - Cortex 核心生产阻塞修复
+  - 发布回归、验收脚本与发布文档收口
+
+## 0.1 发布边界
+
+- **Cortex 核心发布 gate**：`/api/v2/*`、`/mcp`、Dashboard、V2 records/relations/lifecycle/feedback、Settings、生效性与安全边界
+- **OpenClaw 签收 gate**：独立的 Windows 宿主机接入面签收
+
+规则：
+
+- Cortex 核心通过发布门槛后即可进入 release candidate。
+- OpenClaw 若未完成宿主机签收，只标记为“未随本次生产首发签收”，不再单独阻塞 Cortex 核心发布。
 
 ---
 
@@ -52,7 +70,7 @@
 
 ---
 
-## 三、cortex-bridge 插件测试
+## 三、OpenClaw 独立接入面签收
 
 ### 3.0 Windows Host Runtime Gate
 
@@ -181,16 +199,31 @@
 - [ ] write normalization 能将稳定事实写入 durable（如“我住大阪”）
 - [ ] relation candidate -> confirm -> formal relation 流程通过
 - [ ] lifecycle 仅处理 `session_note`，不再自动写回 summary note
-- [ ] Windows host 上 `http://localhost:18790/chat?session=main` 的 OpenClaw 运行时联调通过
 - [ ] E2 场景（单 token）端到端通过
 - [ ] E3 场景（多 agent token）端到端通过
 - [ ] cortex-bridge 插件 npm publish
 - [ ] Docker 镜像推送 GHCR
 - [ ] GitHub Release 创建
 
+### 5.1 OpenClaw 独立签收（不阻塞 Cortex 核心发布）
+
+- [ ] Windows host 上 `http://localhost:18790/chat?session=main` 的 OpenClaw 运行时联调通过
+- [ ] `/cortex_status`、`/cortex_remember`、`/cortex_search`、`/cortex_recent` 通过
+- [ ] 至少一轮 `before_agent_start` recall 与 `agent_end` ingest 真实链路通过
+
 ---
 
-## 六、自动化测试脚本
+## 六、生产版后的第一批工作
+
+1. `Import/Export v2`
+2. 写入与关系候选的 prompt contract 强化
+3. 文档页
+   - 术语对照
+   - 架构说明
+   - 参数说明
+   - 版本更新
+
+## 七、自动化测试脚本
 
 ```bash
 #!/bin/bash

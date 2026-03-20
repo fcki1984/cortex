@@ -368,7 +368,7 @@ NEO4J_PASSWORD=your-password
 
 > 💡 如果设置了 `CORTEX_AUTH_TOKEN`，需要在下面每个客户端配置中加上令牌。示例同时展示了有/无认证的写法。
 
-### OpenClaw（推荐）
+### OpenClaw（可选 Bridge）
 
 ```bash
 openclaw plugins install @cortexmem/openclaw
@@ -385,6 +385,8 @@ openclaw plugins install @cortexmem/openclaw
 ```
 
 > 不用认证：省略 `authToken`。不需要自定义 agent：省略 `agentId`（默认 `"openclaw"`）。
+>
+> 生产说明：OpenClaw 的签收与 Cortex 核心发布 gate 分开进行。最终签收应在 Windows 宿主机运行时完成；WSL 适合作为调试环境，但不作为最终验收环境。
 
 插件自动接入 OpenClaw 生命周期：
 
