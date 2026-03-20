@@ -18,11 +18,14 @@ import {
   CUSTOM_MODEL,
   ProviderPreset,
   parseDuration,
+  SCHEDULE_PRESETS,
+  SCHEDULE_CUSTOM,
 } from './types.js';
 import LlmSection from './sections/LlmSection.js';
 import SearchSection from './sections/SearchSection.js';
 import GateSection from './sections/GateSection.js';
 import SieveSection from './sections/SieveSection.js';
+import LifecycleSection from './sections/LifecycleSection.js';
 import DataManagement from './sections/DataManagement.js';
 import AuthSection from './sections/AuthSection.js';
 
@@ -41,6 +44,12 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
+function humanizeCronValue(value: string, t: (key: string, params?: any) => string): string {
+  const preset = SCHEDULE_PRESETS.find(item => item.value === value);
+  if (preset) return t(preset.labelKey);
+  return value || t('settings.scheduleDisabled');
+}
+
 export default function Settings() {
   const [config, setConfig] = useState<any>(null);
   const [error, setError] = useState('');
@@ -51,6 +60,7 @@ export default function Settings() {
   const [testState, setTestState] = useState<Record<string, { status: 'idle' | 'testing' | 'success' | 'error'; message?: string; latency?: number }>>({});
   const [logLevel, setLogLevelState] = useState('info');
   const { t } = useI18n();
+  const liveEditableSections = useMemo(() => new Set<SectionKey>(['llm', 'lifecycle']), []);
 
   useEffect(() => {
     getConfig().then(setConfig).catch((e: any) => setError(e.message));
@@ -97,6 +107,8 @@ export default function Settings() {
     };
     return `${num} ${labels[unit] || unit}`;
   };
+
+  const humanizeCron = (value: string): string => humanizeCronValue(value, t);
 
   const displayRow = (label: string, value: React.ReactNode, desc?: string) => (
     <tr>
@@ -205,21 +217,75 @@ export default function Settings() {
     </div>
   );
 
-  const sectionHeader = (title: string, section: SectionKey) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-      <h3>{title}</h3>
-      {editingSection === section ? (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={cancelEdit}>{t('common.cancel')}</button>
-          <button className="btn primary" onClick={() => saveSection(section)}>{t('common.save')}</button>
+  const renderSchedule = () => {
+    const presetValue = getDraftValue('schedulePreset') ?? '';
+    const isCustom = presetValue === SCHEDULE_CUSTOM;
+    return (
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label>{t('settings.scheduleLabel')}</label>
+        <select
+          value={presetValue}
+          onChange={e => {
+            const next = e.target.value;
+            updateDraft('schedulePreset', next);
+            if (next === SCHEDULE_CUSTOM) {
+              updateDraft('schedule', getDraftValue('customSchedule') ?? '');
+              return;
+            }
+            updateDraft('schedule', next);
+          }}
+        >
+          {SCHEDULE_PRESETS.map(item => (
+            <option key={item.value || '__disabled__'} value={item.value}>
+              {t(item.labelKey)}
+            </option>
+          ))}
+          <option value={SCHEDULE_CUSTOM}>{t('settings.scheduleCustom')}</option>
+        </select>
+        {isCustom && (
+          <input
+            type="text"
+            value={getDraftValue('customSchedule') ?? ''}
+            placeholder="0 3 * * *"
+            style={{ marginTop: 8 }}
+            onChange={e => {
+              updateDraft('customSchedule', e.target.value);
+              updateDraft('schedule', e.target.value);
+            }}
+          />
+        )}
+        {fieldDesc(t('settings.scheduleDesc'))}
+      </div>
+    );
+  };
+
+  const sectionHeader = (title: string, section: SectionKey) => {
+    const editable = liveEditableSections.has(section);
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
+        <div>
+          <h3 style={{ marginBottom: 6 }}>{title}</h3>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {editable ? t('settings.liveApply') : t('settings.deployOnly')}
+          </div>
         </div>
-      ) : (
-        <button className="btn" onClick={() => startEdit(section)} disabled={editingSection !== null}>
-          {t('common.edit')}
-        </button>
-      )}
-    </div>
-  );
+        {editable ? (
+          editingSection === section ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={cancelEdit}>{t('common.cancel')}</button>
+              <button className="btn primary" onClick={() => saveSection(section)}>{t('common.save')}</button>
+            </div>
+          ) : (
+            <button className="btn" onClick={() => startEdit(section)} disabled={editingSection !== null}>
+              {t('common.edit')}
+            </button>
+          )
+        ) : (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('settings.readOnly')}</span>
+        )}
+      </div>
+    );
+  };
 
   const startEdit = (section: SectionKey) => {
     if (!config) return;
@@ -324,6 +390,16 @@ export default function Settings() {
       return;
     }
 
+    if (section === 'lifecycle') {
+      setDraft({
+        schedulePreset: config.lifecycle?.schedule ?? '',
+        schedule: config.lifecycle?.schedule ?? '',
+        customSchedule: config.lifecycle?.schedule ?? '',
+      });
+      setEditingSection(section);
+      return;
+    }
+
     if (section === 'search') {
       setDraft({
         hybrid: config.search?.hybrid ?? true,
@@ -366,14 +442,20 @@ export default function Settings() {
     const refreshed = await getConfig();
     setConfig(refreshed);
     cancelEdit();
+    const restartRequired = Array.isArray(response?.restart_required_sections)
+      ? response.restart_required_sections
+      : [];
     setToast({
-      message: response?.requires_restart ? t('settings.toastConfigSavedRestart') : t('settings.toastConfigSaved'),
+      message: restartRequired.length > 0
+        ? t('settings.toastConfigSavedPartial', { sections: restartRequired.join(', ') })
+        : t('settings.toastConfigSaved'),
       type: 'success',
     });
   };
 
   const saveSection = async (section: SectionKey) => {
     if (!config) return;
+    const v2Only = !config.runtime?.legacyMode;
 
     if (section === 'llm') {
       for (const value of [draft.extraction?.timeoutMs, draft.lifecycle?.timeoutMs, draft.embedding?.timeoutMs, draft.reranker?.timeoutMs]) {
@@ -399,7 +481,6 @@ export default function Settings() {
       const payload: any = {
         llm: {
           extraction: buildProviderPayload(draft.extraction),
-          lifecycle: buildProviderPayload(draft.lifecycle),
         },
         embedding: {
           provider: draft.embedding.provider,
@@ -420,6 +501,12 @@ export default function Settings() {
           },
         },
       };
+
+      if (!v2Only) {
+        payload.llm.lifecycle = buildProviderPayload(draft.lifecycle);
+      } else {
+        delete payload.search;
+      }
 
       try {
         const response = await updateConfig(payload);
@@ -467,6 +554,27 @@ export default function Settings() {
 
       try {
         const response = await updateConfig(payload);
+        await handleConfigSaveSuccess(response);
+      } catch (e: any) {
+        setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
+      }
+      return;
+    }
+
+    if (section === 'lifecycle') {
+      const schedule = String(draft.schedule ?? '').trim();
+      if (schedule && schedule.split(/\s+/).length !== 5) {
+        setToast({ message: t('settings.validationCronFormat'), type: 'error' });
+        return;
+      }
+
+      try {
+        const response = await updateConfig({
+          lifecycle: {
+            ...config.lifecycle,
+            schedule,
+          },
+        });
         await handleConfigSaveSuccess(response);
       } catch (e: any) {
         setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
@@ -947,9 +1055,19 @@ export default function Settings() {
               {t('settings.expertSettingsHint')}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginTop: 8 }}>
-              {t('settings.lifecycleSettingsRetired')}
+              {t('settings.expertRuntimeHint')}
             </div>
           </div>
+
+          <LifecycleSection
+            config={config}
+            editing={editingSection === 'lifecycle'}
+            sectionHeader={sectionHeader}
+            displayRow={displayRow}
+            renderSchedule={renderSchedule}
+            humanizeCron={humanizeCron}
+            t={t}
+          />
 
           <GateSection
             config={config}

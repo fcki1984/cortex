@@ -6,6 +6,7 @@ import { metrics } from '../utils/metrics.js';
 import type { CortexApp } from '../app.js';
 import type { Memory } from '../db/queries.js';
 import type { SearchResult } from '../search/hybrid.js';
+import { restartLifecycleScheduler } from '../core/scheduler.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +47,70 @@ const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
 // Cache latest release info (check at most every 30 min)
 let latestReleaseCache: { tag: string; url: string; publishedAt: string; checkedAt: number } | null = null;
 const RELEASE_CHECK_INTERVAL = 30 * 60 * 1000;
+
+function isSectionChanged(section: string, current: any, updated: any): boolean {
+  switch (section) {
+    case 'llm.extraction':
+      return JSON.stringify(current?.llm?.extraction ?? null) !== JSON.stringify(updated?.llm?.extraction ?? null);
+    case 'llm.lifecycle':
+      return JSON.stringify(current?.llm?.lifecycle ?? null) !== JSON.stringify(updated?.llm?.lifecycle ?? null);
+    case 'embedding':
+      return JSON.stringify(current?.embedding ?? null) !== JSON.stringify(updated?.embedding ?? null);
+    case 'gate':
+      return JSON.stringify(current?.gate ?? null) !== JSON.stringify(updated?.gate ?? null);
+    case 'search':
+      return JSON.stringify(current?.search ?? null) !== JSON.stringify(updated?.search ?? null);
+    case 'sieve':
+      return JSON.stringify(current?.sieve ?? null) !== JSON.stringify(updated?.sieve ?? null);
+    case 'lifecycle.schedule':
+      return (current?.lifecycle?.schedule ?? '') !== (updated?.lifecycle?.schedule ?? '');
+    case 'lifecycle':
+      return JSON.stringify(current?.lifecycle ?? null) !== JSON.stringify(updated?.lifecycle ?? null);
+    case 'storage':
+      return JSON.stringify(current?.storage ?? null) !== JSON.stringify(updated?.storage ?? null);
+    case 'vectorBackend':
+      return JSON.stringify(current?.vectorBackend ?? null) !== JSON.stringify(updated?.vectorBackend ?? null);
+    case 'server':
+      return current?.port !== updated?.port || current?.host !== updated?.host;
+    case 'runtime':
+      return JSON.stringify(current?.runtime ?? null) !== JSON.stringify(updated?.runtime ?? null);
+    default:
+      return false;
+  }
+}
+
+function collectChangedConfigSections(partial: any, current: any, updated: any): string[] {
+  const sections = new Set<string>();
+  if (partial?.llm?.extraction) sections.add('llm.extraction');
+  if (partial?.llm?.lifecycle) sections.add('llm.lifecycle');
+  if (partial?.embedding) sections.add('embedding');
+  if (partial?.gate) sections.add('gate');
+  if (partial?.search) sections.add('search');
+  if (partial?.sieve) sections.add('sieve');
+  if (partial?.lifecycle?.schedule !== undefined) sections.add('lifecycle.schedule');
+  if (partial?.lifecycle && partial?.lifecycle?.schedule === undefined) sections.add('lifecycle');
+  if (partial?.storage) sections.add('storage');
+  if (partial?.vectorBackend) sections.add('vectorBackend');
+  if (partial?.port !== undefined || partial?.host !== undefined) sections.add('server');
+  if (partial?.runtime) sections.add('runtime');
+  return Array.from(sections).filter(section => isSectionChanged(section, current, updated));
+}
+
+function canApplySectionAtRuntime(section: string, legacyMode: boolean): boolean {
+  switch (section) {
+    case 'llm.extraction':
+    case 'embedding':
+    case 'lifecycle.schedule':
+      return true;
+    case 'llm.lifecycle':
+    case 'gate':
+    case 'search':
+    case 'sieve':
+      return legacyMode;
+    default:
+      return false;
+  }
+}
 
 function isProviderConfigured(config?: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }): boolean {
   if (!config || !config.provider || config.provider === 'none') return false;
@@ -423,15 +488,33 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     return exportable;
   });
 
-  // Persist config only. Runtime changes require restart/redeploy to apply.
   app.patch('/api/v2/config', async (req) => {
     const body = req.body as any;
+    const current = getConfig();
     const updated = updateConfig(body);
+    const requestedSections = collectChangedConfigSections(body, current, updated);
+    const runtimeSections = new Set(
+      requestedSections.filter(section => canApplySectionAtRuntime(section, updated.runtime.legacyMode)),
+    );
+    const restartRequired = requestedSections.filter(section => !runtimeSections.has(section));
+    const reloaded = await cortex.reloadProviders(updated);
+
+    if (body?.lifecycle?.schedule !== undefined) {
+      restartLifecycleScheduler(cortex);
+    }
+
+    const appliedSections = Array.from(new Set([
+      ...reloaded.filter(section => runtimeSections.has(section)),
+      ...(body?.lifecycle?.schedule !== undefined ? ['lifecycle.schedule'] : []),
+    ]));
+
     return {
       ok: true,
       config: updated,
-      requires_restart: true,
-      runtime_applied: false,
+      requires_restart: restartRequired.length > 0,
+      runtime_applied: appliedSections.length > 0,
+      applied_sections: appliedSections,
+      restart_required_sections: restartRequired,
     };
   });
 

@@ -61,6 +61,61 @@ export class CortexApp {
     log.info('CortexApp initialized');
   }
 
+  async reloadProviders(newConfig: CortexConfig): Promise<string[]> {
+    const reloaded = new Set<string>();
+
+    const extractionChanged = hasProviderChanged(this.config.llm.extraction, newConfig.llm.extraction);
+    const lifecycleChanged = hasProviderChanged(this.config.llm.lifecycle, newConfig.llm.lifecycle);
+    const embeddingChanged = hasEmbeddingProviderChanged(this.config.embedding, newConfig.embedding);
+    const searchChanged = JSON.stringify(this.config.search) !== JSON.stringify(newConfig.search);
+    const gateChanged = JSON.stringify(this.config.gate) !== JSON.stringify(newConfig.gate);
+    const sieveChanged = JSON.stringify(this.config.sieve) !== JSON.stringify(newConfig.sieve);
+
+    if (extractionChanged) {
+      this.llmExtraction = createCascadeLLM(newConfig.llm.extraction);
+      reloaded.add('llm.extraction');
+      log.info('Reloaded extraction LLM provider');
+    }
+
+    if (lifecycleChanged) {
+      this.llmLifecycle = createCascadeLLM(newConfig.llm.lifecycle);
+      reloaded.add('llm.lifecycle');
+      log.info('Reloaded lifecycle LLM provider');
+    }
+
+    if (embeddingChanged) {
+      const baseEmbedding = createCascadeEmbedding(newConfig.embedding);
+      this.embeddingProvider = new CachedEmbeddingProvider(baseEmbedding, 2000);
+      reloaded.add('embedding');
+      log.info('Reloaded embedding provider');
+    }
+
+    if (searchChanged) reloaded.add('search');
+    if (gateChanged) reloaded.add('gate');
+    if (sieveChanged) reloaded.add('sieve');
+
+    if (extractionChanged || embeddingChanged) {
+      this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
+      await this.recordsV2.initialize();
+      this.relationsV2 = new CortexRelationsV2();
+      this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
+      this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
+      log.info('Reloaded V2 record services');
+    }
+
+    if (newConfig.runtime.legacyMode) {
+      if (searchChanged || gateChanged || sieveChanged || extractionChanged || lifecycleChanged || embeddingChanged) {
+        this.rebuildLegacyEngines(newConfig);
+        log.info({ reloaded: Array.from(reloaded) }, 'Rebuilt legacy engines after config update');
+      }
+    } else {
+      this.rebuildLegacyEngines(newConfig);
+    }
+
+    this.config = newConfig;
+    return Array.from(reloaded);
+  }
+
   async initialize(): Promise<void> {
     // Initialize vector backend
     await this.vectorBackend.initialize(this.embeddingProvider.dimensions || 1536);
@@ -94,4 +149,23 @@ export class CortexApp {
     this.lifecycle = new LifecycleEngine(this.llmLifecycle, this.embeddingProvider, this.vectorBackend, config);
     this.exporter = new MarkdownExporter(config);
   }
+}
+
+function hasProviderChanged(
+  oldCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+  newCfg: { provider?: string; model?: string; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+): boolean {
+  if (newCfg.provider !== oldCfg.provider) return true;
+  if (newCfg.model !== oldCfg.model) return true;
+  if (newCfg.baseUrl !== oldCfg.baseUrl) return true;
+  if (newCfg.timeoutMs !== oldCfg.timeoutMs) return true;
+  if (newCfg.apiKey && newCfg.apiKey !== oldCfg.apiKey) return true;
+  return false;
+}
+
+function hasEmbeddingProviderChanged(
+  oldCfg: { provider?: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+  newCfg: { provider?: string; model?: string; dimensions?: number; apiKey?: string; baseUrl?: string; timeoutMs?: number },
+): boolean {
+  return hasProviderChanged(oldCfg, newCfg) || newCfg.dimensions !== oldCfg.dimensions;
 }

@@ -18,6 +18,7 @@ const RELATION_GRAPH_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages
 const EXTRACTION_LOGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/ExtractionLogs.tsx');
 const STATS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Stats.tsx');
 const MEMORY_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/MemoryDetail.tsx');
+const SETTINGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/index.tsx');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -216,6 +217,12 @@ describe('Dashboard Integration', () => {
       expect(zh).toContain("columnSource: '来源'");
       expect(zh).toContain("columnContent: '内容'");
     });
+
+    it('should describe editable settings as live-applied instead of restart-required', () => {
+      const zh = fs.readFileSync(ZH_LOCALE, 'utf-8');
+      expect(zh).toContain("toastConfigSaved: '配置已保存并立即生效'");
+      expect(zh).not.toContain("toastConfigSavedRestart: '配置已保存，重启或重新部署后生效'");
+    });
   });
 
   describe('Chinese-first dashboard source copy', () => {
@@ -225,6 +232,18 @@ describe('Dashboard Integration', () => {
       expect(client).not.toContain('requestLegacy(');
       expect(client).not.toContain('/api/v1/');
       expect(fs.existsSync(MEMORY_DETAIL_SOURCE)).toBe(false);
+    });
+
+    it('should save settings with live-apply semantics instead of restart messaging', () => {
+      const src = fs.readFileSync(SETTINGS_SOURCE, 'utf-8');
+      expect(src).not.toContain('toastConfigSavedRestart');
+      expect(src).toContain("t('settings.toastConfigSaved')");
+    });
+
+    it('should only expose live-edit controls for sections that can be applied immediately', () => {
+      const src = fs.readFileSync(SETTINGS_SOURCE, 'utf-8');
+      expect(src).toContain("new Set<SectionKey>(['llm', 'lifecycle'])");
+      expect(src).not.toContain("new Set<SectionKey>(['llm', 'gate', 'search', 'sieve', 'lifecycle'])");
     });
 
     it('should remove hardcoded English labels from Memory Browser', () => {

@@ -18,6 +18,7 @@ export default function LlmSection({
 }: LlmSectionProps) {
   const formatProvider = (provider?: string, model?: string, timeoutMs?: number) =>
     `${provider}${model ? ` / ${model}` : ''}${timeoutMs ? ` · ${timeoutMs}ms` : ''}`;
+  const v2Only = !config.runtime?.legacyMode;
 
   return (
     <div className="card">
@@ -25,9 +26,17 @@ export default function LlmSection({
       {editing ? (
         <>
           {renderProviderBlock(t('settings.extractionLlm'), 'extraction', LLM_PROVIDERS)}
-          {renderProviderBlock(t('settings.lifecycleLlm'), 'lifecycle', LLM_PROVIDERS)}
           {renderProviderBlock(t('settings.embedding'), 'embedding', EMBEDDING_PROVIDERS)}
-          {renderProviderBlock(t('settings.rerankerTitle'), 'reranker', RERANKER_PROVIDERS)}
+          {v2Only ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginTop: 8 }}>
+              {t('settings.llmV2OnlyHint')}
+            </div>
+          ) : (
+            <>
+              {renderProviderBlock(t('settings.lifecycleLlm'), 'lifecycle', LLM_PROVIDERS)}
+              {renderProviderBlock(t('settings.rerankerTitle'), 'reranker', RERANKER_PROVIDERS)}
+            </>
+          )}
         </>
       ) : (
         <table>
@@ -56,19 +65,25 @@ export default function LlmSection({
               <td>{t('settings.lifecycleLlm')}</td>
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>{formatProvider(config.llm?.lifecycle?.provider, config.llm?.lifecycle?.model, config.llm?.lifecycle?.timeoutMs)}</span>
-                <button
-                  className="btn"
-                  style={{ fontSize: 11, padding: '2px 8px' }}
-                  disabled={testState['llm.lifecycle']?.status === 'testing'}
-                  onClick={() => handleTestLLM('lifecycle')}
-                >
-                  {testState['llm.lifecycle']?.status === 'testing' ? t('settings.testing') : t('settings.testConnection')}
-                </button>
-                {testState['llm.lifecycle']?.status === 'success' && (
-                  <span style={{ fontSize: 11, color: 'var(--success)' }}>{t('settings.testSuccess', { latency: testState['llm.lifecycle'].latency ?? 0 })}</span>
-                )}
-                {testState['llm.lifecycle']?.status === 'error' && (
-                  <span style={{ fontSize: 11, color: 'var(--danger)' }}>{t('settings.testFailed', { message: testState['llm.lifecycle'].message ?? '' })}</span>
+                {v2Only ? (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('settings.notUsedInV2')}</span>
+                ) : (
+                  <>
+                    <button
+                      className="btn"
+                      style={{ fontSize: 11, padding: '2px 8px' }}
+                      disabled={testState['llm.lifecycle']?.status === 'testing'}
+                      onClick={() => handleTestLLM('lifecycle')}
+                    >
+                      {testState['llm.lifecycle']?.status === 'testing' ? t('settings.testing') : t('settings.testConnection')}
+                    </button>
+                    {testState['llm.lifecycle']?.status === 'success' && (
+                      <span style={{ fontSize: 11, color: 'var(--success)' }}>{t('settings.testSuccess', { latency: testState['llm.lifecycle'].latency ?? 0 })}</span>
+                    )}
+                    {testState['llm.lifecycle']?.status === 'error' && (
+                      <span style={{ fontSize: 11, color: 'var(--danger)' }}>{t('settings.testFailed', { message: testState['llm.lifecycle'].message ?? '' })}</span>
+                    )}
+                  </>
                 )}
               </td>
             </tr>
@@ -104,7 +119,7 @@ export default function LlmSection({
                       : formatProvider(config.search.reranker.provider, config.search.reranker.model, config.search.reranker.timeoutMs)
                   }
                 </span>
-                {config.search?.reranker?.provider && config.search.reranker.provider !== 'none' && (
+                {!v2Only && config.search?.reranker?.provider && config.search.reranker.provider !== 'none' && (
                   <>
                     <button
                       className="btn"
@@ -121,6 +136,9 @@ export default function LlmSection({
                       <span style={{ fontSize: 11, color: 'var(--danger)' }}>{t('settings.testFailed', { message: testState['reranker'].message ?? '' })}</span>
                     )}
                   </>
+                )}
+                {v2Only && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('settings.notUsedInV2')}</span>
                 )}
               </td>
             </tr>
