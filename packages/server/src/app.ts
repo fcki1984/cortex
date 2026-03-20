@@ -1,4 +1,4 @@
-import { type CortexConfig, getConfig } from './utils/config.js';
+import { type CortexConfig } from './utils/config.js';
 import { createLogger } from './utils/logger.js';
 import { MemoryGate } from './core/gate.js';
 import { MemorySieve } from './core/sieve.js';
@@ -61,40 +61,28 @@ export class CortexApp {
     log.info('CortexApp initialized');
   }
 
-  async reloadProviders(newConfig: CortexConfig): Promise<string[]> {
+  async reloadProviders(newConfig: CortexConfig, runtimeSections: string[]): Promise<string[]> {
     const reloaded = new Set<string>();
 
-    const extractionChanged = hasProviderChanged(this.config.llm.extraction, newConfig.llm.extraction);
-    const lifecycleChanged = hasProviderChanged(this.config.llm.lifecycle, newConfig.llm.lifecycle);
-    const embeddingChanged = hasEmbeddingProviderChanged(this.config.embedding, newConfig.embedding);
-    const searchChanged = JSON.stringify(this.config.search) !== JSON.stringify(newConfig.search);
-    const gateChanged = JSON.stringify(this.config.gate) !== JSON.stringify(newConfig.gate);
-    const sieveChanged = JSON.stringify(this.config.sieve) !== JSON.stringify(newConfig.sieve);
+    const runtimeSet = new Set(runtimeSections);
+    const nextConfig = structuredClone(this.config) as CortexConfig;
 
-    if (extractionChanged) {
+    if (runtimeSet.has('llm.extraction') && hasProviderChanged(this.config.llm.extraction, newConfig.llm.extraction)) {
       this.llmExtraction = createCascadeLLM(newConfig.llm.extraction);
+      nextConfig.llm.extraction = newConfig.llm.extraction;
       reloaded.add('llm.extraction');
       log.info('Reloaded extraction LLM provider');
     }
 
-    if (lifecycleChanged) {
-      this.llmLifecycle = createCascadeLLM(newConfig.llm.lifecycle);
-      reloaded.add('llm.lifecycle');
-      log.info('Reloaded lifecycle LLM provider');
-    }
-
-    if (embeddingChanged) {
+    if (runtimeSet.has('embedding') && hasEmbeddingProviderChanged(this.config.embedding, newConfig.embedding)) {
       const baseEmbedding = createCascadeEmbedding(newConfig.embedding);
       this.embeddingProvider = new CachedEmbeddingProvider(baseEmbedding, 2000);
+      nextConfig.embedding = newConfig.embedding;
       reloaded.add('embedding');
       log.info('Reloaded embedding provider');
     }
 
-    if (searchChanged) reloaded.add('search');
-    if (gateChanged) reloaded.add('gate');
-    if (sieveChanged) reloaded.add('sieve');
-
-    if (extractionChanged || embeddingChanged) {
+    if (reloaded.has('llm.extraction') || reloaded.has('embedding')) {
       this.recordsV2 = new CortexRecordsV2(this.llmExtraction, this.embeddingProvider);
       await this.recordsV2.initialize();
       this.relationsV2 = new CortexRelationsV2();
@@ -103,16 +91,15 @@ export class CortexApp {
       log.info('Reloaded V2 record services');
     }
 
-    if (newConfig.runtime.legacyMode) {
-      if (searchChanged || gateChanged || sieveChanged || extractionChanged || lifecycleChanged || embeddingChanged) {
-        this.rebuildLegacyEngines(newConfig);
-        log.info({ reloaded: Array.from(reloaded) }, 'Rebuilt legacy engines after config update');
-      }
-    } else {
-      this.rebuildLegacyEngines(newConfig);
+    if (runtimeSet.has('lifecycle.schedule')) {
+      nextConfig.lifecycle = {
+        ...nextConfig.lifecycle,
+        schedule: newConfig.lifecycle.schedule,
+      };
+      reloaded.add('lifecycle.schedule');
     }
 
-    this.config = newConfig;
+    this.config = nextConfig;
     return Array.from(reloaded);
   }
 

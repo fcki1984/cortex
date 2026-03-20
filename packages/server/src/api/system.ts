@@ -96,17 +96,12 @@ function collectChangedConfigSections(partial: any, current: any, updated: any):
   return Array.from(sections).filter(section => isSectionChanged(section, current, updated));
 }
 
-function canApplySectionAtRuntime(section: string, legacyMode: boolean): boolean {
+function canApplySectionAtRuntime(section: string): boolean {
   switch (section) {
     case 'llm.extraction':
     case 'embedding':
     case 'lifecycle.schedule':
       return true;
-    case 'llm.lifecycle':
-    case 'gate':
-    case 'search':
-    case 'sieve':
-      return legacyMode;
     default:
       return false;
   }
@@ -494,19 +489,18 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     const updated = updateConfig(body);
     const requestedSections = collectChangedConfigSections(body, current, updated);
     const runtimeSections = new Set(
-      requestedSections.filter(section => canApplySectionAtRuntime(section, updated.runtime.legacyMode)),
+      requestedSections.filter(section => canApplySectionAtRuntime(section)),
     );
     const restartRequired = requestedSections.filter(section => !runtimeSections.has(section));
-    const reloaded = await cortex.reloadProviders(updated);
+    const reloaded = runtimeSections.size > 0
+      ? await cortex.reloadProviders(updated, Array.from(runtimeSections))
+      : [];
 
-    if (body?.lifecycle?.schedule !== undefined) {
+    if (runtimeSections.has('lifecycle.schedule')) {
       restartLifecycleScheduler(cortex);
     }
 
-    const appliedSections = Array.from(new Set([
-      ...reloaded.filter(section => runtimeSections.has(section)),
-      ...(body?.lifecycle?.schedule !== undefined ? ['lifecycle.schedule'] : []),
-    ]));
+    const appliedSections = Array.from(new Set(reloaded.filter(section => runtimeSections.has(section))));
 
     return {
       ok: true,

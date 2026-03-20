@@ -10,7 +10,7 @@ import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
 import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
-import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getConfig, getAuthStatus, setupAuthToken, triggerUpdate } from './api/client.js';
+import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getAuthStatus, setupAuthToken } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
 import { formatRecordKindLabel, formatSourceTypeLabel } from './utils/v2Display.js';
@@ -337,12 +337,8 @@ function AppContent() {
     version: string; github: string;
     latestRelease?: { version: string; url: string; publishedAt: string; updateAvailable: boolean } | null;
   } | null>(null);
-  const [updating, setUpdating] = useState(false);
-  const [updateCountdown, setUpdateCountdown] = useState(0);
-  const [updateResult, setUpdateResult] = useState<'success'|'stale'|'down'|null>(null);
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string|null>(null);
-  const [legacyMode, setLegacyMode] = useState(false);
 
   useEffect(() => {
     getAuthStatus().then(async (status: any) => {
@@ -381,9 +377,6 @@ function AppContent() {
     if (authState !== 'authenticated') return;
     getHealth().then((data: any) => {
       setVersionInfo({ version: data.version, github: data.github, latestRelease: data.latestRelease });
-    }).catch(() => {});
-    getConfig().then((cfg: any) => {
-      setLegacyMode(cfg.runtime?.legacyMode !== false);
     }).catch(() => {});
     // Re-check every 30 min
     const iv = setInterval(() => {
@@ -442,7 +435,7 @@ function AppContent() {
               >
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
               </a>
-              {!versionInfo.latestRelease?.updateAvailable && !updating && !updateResult && !checkMsg && (
+              {!versionInfo.latestRelease?.updateAvailable && !checkMsg && (
                 <button
                   disabled={checking}
                   onClick={async () => {
@@ -493,7 +486,7 @@ function AppContent() {
                 }}>{checkMsg}</span>
               )}
             </div>
-            {versionInfo.latestRelease?.updateAvailable && !updating && !updateResult && (
+            {versionInfo.latestRelease?.updateAvailable && (
               <div style={{ marginTop: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
                   <span>🆕 v{versionInfo.latestRelease.version}</span>
@@ -504,121 +497,9 @@ function AppContent() {
                     style={{ color: 'var(--primary)', textDecoration: 'none', fontSize: 10 }}
                   >{locale === 'zh' ? '更新日志' : 'Changelog'}</a>
                 </div>
-                <button
-                  onClick={async () => {
-                    if (!confirm(locale === 'zh' ? `确认更新到 v${versionInfo.latestRelease!.version}？服务器将短暂重启。` : `Update to v${versionInfo.latestRelease!.version}? Server will restart briefly.`)) return;
-                    setUpdating(true);
-                    setUpdateResult(null);
-                    setUpdateCountdown(0);
-                    const target = versionInfo.latestRelease!.version;
-
-                    // Phase 1: Trigger update (backend pulls image + spawns updater)
-                    try { await triggerUpdate(); } catch {}
-
-                    // Phase 2: Wait for server to go down first
-                    // Don't poll immediately — give the container time to be replaced
-                    let elapsed = 0;
-                    const pollTimer = setInterval(() => { elapsed++; setUpdateCountdown(elapsed); }, 1000);
-
-                    // Wait up to 15s for server to go offline
-                    let serverWentDown = false;
-                    for (let i = 0; i < 15; i++) {
-                      await new Promise(r => setTimeout(r, 1000));
-                      try {
-                        await getHealth();
-                        // Still up — keep waiting
-                      } catch {
-                        serverWentDown = true;
-                        break;
-                      }
-                    }
-
-                    // Phase 3: Poll for server to come back with new version
-                    // Allow up to 90s for pull + recreate (CI images can be large)
-                    let found = false;
-                    const maxPollAttempts = serverWentDown ? 45 : 60;
-                    for (let i = 0; i < maxPollAttempts; i++) {
-                      await new Promise(r => setTimeout(r, 2000));
-                      try {
-                        const h = await getHealth();
-                        if (h.version === target) {
-                          clearInterval(pollTimer);
-                          setUpdateResult('success');
-                          setUpdating(false);
-                          setTimeout(() => window.location.reload(), 1500);
-                          found = true;
-                          break;
-                        } else if (h.version && serverWentDown) {
-                          // Server came back but with old version — image may not have updated
-                          clearInterval(pollTimer);
-                          setUpdateResult('stale');
-                          setUpdating(false);
-                          setVersionInfo({ version: h.version, github: h.github, latestRelease: h.latestRelease });
-                          found = true;
-                          break;
-                        }
-                        // Version still old but server never went down — keep waiting
-                      } catch {
-                        // Server still restarting, keep polling
-                        serverWentDown = true;
-                      }
-                    }
-                    clearInterval(pollTimer);
-                    if (!found) {
-                      setUpdateResult('down');
-                      setUpdating(false);
-                    }
-                  }}
-                  style={{
-                    display: 'block', width: '100%', fontSize: 11, padding: '3px 8px',
-                    background: 'rgba(59,130,246,0.15)', color: 'var(--primary)',
-                    border: '1px solid rgba(59,130,246,0.3)', borderRadius: 'var(--radius)',
-                    cursor: 'pointer', textAlign: 'center',
-                  }}
-                >{locale === 'zh' ? '⬆️ 立即更新' : '⬆️ Update now'}</button>
-              </div>
-            )}
-            {updating && (
-              <div style={{ marginTop: 4 }}>
-                <div style={{ fontSize: 11, marginBottom: 3, textAlign: 'center' }}>
-                  {updateCountdown < 5
-                    ? (locale === 'zh' ? '📦 正在拉取镜像...' : '📦 Pulling image...')
-                    : updateCountdown < 15
-                      ? (locale === 'zh' ? '🔄 等待服务重启...' : '🔄 Waiting for restart...')
-                      : (locale === 'zh' ? `⏳ 重建容器中... ${updateCountdown}s` : `⏳ Rebuilding container... ${updateCountdown}s`)
-                  }
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  {locale === 'zh' ? '请在部署流程中完成版本更新。' : 'Use your deployment pipeline to apply this release.'}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 3 }}>
-                  {locale === 'zh' ? '请勿关闭或刷新页面' : 'Do not close or refresh this page'}
-                </div>
-                <div style={{ height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', background: 'var(--primary)', borderRadius: 2,
-                    width: `${Math.min((updateCountdown / 90) * 100, 95)}%`,
-                    transition: 'width 1s linear',
-                  }} />
-                </div>
-              </div>
-            )}
-            {updateResult === 'success' && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#22c55e', textAlign: 'center' }}>
-                ✅ {locale === 'zh' ? '更新成功！正在刷新...' : 'Updated! Reloading...'}
-              </div>
-            )}
-            {updateResult === 'stale' && (
-              <div style={{ marginTop: 4, fontSize: 11, textAlign: 'center' }}>
-                <div style={{ color: '#f59e0b' }}>⚠️ {locale === 'zh' ? '版本未变化 — 新镜像可能还在构建中，请稍后再试' : 'Version unchanged — new image may still be building, try again later'}</div>
-                <button onClick={() => { setUpdateResult(null); }} style={{ fontSize: 10, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', marginTop: 2 }}>
-                  {locale === 'zh' ? '🔄 重试' : '🔄 Retry'}
-                </button>
-              </div>
-            )}
-            {updateResult === 'down' && (
-              <div style={{ marginTop: 4, fontSize: 11, textAlign: 'center' }}>
-                <div style={{ color: '#ef4444' }}>❌ {locale === 'zh' ? '服务器无响应，容器可能在重建中' : 'Server unreachable, container may be rebuilding'}</div>
-                <button onClick={() => window.location.reload()} style={{ fontSize: 10, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', marginTop: 2 }}>
-                  {locale === 'zh' ? '刷新页面' : 'Refresh'}
-                </button>
               </div>
             )}
           </div>

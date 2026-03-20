@@ -258,7 +258,7 @@ describe('API Integration', () => {
       expect(cortex.recordsV2).not.toBe(previousRecordsV2);
     });
 
-    it('should persist and live-apply gate, search, sieve, and lifecycle schedule settings', async () => {
+    it('should treat gate, search, and sieve as deployment-only while still live-applying lifecycle schedule', async () => {
       stopLifecycleScheduler();
       startLifecycleScheduler(cortex);
       const initialSchedule = getSchedulerStatus().schedule;
@@ -303,11 +303,8 @@ describe('API Integration', () => {
       const body = JSON.parse(res.payload);
       expect(body.ok).toBe(true);
       expect(body.runtime_applied).toBe(true);
-      expect(body.applied_sections).toContain('gate');
-      expect(body.applied_sections).toContain('search');
-      expect(body.applied_sections).toContain('sieve');
-      expect(body.applied_sections).toContain('lifecycle.schedule');
-      expect(body.restart_required_sections).toEqual([]);
+      expect(body.applied_sections).toEqual(['lifecycle.schedule']);
+      expect(body.restart_required_sections).toEqual(expect.arrayContaining(['gate', 'search', 'sieve']));
       expect(body.config.gate.queryExpansionTimeoutMs).toBe(1234);
       expect(body.config.gate.rerankerTimeoutMs).toBe(2345);
       expect(body.config.gate.relationTimeoutMs).toBe(3456);
@@ -315,22 +312,18 @@ describe('API Integration', () => {
       expect(body.config.gate.relevanceGate.inspectTopK).toBe(2);
       expect(body.config.gate.relevanceGate.minSemanticScore).toBe(0.71);
       expect(body.config.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.19);
-      expect(cortex.config.gate.relevanceGate.enabled).toBe(false);
-      expect(cortex.config.search.vectorWeight).toBe(0.2);
-      expect(cortex.config.search.textWeight).toBe(0.8);
-      expect(cortex.config.sieve.smartUpdate).toBe(false);
-      expect(cortex.config.sieve.relationExtraction).toBe(false);
+      expect(cortex.config.gate.relevanceGate.enabled).toBe(true);
+      expect(cortex.config.search.vectorWeight).toBe(0.7);
+      expect(cortex.config.search.textWeight).toBe(0.3);
+      expect(cortex.config.sieve.smartUpdate).toBe(true);
+      expect(cortex.config.sieve.relationExtraction).toBe(true);
       expect(cortex.config.lifecycle.schedule).toBe('*/15 * * * *');
-      expect(cortex.gate).not.toBe(previousGate);
-      expect(cortex.searchEngine).not.toBe(previousSearchEngine);
-      expect(cortex.sieve).not.toBe(previousSieve);
-      expect((cortex.gate as any)?.config?.queryExpansionTimeoutMs).toBe(1234);
-      expect((cortex.gate as any)?.config?.rerankerTimeoutMs).toBe(2345);
-      expect((cortex.gate as any)?.config?.relationTimeoutMs).toBe(3456);
-      expect((cortex.searchEngine as any)?.config?.vectorWeight).toBe(0.2);
-      expect((cortex.searchEngine as any)?.config?.textWeight).toBe(0.8);
-      expect((cortex.sieve as any)?.config?.sieve?.smartUpdate).toBe(false);
-      expect((cortex.sieve as any)?.config?.sieve?.relationExtraction).toBe(false);
+      expect(cortex.gate).toBe(previousGate);
+      expect(cortex.searchEngine).toBe(previousSearchEngine);
+      expect(cortex.sieve).toBe(previousSieve);
+      expect((cortex.gate as any)?.config?.queryExpansionTimeoutMs).toBe(5555);
+      expect((cortex.gate as any)?.config?.rerankerTimeoutMs).toBe(6666);
+      expect((cortex.gate as any)?.config?.relationTimeoutMs).toBe(7777);
       const scheduler = getSchedulerStatus();
       expect(scheduler.running).toBe(true);
       expect(scheduler.schedule).toBe('*/15 * * * *');
@@ -338,19 +331,69 @@ describe('API Integration', () => {
       expect(scheduler.schedule).not.toBe(initialSchedule);
     });
 
-    it('should ignore unchanged deployment-only sections when reporting runtime apply', async () => {
+    it('should live-apply only truly wired sections when runtime and deployment-only fields are mixed', async () => {
+      const previousExtraction = cortex.llmExtraction;
+      const previousGate = cortex.gate;
+      const nextExtractionTimeout = (cortex.config.llm.extraction.timeoutMs ?? 0) + 1111;
+      const nextLifecycleTimeout = (cortex.config.llm.lifecycle.timeoutMs ?? 0) + 2222;
+      const nextQueryExpansionTimeout = (cortex.config.gate.queryExpansionTimeoutMs ?? 0) + 333;
+
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/v2/config',
         payload: {
           llm: {
             extraction: {
-              timeoutMs: 7777,
+              timeoutMs: nextExtractionTimeout,
             },
             lifecycle: {
-              provider: cortex.config.llm.lifecycle.provider,
-              model: cortex.config.llm.lifecycle.model,
-              timeoutMs: cortex.config.llm.lifecycle.timeoutMs,
+              provider: 'none',
+              timeoutMs: nextLifecycleTimeout,
+            },
+          },
+          gate: {
+            queryExpansionTimeoutMs: nextQueryExpansionTimeout,
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.ok).toBe(true);
+      expect(body.runtime_applied).toBe(true);
+      expect(body.applied_sections).toEqual(['llm.extraction']);
+      expect(body.restart_required_sections).toEqual(expect.arrayContaining(['llm.lifecycle', 'gate']));
+      expect(body.config.llm.extraction.timeoutMs).toBe(nextExtractionTimeout);
+      expect(body.config.llm.lifecycle.timeoutMs).toBe(nextLifecycleTimeout);
+      expect(body.config.gate.queryExpansionTimeoutMs).toBe(nextQueryExpansionTimeout);
+      expect(cortex.config.llm.extraction.timeoutMs).toBe(nextExtractionTimeout);
+      expect(cortex.config.llm.lifecycle.timeoutMs).toBe(2222);
+      expect(cortex.config.gate.queryExpansionTimeoutMs).toBe(5555);
+      expect(cortex.llmExtraction).not.toBe(previousExtraction);
+      expect(cortex.gate).toBe(previousGate);
+    });
+
+    it('should ignore unchanged deployment-only sections when reporting runtime apply', async () => {
+      const nextExtractionTimeout = (cortex.config.llm.extraction.timeoutMs ?? 0) + 1111;
+      const currentConfigRes = await app.inject({
+        method: 'GET',
+        url: '/api/v2/config',
+      });
+      expect(currentConfigRes.statusCode).toBe(200);
+      const currentConfig = JSON.parse(currentConfigRes.payload);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v2/config',
+        payload: {
+          llm: {
+            extraction: {
+              timeoutMs: nextExtractionTimeout,
+            },
+            lifecycle: {
+              provider: currentConfig.llm.lifecycle.provider,
+              model: currentConfig.llm.lifecycle.model,
+              timeoutMs: currentConfig.llm.lifecycle.timeoutMs,
             },
           },
         },
@@ -362,7 +405,7 @@ describe('API Integration', () => {
       expect(body.runtime_applied).toBe(true);
       expect(body.applied_sections).toEqual(['llm.extraction']);
       expect(body.restart_required_sections).toEqual([]);
-      expect(body.config.llm.extraction.timeoutMs).toBe(7777);
+      expect(body.config.llm.extraction.timeoutMs).toBe(nextExtractionTimeout);
     });
   });
 

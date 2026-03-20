@@ -19,6 +19,7 @@ const EXTRACTION_LOGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/page
 const STATS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Stats.tsx');
 const MEMORY_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/MemoryDetail.tsx');
 const SETTINGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/index.tsx');
+const APP_SOURCE = path.resolve(__dirname, '../../dashboard/src/App.tsx');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -244,6 +245,12 @@ describe('Dashboard Integration', () => {
       const src = fs.readFileSync(SETTINGS_SOURCE, 'utf-8');
       expect(src).toContain("new Set<SectionKey>(['llm', 'lifecycle'])");
       expect(src).not.toContain("new Set<SectionKey>(['llm', 'gate', 'search', 'sieve', 'lifecycle'])");
+    });
+
+    it('should remove the self-update button from the main dashboard shell', () => {
+      const src = fs.readFileSync(APP_SOURCE, 'utf-8');
+      expect(src).not.toContain('⬆️ 立即更新');
+      expect(src).not.toContain('⬆️ Update now');
     });
 
     it('should remove hardcoded English labels from Memory Browser', () => {
