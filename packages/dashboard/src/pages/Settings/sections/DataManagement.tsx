@@ -119,23 +119,47 @@ export default function DataManagement({ config, setConfig, setToast, t }: DataM
                     const parsed = JSON.parse(text);
                     delete parsed.port;
                     delete parsed.host;
+                    delete parsed.runtime;
                     delete parsed.storage;
                     delete parsed.auth;
                     delete parsed.cors;
                     delete parsed.rateLimit;
                     delete parsed.vectorBackend;
+                    delete parsed.gate;
+                    delete parsed.search;
+                    delete parsed.sieve;
+                    delete parsed.layers;
+                    delete parsed.flush;
+                    delete parsed.markdownExport;
                     for (const key of ['extraction', 'lifecycle']) {
                       if (parsed.llm?.[key]?.hasApiKey !== undefined) {
                         delete parsed.llm[key].hasApiKey;
                         if (!parsed.llm[key].apiKey) delete parsed.llm[key].apiKey;
                       }
                     }
+                    if (parsed.llm?.lifecycle) {
+                      delete parsed.llm.lifecycle;
+                    }
                     if (parsed.embedding?.hasApiKey !== undefined) {
                       delete parsed.embedding.hasApiKey;
                       if (!parsed.embedding.apiKey) delete parsed.embedding.apiKey;
                     }
+                    const importableConfig: any = {};
+                    if (parsed.llm?.extraction) {
+                      importableConfig.llm = {
+                        extraction: parsed.llm.extraction,
+                      };
+                    }
+                    if (parsed.embedding) {
+                      importableConfig.embedding = parsed.embedding;
+                    }
+                    if (parsed.lifecycle?.schedule) {
+                      importableConfig.lifecycle = {
+                        schedule: parsed.lifecycle.schedule,
+                      };
+                    }
                     if (!confirm(t('settings.confirmImportConfig'))) return;
-                    await updateConfig(parsed);
+                    await updateConfig(importableConfig);
                     const refreshed = await getConfig();
                     setConfig(refreshed);
                     setToast({ message: t('settings.toastConfigImported'), type: 'success' });

@@ -19,6 +19,7 @@ const EXTRACTION_LOGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/page
 const STATS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Stats.tsx');
 const MEMORY_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/MemoryDetail.tsx');
 const SETTINGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/index.tsx');
+const DATA_MANAGEMENT_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/sections/DataManagement.tsx');
 const APP_SOURCE = path.resolve(__dirname, '../../dashboard/src/App.tsx');
 
 describe('Dashboard Integration', () => {
@@ -245,6 +246,19 @@ describe('Dashboard Integration', () => {
       const src = fs.readFileSync(SETTINGS_SOURCE, 'utf-8');
       expect(src).toContain("new Set<SectionKey>(['llm', 'lifecycle'])");
       expect(src).not.toContain("new Set<SectionKey>(['llm', 'gate', 'search', 'sieve', 'lifecycle'])");
+    });
+
+    it('should strip read-only sections before importing full config back through settings', () => {
+      const src = fs.readFileSync(DATA_MANAGEMENT_SOURCE, 'utf-8');
+      expect(src).not.toContain('await updateConfig(parsed);');
+      expect(src).toContain('delete parsed.gate;');
+      expect(src).toContain('delete parsed.search;');
+      expect(src).toContain('delete parsed.sieve;');
+      expect(src).toContain('delete parsed.markdownExport;');
+      expect(src).toContain('delete parsed.flush;');
+      expect(src).toContain('delete parsed.layers;');
+      expect(src).toContain('delete parsed.runtime;');
+      expect(src).toContain('delete parsed.llm.lifecycle;');
     });
 
     it('should remove the self-update button from the main dashboard shell', () => {

@@ -50,6 +50,12 @@ const RELEASE_CHECK_INTERVAL = 30 * 60 * 1000;
 
 function isSectionChanged(section: string, current: any, updated: any): boolean {
   switch (section) {
+    case 'auth':
+      return JSON.stringify(current?.auth ?? null) !== JSON.stringify(updated?.auth ?? null);
+    case 'cors':
+      return JSON.stringify(current?.cors ?? null) !== JSON.stringify(updated?.cors ?? null);
+    case 'rateLimit':
+      return JSON.stringify(current?.rateLimit ?? null) !== JSON.stringify(updated?.rateLimit ?? null);
     case 'llm.extraction':
       return JSON.stringify(current?.llm?.extraction ?? null) !== JSON.stringify(updated?.llm?.extraction ?? null);
     case 'llm.lifecycle':
@@ -74,6 +80,12 @@ function isSectionChanged(section: string, current: any, updated: any): boolean 
       return current?.port !== updated?.port || current?.host !== updated?.host;
     case 'runtime':
       return JSON.stringify(current?.runtime ?? null) !== JSON.stringify(updated?.runtime ?? null);
+    case 'layers':
+      return JSON.stringify(current?.layers ?? null) !== JSON.stringify(updated?.layers ?? null);
+    case 'flush':
+      return JSON.stringify(current?.flush ?? null) !== JSON.stringify(updated?.flush ?? null);
+    case 'markdownExport':
+      return JSON.stringify(current?.markdownExport ?? null) !== JSON.stringify(updated?.markdownExport ?? null);
     default:
       return false;
   }
@@ -81,6 +93,9 @@ function isSectionChanged(section: string, current: any, updated: any): boolean 
 
 function collectChangedConfigSections(partial: any, current: any, updated: any): string[] {
   const sections = new Set<string>();
+  if (partial?.auth) sections.add('auth');
+  if (partial?.cors) sections.add('cors');
+  if (partial?.rateLimit) sections.add('rateLimit');
   if (partial?.llm?.extraction) sections.add('llm.extraction');
   if (partial?.llm?.lifecycle) sections.add('llm.lifecycle');
   if (partial?.embedding) sections.add('embedding');
@@ -93,6 +108,9 @@ function collectChangedConfigSections(partial: any, current: any, updated: any):
   if (partial?.vectorBackend) sections.add('vectorBackend');
   if (partial?.port !== undefined || partial?.host !== undefined) sections.add('server');
   if (partial?.runtime) sections.add('runtime');
+  if (partial?.layers) sections.add('layers');
+  if (partial?.flush) sections.add('flush');
+  if (partial?.markdownExport) sections.add('markdownExport');
   return Array.from(sections).filter(section => isSectionChanged(section, current, updated));
 }
 
@@ -107,10 +125,83 @@ function canApplySectionAtRuntime(section: string): boolean {
   }
 }
 
+function isSectionWritableFromSettings(section: string): boolean {
+  switch (section) {
+    case 'llm.extraction':
+    case 'embedding':
+    case 'lifecycle.schedule':
+      return true;
+    default:
+      return false;
+  }
+}
+
 function isProviderConfigured(config?: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }): boolean {
   if (!config || !config.provider || config.provider === 'none') return false;
   if (config.provider === 'ollama') return true;
   return !!(config.apiKey || (config.baseUrl && config.model));
+}
+
+function buildSafeConfig(config: any, options?: { includeServerInfo?: boolean }) {
+  const safe = structuredClone(config);
+  delete safe.auth;
+
+  safe.llm = {
+    extraction: {
+      provider: config.llm.extraction.provider,
+      model: config.llm.extraction.model,
+      baseUrl: config.llm.extraction.baseUrl,
+      timeoutMs: config.llm.extraction.timeoutMs,
+      hasApiKey: !!config.llm.extraction.apiKey,
+    },
+    lifecycle: {
+      provider: config.llm.lifecycle.provider,
+      model: config.llm.lifecycle.model,
+      baseUrl: config.llm.lifecycle.baseUrl,
+      timeoutMs: config.llm.lifecycle.timeoutMs,
+      hasApiKey: !!config.llm.lifecycle.apiKey,
+    },
+  };
+
+  safe.embedding = {
+    provider: config.embedding.provider,
+    model: config.embedding.model,
+    dimensions: config.embedding.dimensions,
+    baseUrl: config.embedding.baseUrl,
+    timeoutMs: config.embedding.timeoutMs,
+    hasApiKey: !!config.embedding.apiKey,
+  };
+
+  safe.search = {
+    ...safe.search,
+    reranker: {
+      ...safe.search?.reranker,
+      apiKey: undefined,
+      timeoutMs: config.search.reranker?.timeoutMs,
+      hasApiKey: !!config.search.reranker?.apiKey,
+    },
+  };
+
+  if (safe.vectorBackend?.qdrant) {
+    safe.vectorBackend = {
+      ...safe.vectorBackend,
+      qdrant: {
+        ...safe.vectorBackend.qdrant,
+        apiKey: undefined,
+        hasApiKey: !!config.vectorBackend?.qdrant?.apiKey,
+      },
+    };
+  }
+
+  if (options?.includeServerInfo) {
+    safe.serverInfo = {
+      time: new Date().toISOString(),
+      timezone: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      uptime: Math.floor(process.uptime()),
+    };
+  }
+
+  return safe;
 }
 
 async function getLatestRelease(forceRefresh = false): Promise<typeof latestReleaseCache> {
@@ -432,47 +523,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   // Get config (safe — masks sensitive fields, exposes baseUrl + hasApiKey)
   app.get('/api/v2/config', async () => {
     const config = getConfig();
-    return {
-      ...config,
-      serverInfo: {
-        time: new Date().toISOString(),
-        timezone: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-        uptime: Math.floor(process.uptime()),
-      },
-      llm: {
-        extraction: {
-          provider: config.llm.extraction.provider,
-          model: config.llm.extraction.model,
-          baseUrl: config.llm.extraction.baseUrl,
-          timeoutMs: config.llm.extraction.timeoutMs,
-          hasApiKey: !!config.llm.extraction.apiKey,
-        },
-        lifecycle: {
-          provider: config.llm.lifecycle.provider,
-          model: config.llm.lifecycle.model,
-          baseUrl: config.llm.lifecycle.baseUrl,
-          timeoutMs: config.llm.lifecycle.timeoutMs,
-          hasApiKey: !!config.llm.lifecycle.apiKey,
-        },
-      },
-      embedding: {
-        provider: config.embedding.provider,
-        model: config.embedding.model,
-        dimensions: config.embedding.dimensions,
-        baseUrl: config.embedding.baseUrl,
-        timeoutMs: config.embedding.timeoutMs,
-        hasApiKey: !!config.embedding.apiKey,
-      },
-      search: {
-        ...config.search,
-        reranker: {
-          ...config.search.reranker,
-          apiKey: undefined,
-          timeoutMs: config.search.reranker?.timeoutMs,
-          hasApiKey: !!config.search.reranker?.apiKey,
-        },
-      },
-    };
+    return buildSafeConfig(config, { includeServerInfo: true });
   });
 
   // Export full config (includes secrets — for backup/migration)
@@ -483,11 +534,23 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
     return exportable;
   });
 
-  app.patch('/api/v2/config', async (req) => {
+  app.patch('/api/v2/config', async (req, reply) => {
     const body = req.body as any;
     const current = getConfig();
     const updated = updateConfig(body);
     const requestedSections = collectChangedConfigSections(body, current, updated);
+    const readOnlySections = requestedSections.filter(section => !isSectionWritableFromSettings(section));
+
+    if (readOnlySections.length > 0) {
+      updateConfig(current);
+      return reply.code(400).send({
+        ok: false,
+        code: 'READ_ONLY_CONFIG',
+        message: 'One or more sections are deployment-only and cannot be changed from Settings.',
+        read_only_sections: readOnlySections,
+      });
+    }
+
     const runtimeSections = new Set(
       requestedSections.filter(section => canApplySectionAtRuntime(section)),
     );
@@ -504,7 +567,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
 
     return {
       ok: true,
-      config: updated,
+      config: buildSafeConfig(updated),
       requires_restart: restartRequired.length > 0,
       runtime_applied: appliedSections.length > 0,
       applied_sections: appliedSections,
