@@ -830,6 +830,79 @@ describe('API V2 Integration', () => {
     expect(relationsAfterBody.items[0]?.source_record?.content).toContain('大阪');
   });
 
+  it('creates relation candidates for durable records written via the public record API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-v2-record-candidates',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.record.kind).toBe('fact_slot');
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-record-candidates',
+    });
+    expect(candidates.statusCode).toBe(200);
+    const candidatesBody = JSON.parse(candidates.payload);
+    expect(candidatesBody.items).toHaveLength(1);
+    expect(candidatesBody.items[0]?.status).toBe('pending');
+    expect(candidatesBody.items[0]?.source_record_id).toBe(createdBody.record.id);
+  });
+
+  it('refreshes pending relation candidates when durable records are updated', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        entity_key: 'user',
+        attribute_key: 'location',
+        agent_id: 'api-v2-update-candidates',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const before = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-update-candidates',
+    });
+    expect(before.statusCode).toBe(200);
+    const beforeBody = JSON.parse(before.payload);
+    expect(beforeBody.items).toHaveLength(1);
+    expect(beforeBody.items[0]?.object_key).toBe('大阪');
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/api/v2/records/${createdBody.record.id}`,
+      payload: {
+        content: '我住京都',
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+
+    const after = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-update-candidates',
+    });
+    expect(after.statusCode).toBe(200);
+    const afterBody = JSON.parse(after.payload);
+    expect(afterBody.items).toHaveLength(1);
+    expect(afterBody.items[0]?.source_record_id).toBe(createdBody.record.id);
+    expect(afterBody.items[0]?.object_key).toBe('京都');
+    expect(afterBody.items[0]?.status).toBe('pending');
+  });
+
   it('runs forgetting-first lifecycle maintenance only on session notes', async () => {
     const activeNote = await app.inject({
       method: 'POST',
@@ -985,6 +1058,14 @@ describe('API V2 Integration', () => {
     const recallBody = JSON.parse(recalled.payload);
     expect(recallBody.facts).toHaveLength(1);
     expect(recallBody.facts[0]?.content).toContain('大阪');
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-feedback',
+    });
+    expect(candidates.statusCode).toBe(200);
+    const candidatesBody = JSON.parse(candidates.payload);
+    expect(candidatesBody.items.some((item: any) => item.source_record_id === correctedBody.correction.record.id)).toBe(true);
 
     const stats = await app.inject({
       method: 'GET',

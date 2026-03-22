@@ -8,6 +8,7 @@ const DOCKERFILE = path.join(ROOT, 'Dockerfile');
 const README = path.join(ROOT, 'README.md');
 const README_ZH = path.join(ROOT, 'README.zh-CN.md');
 const RELEASE_PLAN = path.join(ROOT, 'RELEASE_TEST_PLAN.md');
+const SERVER_INDEX = path.join(ROOT, 'packages/server/src/index.ts');
 
 describe('Platform surface migration', () => {
   it('moves the OpenClaw bridge off legacy v1 endpoints', () => {
@@ -49,6 +50,14 @@ describe('Platform surface migration', () => {
       expect(doc).not.toContain('/api/v1/health');
       expect(doc).not.toContain('/api/v1/config');
     }
+  });
+
+
+  it('initializes Neo4j only behind the legacy runtime gate', () => {
+    const serverIndex = fs.readFileSync(SERVER_INDEX, 'utf8');
+    expect(serverIndex).toContain('if (config.runtime.legacyMode)');
+    expect(serverIndex).toContain('const neo4jDriver = initNeo4j();');
+    expect(serverIndex).toContain('await ensureNeo4jSchema();');
   });
 
   it('documents Windows host-side OpenClaw runtime validation before release', () => {

@@ -104,7 +104,9 @@ candidate relation ──review/confirm──→ confirmed relation
 - Auto extraction produces **relation candidates**, not formal truth
 - Confirmed relations are stored in `record_relations_v2`
 - Formal relations must point back to a source record and evidence
-- Neo4j, if enabled, is a derived graph index, not the formal truth source
+- The default formalization flow is `candidate -> review/edit -> confirm`
+- Direct `POST /api/v2/relations` writes are reserved for manual/admin override paths, not the normal product flow
+- Neo4j is outside the default V2 truth path; in the current release candidate it is only initialized when legacy mode is explicitly enabled
 
 ### 🛡️ Structured Extraction + Durable Admissibility
 
@@ -157,6 +159,8 @@ Conversation ──→ Fast signals + Deep extraction
                  Upsert record + evidence + conversation refs
                           ↓
                  Derive relation candidates (pending review)
+                          ↓
+                 Optional manual review/edit/confirm into `record_relations_v2`
 ```
 
 ### Read Path — every conversation turn
@@ -295,9 +299,10 @@ Create a `.env` file in the project root (or set in `docker-compose.yml` → `en
 | `OLLAMA_BASE_URL` | — | Legacy fallback base URL for Ollama providers |
 | `TZ` | `UTC` | Timezone (e.g. `Asia/Tokyo`) |
 | `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
-| `NEO4J_URI` | — | Neo4j connection (optional) |
+| `NEO4J_URI` | — | Neo4j connection (optional, legacy-mode only) |
 | `NEO4J_USER` | — | Neo4j user |
 | `NEO4J_PASSWORD` | — | Neo4j password |
+| `CORTEX_LEGACY_MODE` | `0` | Enable legacy-compatible graph/search paths; required for Neo4j initialization in the current RC |
 
 > 💡 Dashboard → Settings still works for all model settings. These env vars are useful when you want Docker/bootstrap-time defaults or need to wire an OpenAI-compatible endpoint before first login.
 >
@@ -337,7 +342,13 @@ openssl rand -hex 24
 > ⚠️ **Without HTTPS, your token is sent in plaintext.** Always use TLS for non-localhost deployments.
 
 <details>
-<summary><b>With Neo4j (knowledge graph)</b></summary>
+<summary><b>With Neo4j (legacy / optional graph path)</b></summary>
+
+Neo4j is **not** the formal truth source for V2 relations. In the current release candidate:
+
+- formal relations live in `record_relations_v2`
+- automatic extraction first creates `relation_candidates_v2`
+- Neo4j is only initialized when `CORTEX_LEGACY_MODE=1`
 
 Add to your `docker-compose.yml`:
 
@@ -356,6 +367,7 @@ Set env vars for Cortex:
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
+CORTEX_LEGACY_MODE=1
 ```
 
 </details>
@@ -552,8 +564,8 @@ For Cortex V2 record writes, durable kinds are reserved for clear, updateable us
 | `POST` | `/api/v2/ingest` | Extract and write V2 records from a conversation turn |
 | `CRUD` | `/api/v2/records` | V2 record management |
 | `GET` | `/api/v2/stats` | V2 record and runtime statistics |
-| `CRUD` | `/api/v2/relation-candidates` | Review relation candidates before confirmation |
-| `CRUD` | `/api/v2/relations` | Confirmed record-bound relations |
+| `CRUD` | `/api/v2/relation-candidates` | Review, edit, and confirm relation candidates before formalization |
+| `CRUD` | `/api/v2/relations` | Confirmed record-bound relations; direct writes are for manual/admin override paths |
 | `POST` | `/api/v2/lifecycle/run` | Run note-only lifecycle maintenance |
 | `GET` | `/api/v2/lifecycle/preview` | Preview dormant/stale/purge note transitions |
 | `GET` | `/api/v2/lifecycle/log` | Lifecycle execution history |

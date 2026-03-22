@@ -540,4 +540,10 @@ export class CortexRelationsV2 {
       }),
     ];
   }
+
+  refreshDerivedCandidates(recordId: string): V2RelationCandidate[] {
+    const db = getDb();
+    db.prepare("DELETE FROM relation_candidates_v2 WHERE source_record_id = ? AND status = 'pending'").run(recordId);
+    return this.createDerivedCandidates(recordId);
+  }
 }

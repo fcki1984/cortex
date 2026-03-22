@@ -376,6 +376,12 @@ export class CortexRecordsV2 {
     private embeddingProvider: EmbeddingProvider,
   ) {}
 
+  private createDerivedRelationCandidatesIfNeeded(record: CortexRecord): void {
+    if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return;
+    if (record.kind !== 'fact_slot' && record.kind !== 'task_state') return;
+    this.relations.createDerivedCandidates(record.id);
+  }
+
   async initialize(): Promise<void> {
     const migration = migrateLegacyMemories();
     if (migration.migrated > 0) {
@@ -529,9 +535,7 @@ export class CortexRecordsV2 {
         evidence,
       }, normalized);
       insertEvidence(result.record.id, agentId, normalized.candidate.source_type, evidence);
-      if (normalized.candidate.source_type === 'user_explicit' || normalized.candidate.source_type === 'user_confirmed') {
-        this.relations.createDerivedCandidates(result.record.id);
-      }
+      this.createDerivedRelationCandidatesIfNeeded(result.record);
       await this.indexRecord(result.record).catch((error: Error) => {
         log.debug({ id: result.record.id, error: error.message }, 'V2 vector indexing failed');
       });
@@ -575,6 +579,7 @@ export class CortexRecordsV2 {
   }): Promise<RecordUpsertResult> {
     const normalized = normalizeManualInput(input.agent_id || 'default', input);
     const result = upsertRecord(normalized.candidate, normalized);
+    this.createDerivedRelationCandidatesIfNeeded(result.record);
     await this.indexRecord(result.record);
     return result;
   }
@@ -829,7 +834,10 @@ export class CortexRecordsV2 {
     },
   ) {
     const updated = updateRecord(id, patch);
-    if (updated) await this.indexRecord(updated);
+    if (updated) {
+      this.relations.refreshDerivedCandidates(updated.id);
+      await this.indexRecord(updated);
+    }
     return updated;
   }
 

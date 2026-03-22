@@ -106,7 +106,9 @@ active → dormant → stale → purge
 - 自动抽取先写入**关系候选**，不直接成为正式关系
 - 已确认关系写入 `record_relations_v2`
 - 每条正式关系都必须能追溯到来源记录和证据
-- Neo4j 如启用，只是派生图索引，不是正式真相源
+- 默认正式化流程是 `候选 -> 审查/编辑 -> 确认`
+- 直接 `POST /api/v2/relations` 仅保留给手工/管理员覆盖路径，不是常规产品流
+- Neo4j 不在默认 V2 真相路径内；当前 RC 只有显式开启 legacy mode 时才会初始化
 
 ### 🛡️ 结构化提取 + Durable 准入
 
@@ -160,6 +162,8 @@ active → dormant → stale → purge
           Upsert 记录 + 证据 + 对话引用
                    ↓
           派生关系候选（等待人工确认）
+                   ↓
+          可选人工审查/编辑/确认后写入 `record_relations_v2`
 ```
 
 ### 读取路径 — 每轮对话自动执行
@@ -298,9 +302,10 @@ cd packages/dashboard && pnpm dev  # → http://localhost:5173
 | `OLLAMA_BASE_URL` | — | Ollama Provider 的兼容旧变量 |
 | `TZ` | `UTC` | 时区（如 `Asia/Tokyo`、`Asia/Shanghai`） |
 | `LOG_LEVEL` | `info` | 日志级别（`debug`/`info`/`warn`/`error`） |
-| `NEO4J_URI` | — | Neo4j 连接地址（可选） |
+| `NEO4J_URI` | — | Neo4j 连接地址（可选，仅 legacy mode） |
 | `NEO4J_USER` | — | Neo4j 用户名 |
 | `NEO4J_PASSWORD` | — | Neo4j 密码 |
+| `CORTEX_LEGACY_MODE` | `0` | 开启旧版兼容图谱/搜索路径；当前 RC 中 Neo4j 初始化依赖该开关 |
 
 > 💡 面板 → 设置仍然可以配置所有模型参数；这些环境变量适合 Docker 首次启动时直接注入默认值，或在首次登录前就接好 OpenAI-compatible 接口。
 >
@@ -340,7 +345,13 @@ openssl rand -hex 24
 > ⚠️ **没有 HTTPS 的话，令牌是明文传输的。** 非本地部署务必配置 TLS。
 
 <details>
-<summary><b>启用知识图谱 (Neo4j)</b></summary>
+<summary><b>启用 Neo4j（旧版 / 可选图路径）</b></summary>
+
+Neo4j **不是** V2 正式关系的真相源。当前 RC 的关系主线是：
+
+- 正式关系保存在 `record_relations_v2`
+- 自动抽取先生成 `relation_candidates_v2`
+- 只有显式开启 `CORTEX_LEGACY_MODE=1` 时才会初始化 Neo4j
 
 在 `docker-compose.yml` 中添加：
 
@@ -359,6 +370,7 @@ neo4j:
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
+CORTEX_LEGACY_MODE=1
 ```
 </details>
 
@@ -579,8 +591,8 @@ pnpm smoke:v2
 | `POST` | `/api/v2/ingest` | 将对话写入 V2 records |
 | `CRUD` | `/api/v2/records` | V2 record 管理 |
 | `GET` | `/api/v2/stats` | V2 record 与运行态统计 |
-| `CRUD` | `/api/v2/relation-candidates` | 审查与确认关系候选 |
-| `CRUD` | `/api/v2/relations` | 已确认的 record/evidence 关系 |
+| `CRUD` | `/api/v2/relation-candidates` | 审查、编辑并确认关系候选，再正式化 |
+| `CRUD` | `/api/v2/relations` | 已确认的 record/evidence 关系；直接写入仅用于手工/管理员覆盖路径 |
 | `POST` | `/api/v2/lifecycle/run` | 执行 note-only 生命周期维护 |
 | `GET` | `/api/v2/lifecycle/preview` | 预览会话笔记的休眠/陈旧/清理 |
 | `GET` | `/api/v2/lifecycle/log` | 生命周期执行日志 |

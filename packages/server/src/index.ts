@@ -32,10 +32,12 @@ async function main() {
   // 2a. Rebuild FTS index with jieba tokenization (idempotent)
   rebuildFtsIndex();
 
-  // 2b. Initialize Neo4j (optional — graph features)
-  const neo4jDriver = initNeo4j();
-  if (neo4jDriver) {
-    await ensureNeo4jSchema();
+  // 2b. Initialize Neo4j only for legacy-mode graph features
+  if (config.runtime.legacyMode) {
+    const neo4jDriver = initNeo4j();
+    if (neo4jDriver) {
+      await ensureNeo4jSchema();
+    }
   }
 
   // 3. Create app
