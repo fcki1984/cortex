@@ -41,11 +41,27 @@ function isNewerVersion(latest: string, current: string): boolean {
   if (lm !== cm) return lm > cm;
   return (lp || 0) > (cp || 0);
 }
-const GITHUB_REPO = 'rikouu/cortex';
-const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
+const DEFAULT_RELEASE_REPO = 'fcki1984/cortex';
+
+function getReleaseRepo(): string {
+  const raw = (process.env.CORTEX_RELEASE_REPO || DEFAULT_RELEASE_REPO).trim();
+  const normalized = raw
+    .replace(/^https?:\/\/github\.com\//, '')
+    .replace(/\.git$/, '')
+    .replace(/^\/+|\/+$/g, '');
+  return normalized || DEFAULT_RELEASE_REPO;
+}
+
+function getGithubUrl(repo = getReleaseRepo()): string {
+  return `https://github.com/${repo}`;
+}
+
+function getUpdateImage(repo = getReleaseRepo()): string {
+  return (process.env.CORTEX_UPDATE_IMAGE || `ghcr.io/${repo}:latest`).trim();
+}
 
 // Cache latest release info (check at most every 30 min)
-let latestReleaseCache: { tag: string; url: string; publishedAt: string; checkedAt: number } | null = null;
+let latestReleaseCache: { repo: string; tag: string; url: string; publishedAt: string; checkedAt: number } | null = null;
 const RELEASE_CHECK_INTERVAL = 30 * 60 * 1000;
 
 function isSectionChanged(section: string, current: any, updated: any): boolean {
@@ -204,18 +220,24 @@ function buildSafeConfig(config: any, options?: { includeServerInfo?: boolean })
   return safe;
 }
 
-async function getLatestRelease(forceRefresh = false): Promise<typeof latestReleaseCache> {
-  if (!forceRefresh && latestReleaseCache && Date.now() - latestReleaseCache.checkedAt < RELEASE_CHECK_INTERVAL) {
+async function getLatestRelease(forceRefresh = false, repo = getReleaseRepo()): Promise<typeof latestReleaseCache> {
+  if (
+    !forceRefresh &&
+    latestReleaseCache &&
+    latestReleaseCache.repo === repo &&
+    Date.now() - latestReleaseCache.checkedAt < RELEASE_CHECK_INTERVAL
+  ) {
     return latestReleaseCache;
   }
   try {
-    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'cortex-server' },
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
       const data = await res.json() as any;
       latestReleaseCache = {
+        repo,
         tag: data.tag_name,
         url: data.html_url,
         publishedAt: data.published_at,
@@ -266,12 +288,13 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   // Health check (?refresh=true to bypass release cache)
   app.get('/api/v2/health', async (req) => {
     const query = req.query as any;
-    const latest = await getLatestRelease(query.refresh === 'true');
+    const releaseRepo = getReleaseRepo();
+    const latest = await getLatestRelease(query.refresh === 'true', releaseRepo);
     const latestVersion = latest?.tag?.replace(/^v/, '') ?? null;
     return {
       status: 'ok',
       version: CURRENT_VERSION,
-      github: GITHUB_URL,
+      github: getGithubUrl(releaseRepo),
       latestRelease: latest ? {
         version: latestVersion,
         url: latest.url,
@@ -361,7 +384,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
       }
 
       // Step 1: Pull latest image (use explicit image name to avoid build: skip)
-      const IMAGE = 'ghcr.io/rikouu/cortex:latest';
+      const IMAGE = getUpdateImage();
       log.info('Pulling latest image...');
       try {
         const pullOutput = execSync(`docker pull ${IMAGE}`, { timeout: 120000, encoding: 'utf-8', stdio: 'pipe' });

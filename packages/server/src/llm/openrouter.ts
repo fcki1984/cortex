@@ -4,6 +4,7 @@ import { createTimeoutSignal, resolveTimeoutMs } from '../utils/timeout.js';
 
 const log = createLogger('llm-openrouter');
 const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_REFERER = 'https://github.com/fcki1984/cortex';
 
 /**
  * OpenRouter LLM Provider — routes to any model via OpenRouter's unified API.
@@ -37,7 +38,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
-        'HTTP-Referer': 'https://github.com/rikouu/cortex',
+        'HTTP-Referer': process.env.CORTEX_OPENROUTER_REFERER || DEFAULT_REFERER,
         'X-Title': 'Cortex Memory Service',
       },
       body: JSON.stringify({

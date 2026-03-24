@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rikouu/cortex/main/.github/assets/logo.png" width="80" alt="Cortex Logo" />
+  <img src="https://raw.githubusercontent.com/fcki1984/cortex/main/.github/assets/logo.png" width="80" alt="Cortex Logo" />
 </p>
 
 <h1 align="center">Cortex</h1>
@@ -7,9 +7,9 @@
 <p align="center"><sub>会生长、会学习、会回忆的记忆系统。</sub></p>
 
 <p align="center">
-  <a href="https://github.com/rikouu/cortex/releases"><img src="https://img.shields.io/github/v/release/rikouu/cortex?style=flat-square&color=6366f1" alt="Release" /></a>
-  <a href="https://github.com/rikouu/cortex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rikouu/cortex?style=flat-square" alt="License" /></a>
-  <a href="https://hub.docker.com/r/rikouu/cortex"><img src="https://img.shields.io/docker/pulls/rikouu/cortex?style=flat-square" alt="Docker Pulls" /></a>
+  <a href="https://github.com/fcki1984/cortex/releases"><img src="https://img.shields.io/github/v/release/fcki1984/cortex?style=flat-square&color=6366f1" alt="Release" /></a>
+  <a href="https://github.com/fcki1984/cortex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/fcki1984/cortex?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/fcki1984/cortex/pkgs/container/cortex"><img src="https://img.shields.io/badge/GHCR-cortex-blue?style=flat-square" alt="GHCR Package" /></a>
   <a href="https://www.npmjs.com/package/@cortexmem/mcp"><img src="https://img.shields.io/npm/v/@cortexmem/mcp?style=flat-square&label=MCP" alt="npm MCP" /></a>
 </p>
 
@@ -195,7 +195,7 @@ profile_rule / fact_slot / task_state 不参与生命周期真假管理
 ## 架构
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rikouu/cortex/main/.github/assets/architecture-zh.png" alt="Cortex 架构图" width="800" />
+  <img src="https://raw.githubusercontent.com/fcki1984/cortex/main/.github/assets/architecture-zh.png" alt="Cortex 架构图" width="800" />
 </p>
 
 ```
@@ -233,7 +233,7 @@ profile_rule / fact_slot / task_state 不参与生命周期真假管理
 ## 快速开始
 
 ```bash
-git clone https://github.com/rikouu/cortex.git
+git clone https://github.com/fcki1984/cortex.git
 cd cortex
 docker compose up -d
 ```
@@ -250,7 +250,7 @@ docker compose up -d
 **生产模式**（推荐）：
 
 ```bash
-git clone https://github.com/rikouu/cortex.git
+git clone https://github.com/fcki1984/cortex.git
 cd cortex
 pnpm install
 pnpm build        # 构建服务器 + 控制台
