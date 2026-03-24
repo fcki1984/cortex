@@ -84,16 +84,6 @@ const FACT_SLOT_PREDICATES: Record<string, string> = {
   skill: 'has_skill',
 };
 
-const TASK_STATE_PREDICATES: Record<string, string> = {
-  current_goal: 'has_goal',
-  current_decision: 'made_decision',
-  open_todo: 'has_todo',
-  project_status: 'project_status',
-  deployment_status: 'deployment_status',
-  migration_status: 'migration_status',
-  refactor_status: 'refactor_status',
-};
-
 function parseMetadata(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -145,11 +135,6 @@ function deriveObjectKey(record: CortexRecord): string | null {
         return null;
     }
   }
-
-  if (record.kind === 'task_state') {
-    return normalizeKey(content);
-  }
-
   return null;
 }
 
@@ -168,8 +153,6 @@ function derivePredicate(record: CortexRecord): string | null {
   switch (record.kind) {
     case 'fact_slot':
       return FACT_SLOT_PREDICATES[record.attribute_key] || null;
-    case 'task_state':
-      return TASK_STATE_PREDICATES[record.state_key] || null;
     default:
       return null;
   }
@@ -516,7 +499,7 @@ export class CortexRelationsV2 {
 
   createDerivedCandidates(recordId: string): V2RelationCandidate[] {
     const record = getRecordById(recordId);
-    if (!record || record.kind === 'profile_rule' || record.kind === 'session_note') return [];
+    if (!record || record.kind !== 'fact_slot') return [];
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return [];
 
     const subjectKey = deriveSubjectKey(record);

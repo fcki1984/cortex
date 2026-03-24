@@ -378,8 +378,60 @@ export class CortexRecordsV2 {
 
   private createDerivedRelationCandidatesIfNeeded(record: CortexRecord): void {
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return;
-    if (record.kind !== 'fact_slot' && record.kind !== 'task_state') return;
+    if (record.kind !== 'fact_slot') return;
     this.relations.createDerivedCandidates(record.id);
+  }
+
+  async previewImportCandidates(input: {
+    agent_id: string;
+    content: string;
+    requested_kind?: RecordKind;
+    source_type?: SourceType;
+    session_id?: string;
+  }): Promise<NormalizedRecordCandidate[]> {
+    const content = stripInjectedContent(input.content || '').trim();
+    if (!content) return [];
+
+    const exchange = {
+      user: content,
+      assistant: '',
+      messages: [{ role: 'user' as const, content }],
+    };
+
+    const fast = detectHighSignals(exchange).map(signal => signalToCandidate(signal, input.agent_id));
+    const deep = !isSmallTalk(content)
+      ? await this.extractDeepCandidates(exchange, input.agent_id, input.session_id).catch((error: Error) => {
+          log.warn({ error: error.message }, 'V2 preview extraction failed');
+          return [] as NormalizedRecordCandidate[];
+        })
+      : [];
+
+    const merged = new Map<string, NormalizedRecordCandidate>();
+    for (const candidate of [...fast, ...deep]) {
+      merged.set(dedupeKey(candidate), candidate);
+    }
+
+    const hintedFallback = normalizeManualInput(input.agent_id, {
+      kind: input.requested_kind,
+      content,
+      source_type: input.source_type || 'user_confirmed',
+      session_id: input.session_id,
+    });
+
+    if (merged.size === 0) {
+      merged.set(dedupeKey(hintedFallback), hintedFallback);
+      return Array.from(merged.values());
+    }
+
+    if (
+      input.requested_kind &&
+      hintedFallback.written_kind !== 'session_note' &&
+      Array.from(merged.values()).every(candidate => candidate.written_kind === 'session_note')
+    ) {
+      return [hintedFallback];
+    }
+
+    return Array.from(merged.values());
   }
 
   async initialize(): Promise<void> {

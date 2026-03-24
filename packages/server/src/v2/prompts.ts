@@ -17,6 +17,10 @@ Rules:
 4. Never convert assistant advice into user facts unless the user clearly confirmed it.
 5. Keep keys short, stable, and machine-friendly: snake_case English.
 6. content/value_text/summary must stay in the conversation language. Keys stay in English.
+7. If the statement is tentative, speculative, or framed as "maybe / perhaps / considering / 也许 / 可能 / 考虑", emit session_note instead of a durable record.
+8. Do not invent stable keys. If attribute_key / entity_key / subject_key / state_key is not clear from the text, emit session_note.
+9. Prefer durable records only for explicit user truth, user-confirmed constraints, or explicit task/project state. Implementation details and vague plans stay session_note.
+10. For response constraints such as language, brevity, style, or "keep answers within N sentences", prefer profile_rule with a stable attribute_key over session_note.
 
 Output JSON only:
 {

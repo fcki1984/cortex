@@ -132,16 +132,6 @@ const FACT_SLOT_PREDICATES: Record<string, string> = {
   skill: 'has_skill',
 };
 
-const TASK_STATE_PREDICATES: Record<string, string> = {
-  current_goal: 'has_goal',
-  current_decision: 'made_decision',
-  open_todo: 'has_todo',
-  project_status: 'project_status',
-  deployment_status: 'deployment_status',
-  migration_status: 'migration_status',
-  refactor_status: 'refactor_status',
-};
-
 function generateCandidateId(prefix: string, index: number): string {
   return `${prefix}_${index + 1}`;
 }
@@ -381,14 +371,6 @@ function deriveRelationTriple(candidate: PreviewRecordCandidate): RelationTriple
     return { subject_key: subjectKey, predicate, object_key: objectKey };
   }
 
-  if (candidate.normalized_kind === 'task_state') {
-    const subjectKey = candidate.subject_key ? normalizeRelationKey(candidate.subject_key) : '';
-    const predicate = candidate.state_key ? TASK_STATE_PREDICATES[candidate.state_key] : '';
-    const objectKey = normalizeRelationKey(candidate.content);
-    if (!subjectKey || !predicate || !objectKey) return null;
-    return { subject_key: subjectKey, predicate, object_key: objectKey };
-  }
-
   return null;
 }
 
@@ -418,28 +400,64 @@ function previewRelationFromRecord(
   };
 }
 
-function buildPreviewFromSegments(
+function relationCandidateKey(candidate: PreviewRelationCandidate): string {
+  return [
+    candidate.source_candidate_id || '',
+    normalizeRelationKey(candidate.subject_key),
+    normalizeRelationPredicate(candidate.predicate),
+    normalizeRelationKey(candidate.object_key),
+  ].join(':');
+}
+
+function dedupeRelationCandidates(candidates: PreviewRelationCandidate[]): PreviewRelationCandidate[] {
+  const deduped = new Map<string, PreviewRelationCandidate>();
+
+  for (const candidate of candidates) {
+    const key = relationCandidateKey(candidate);
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, candidate);
+      continue;
+    }
+    if (existing.mode !== 'confirmed_restore' && candidate.mode === 'confirmed_restore') {
+      deduped.set(key, candidate);
+    }
+  }
+
+  return Array.from(deduped.values());
+}
+
+async function buildPreviewFromSegments(
+  recordsV2: CortexRecordsV2,
   agentId: string,
   format: ImportFormat,
   segments: Array<{ content: string; requested_kind?: RecordKind }>,
-): ImportPreviewResponse {
-  const recordCandidates = segments.map((segment, index) => {
-    const normalized = normalizeManualInput(agentId, {
-      kind: segment.requested_kind,
+): Promise<ImportPreviewResponse> {
+  const recordCandidates: PreviewRecordCandidate[] = [];
+
+  for (const segment of segments) {
+    const normalizedCandidates = await recordsV2.previewImportCandidates({
+      agent_id: agentId,
       content: segment.content,
+      requested_kind: segment.requested_kind,
       source_type: 'user_confirmed',
     });
-    return previewRecordFromNormalized(
-      normalized,
-      index,
-      segment.content,
-      normalizeEvidence(undefined, segment.content, 'user_confirmed'),
-    );
-  });
 
-  const relationCandidates = recordCandidates
-    .map((candidate, index) => previewRelationFromRecord(candidate, index))
-    .filter((item): item is PreviewRelationCandidate => !!item);
+    for (const normalized of normalizedCandidates) {
+      recordCandidates.push(previewRecordFromNormalized(
+        normalized,
+        recordCandidates.length,
+        segment.content,
+        normalizeEvidence(undefined, segment.content, 'user_confirmed'),
+      ));
+    }
+  }
+
+  const relationCandidates = dedupeRelationCandidates(
+    recordCandidates
+      .map((candidate, index) => previewRelationFromRecord(candidate, index))
+      .filter((item): item is PreviewRelationCandidate => !!item),
+  );
 
   return {
     record_candidates: recordCandidates,
@@ -565,21 +583,21 @@ function previewRelationsFromJson(
   });
 }
 
-export function previewImport(input: {
+export async function previewImport(recordsV2: CortexRecordsV2, input: {
   agent_id: string;
   format: ImportFormat;
   content: string;
-}): ImportPreviewResponse {
+}): Promise<ImportPreviewResponse> {
   ensureAgent(input.agent_id);
 
   if (input.format === 'text') {
     const segments = splitPlainTextSegments(input.content).map((content) => ({ content }));
-    return buildPreviewFromSegments(input.agent_id, input.format, segments);
+    return buildPreviewFromSegments(recordsV2, input.agent_id, input.format, segments);
   }
 
   if (input.format === 'memory_md') {
     const segments = parseMemoryMdSegments(input.content);
-    return buildPreviewFromSegments(input.agent_id, input.format, segments);
+    return buildPreviewFromSegments(recordsV2, input.agent_id, input.format, segments);
   }
 
   const parsed = JSON.parse(input.content) as Record<string, unknown>;
@@ -593,7 +611,7 @@ export function previewImport(input: {
     .map((record, index) => previewRecordFromJsonObject(record, input.agent_id, index))
     .filter((item): item is PreviewRecordCandidate => !!item);
 
-  const relationCandidates = [
+  const relationCandidates = dedupeRelationCandidates([
     ...recordCandidates
       .map((candidate, index) => previewRelationFromRecord(candidate, index))
       .filter((item): item is PreviewRelationCandidate => !!item),
@@ -605,7 +623,7 @@ export function previewImport(input: {
           : [],
       recordCandidates,
     ),
-  ];
+  ]);
 
   return {
     record_candidates: recordCandidates,

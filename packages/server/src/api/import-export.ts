@@ -47,7 +47,7 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
     }
 
     try {
-      return previewImport({
+      return await previewImport(cortex.recordsV2, {
         agent_id: body.agent_id,
         format: parseImportFormat(body.format),
         content: body.content,
