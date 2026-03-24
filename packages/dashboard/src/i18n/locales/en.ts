@@ -192,6 +192,7 @@ export default {
     relationModeCandidate: 'Pending Relation Candidate',
     relationModeConfirmedRestore: 'Restore Confirmed Relation',
     predicate: 'Predicate',
+    objectKey: 'Object Key',
     resultTitle: 'Import Result',
     resultCommitted: 'Committed Records',
     resultSkipped: 'Skipped',

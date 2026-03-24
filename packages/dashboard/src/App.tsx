@@ -509,7 +509,6 @@ function AppContent() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>📊 {t('nav.dashboard')}</NavLink>
           <NavLink to="/memories" className={({ isActive }) => isActive ? 'active' : ''}>🗂️ {t('nav.memories')}</NavLink>
           <NavLink to="/agents" className={({ isActive }) => isActive ? 'active' : ''}>🤖 {t('nav.agents')}</NavLink>
-          <NavLink to="/import-export" className={({ isActive }) => isActive ? 'active' : ''}>⇄ {t('nav.importExport')}</NavLink>
           <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '日志' : 'Logs'}</div>
@@ -518,6 +517,7 @@ function AppContent() {
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '系统' : 'System'}</div>
           <NavLink to="/lifecycle" className={({ isActive }) => isActive ? 'active' : ''}>♻️ {t('nav.lifecycle')}</NavLink>
+          <NavLink to="/import-export" className={({ isActive }) => isActive ? 'active' : ''}>⇄ {t('nav.importExport')}</NavLink>
           <NavLink to="/feedback" className={({ isActive }) => isActive ? 'active' : ''}>🧪 {t('nav.feedback')}</NavLink>
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''}>⚙️ {t('nav.settings')}</NavLink>
         </nav>

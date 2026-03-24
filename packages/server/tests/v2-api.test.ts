@@ -1282,4 +1282,16 @@ describe('API V2 Integration', () => {
     expect(importedRelationsBody.items[0]?.source_record?.content).toContain('大阪');
     expect(importedRelationsBody.items[0]?.source_evidence?.content).toContain('我住大阪');
   });
+
+  it('exports built-in agents for all_agents scope even when there are no records', async () => {
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/api/v2/export?scope=all_agents&format=json',
+    });
+
+    expect(exported.statusCode).toBe(200);
+    const body = JSON.parse(exported.payload);
+    expect(body.scope).toBe('all_agents');
+    expect(body.agents.map((agent: any) => agent.id)).toEqual(expect.arrayContaining(['default', 'mcp']));
+  });
 });

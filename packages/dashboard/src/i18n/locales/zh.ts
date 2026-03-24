@@ -192,6 +192,7 @@ export default {
     relationModeCandidate: '待确认关系候选',
     relationModeConfirmedRestore: '恢复已确认关系',
     predicate: '谓词',
+    objectKey: '宾语键',
     resultTitle: '导入结果',
     resultCommitted: '已提交记录',
     resultSkipped: '已跳过',

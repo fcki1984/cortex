@@ -1,4 +1,4 @@
-import { getAgentById } from '../db/agent-queries.js';
+import { getAgentById, listAgents } from '../db/agent-queries.js';
 import { getDb } from '../db/connection.js';
 import { ensureAgent } from '../db/index.js';
 import { normalizeEntity } from '../utils/helpers.js';
@@ -662,7 +662,11 @@ export function buildCanonicalExportBundle(
     limit: Math.max(20, relationCount + 10),
   }).items;
 
+  const configuredAgentIds = opts.scope === 'all_agents'
+    ? listAgents().map((agent) => agent.id)
+    : [];
   const agentIds = Array.from(new Set([
+    ...configuredAgentIds,
     ...records.map((record) => record.agent_id),
     ...relations.map((relation) => relation.agent_id),
     ...(agentId ? [agentId] : []),
