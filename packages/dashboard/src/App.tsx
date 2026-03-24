@@ -10,6 +10,7 @@ import Agents from './pages/Agents.js';
 import AgentDetail from './pages/AgentDetail.js';
 import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
+import ImportExport from './pages/ImportExport.js';
 import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getAuthStatus, setupAuthToken } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
@@ -508,6 +509,7 @@ function AppContent() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>📊 {t('nav.dashboard')}</NavLink>
           <NavLink to="/memories" className={({ isActive }) => isActive ? 'active' : ''}>🗂️ {t('nav.memories')}</NavLink>
           <NavLink to="/agents" className={({ isActive }) => isActive ? 'active' : ''}>🤖 {t('nav.agents')}</NavLink>
+          <NavLink to="/import-export" className={({ isActive }) => isActive ? 'active' : ''}>⇄ {t('nav.importExport')}</NavLink>
           <NavLink to="/relations" className={({ isActive }) => isActive ? 'active' : ''}>🕸️ {t('nav.relations')}</NavLink>
           <div className="nav-divider" />
           <div className="nav-group-label">{locale === 'zh' ? '日志' : 'Logs'}</div>
@@ -545,6 +547,7 @@ function AppContent() {
           <Route path="/memories" element={<MemoryBrowser />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetail />} />
+          <Route path="/import-export" element={<ImportExport />} />
           <Route path="/relations" element={<RelationGraph />} />
           <Route path="/extraction-logs" element={<ExtractionLogs />} />
           <Route path="/system-logs" element={<SystemLogs />} />

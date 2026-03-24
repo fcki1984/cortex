@@ -441,6 +441,22 @@ export class CortexRecordsV2 {
     return records;
   }
 
+  async commitNormalizedCandidate(
+    normalized: NormalizedRecordCandidate,
+    evidence: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }> = [],
+  ): Promise<RecordUpsertResult> {
+    const result = upsertRecord({
+      ...normalized.candidate,
+      evidence,
+    }, normalized);
+    if (evidence.length > 0) {
+      insertEvidence(result.record.id, normalized.candidate.agent_id, normalized.candidate.source_type, evidence);
+    }
+    this.createDerivedRelationCandidatesIfNeeded(result.record);
+    await this.indexRecord(result.record);
+    return result;
+  }
+
   async ingest(req: {
     user_message: string;
     assistant_message: string;
@@ -530,14 +546,12 @@ export class CortexRecordsV2 {
     }> = [];
 
     for (const normalized of merged.values()) {
-      const result = upsertRecord({
-        ...normalized.candidate,
-        evidence,
-      }, normalized);
-      insertEvidence(result.record.id, agentId, normalized.candidate.source_type, evidence);
-      this.createDerivedRelationCandidatesIfNeeded(result.record);
-      await this.indexRecord(result.record).catch((error: Error) => {
-        log.debug({ id: result.record.id, error: error.message }, 'V2 vector indexing failed');
+      const result = await this.commitNormalizedCandidate(normalized, evidence).catch((error: Error) => {
+        const content = normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
+          ? normalized.candidate.value_text
+          : normalized.candidate.summary;
+        log.debug({ content, error: error.message }, 'V2 record commit failed');
+        throw error;
       });
       results.push({
         record_id: result.record.id,
@@ -578,10 +592,7 @@ export class CortexRecordsV2 {
     purge_after?: string;
   }): Promise<RecordUpsertResult> {
     const normalized = normalizeManualInput(input.agent_id || 'default', input);
-    const result = upsertRecord(normalized.candidate, normalized);
-    this.createDerivedRelationCandidatesIfNeeded(result.record);
-    await this.indexRecord(result.record);
-    return result;
+    return this.commitNormalizedCandidate(normalized);
   }
 
   async search(query: string, opts: { agent_id?: string; limit?: number; recall_only?: boolean } = {}): Promise<SearchResult[]> {

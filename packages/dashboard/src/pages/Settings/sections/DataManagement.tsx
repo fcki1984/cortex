@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { getConfig, updateConfig, exportFullConfig, triggerExport, triggerReindex } from '../../../api/client.js';
+import { useNavigate } from 'react-router-dom';
+import { getConfig, updateConfig, exportFullConfig, triggerReindex } from '../../../api/client.js';
 
 interface DataManagementProps {
   config: any;
@@ -27,6 +28,7 @@ function maskSensitive(obj: any): any {
 }
 
 export default function DataManagement({ config, setConfig, setToast, t }: DataManagementProps) {
+  const navigate = useNavigate();
   const [showConfig, setShowConfig] = useState(false);
   const [reindexing, setReindexing] = useState(false);
   const [reindexStart, setReindexStart] = useState<number | null>(null);
@@ -37,30 +39,19 @@ export default function DataManagement({ config, setConfig, setToast, t }: DataM
       <div className="card">
         <h3 style={{ marginBottom: 12 }}>{t('settings.dataManagement')}</h3>
 
-        {/* Export */}
+        {/* Import / Export */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('settings.exportLabel')}</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn" onClick={async () => {
-              try {
-                const data = await triggerExport('json');
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = `cortex-export-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-                URL.revokeObjectURL(url);
-                setToast({ message: t('settings.toastJsonExported'), type: 'success' });
-              } catch (e: any) { setToast({ message: e.message, type: 'error' }); }
-            }}>{t('settings.exportJson')}</button>
-            <button className="btn" onClick={async () => {
-              try {
-                const data = await triggerExport('markdown');
-                const blob = new Blob([data.content], { type: 'text/markdown' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = `cortex-export-${new Date().toISOString().slice(0, 10)}.md`; a.click();
-                URL.revokeObjectURL(url);
-                setToast({ message: t('settings.toastMarkdownExported'), type: 'success' });
-              } catch (e: any) { setToast({ message: e.message, type: 'error' }); }
-            }}>{t('settings.exportMarkdown')}</button>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('settings.importExportTitle')}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 10 }}>
+            {t('settings.importExportHint')}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn" onClick={() => navigate('/import-export')}>
+              {t('settings.openImportExport')}
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {t('settings.importExportScopeHint')}
+            </span>
           </div>
         </div>
 

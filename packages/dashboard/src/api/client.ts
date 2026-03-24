@@ -16,7 +16,8 @@ const V2 = {
   testEmbedding: '/api/v2/test-embedding',
   testReranker: '/api/v2/test-reranker',
   export: '/api/v2/export',
-  import: '/api/v2/import',
+  importPreview: '/api/v2/import/preview',
+  importConfirm: '/api/v2/import/confirm',
   reindex: '/api/v2/reindex',
   update: '/api/v2/update',
   agents: '/api/v2/agents',
@@ -166,13 +167,34 @@ export const testEmbedding = () =>
 export const testReranker = () =>
   request(V2.testReranker, { method: 'POST' });
 
-// Export
-export const triggerExport = (format: string = 'json') =>
-  request(V2.export, { method: 'POST', body: JSON.stringify({ format }) });
+// Import / Export v2
+export const previewImportV2 = (data: {
+  agent_id: string;
+  format: 'json' | 'memory_md' | 'text';
+  content: string;
+  filename?: string;
+}) =>
+  request(V2.importPreview, { method: 'POST', body: JSON.stringify(data) });
 
-// Import
-export const triggerImport = (data: any) =>
-  request(V2.import, { method: 'POST', body: JSON.stringify(data) });
+export const confirmImportV2 = (data: {
+  agent_id: string;
+  record_candidates: any[];
+  relation_candidates: any[];
+}) =>
+  request(V2.importConfirm, { method: 'POST', body: JSON.stringify(data) });
+
+export const exportBundleV2 = (params?: {
+  scope?: 'current_agent' | 'all_agents';
+  agent_id?: string;
+  format?: 'json' | 'memory_md';
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.scope) qs.set('scope', params.scope);
+  if (params?.agent_id) qs.set('agent_id', params.agent_id);
+  if (params?.format) qs.set('format', params.format);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request(`${V2.export}${suffix}`);
+};
 
 // Reindex
 export const triggerReindex = () =>

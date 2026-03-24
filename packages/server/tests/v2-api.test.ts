@@ -1075,4 +1075,211 @@ describe('API V2 Integration', () => {
     const statsBody = JSON.parse(stats.payload);
     expect(statsBody.corrected).toBe(1);
   });
+
+  it('previews plain-text import as mixed v2 candidates without writing records', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-v2-import-preview-text',
+        format: 'text',
+        content: [
+          '我住大阪',
+          '请用中文回答',
+          '当前任务是重构 Cortex recall',
+          '最近也许会考虑换方案',
+        ].join('\n'),
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const body = JSON.parse(preview.payload);
+    expect(Array.isArray(body.record_candidates)).toBe(true);
+    expect(body.record_candidates).toHaveLength(4);
+    expect(body.record_candidates.some((item: any) => item.normalized_kind === 'fact_slot' && item.content.includes('大阪'))).toBe(true);
+    expect(body.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content.includes('中文'))).toBe(true);
+    expect(body.record_candidates.some((item: any) => item.normalized_kind === 'task_state' && item.content.includes('重构 Cortex recall'))).toBe(true);
+    expect(body.record_candidates.some((item: any) => item.normalized_kind === 'session_note' && item.content.includes('考虑换方案'))).toBe(true);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-v2-import-preview-text',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
+  it('previews MEMORY.md sections with v2 kind hints', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-v2-import-preview-memory-md',
+        format: 'memory_md',
+        content: [
+          '# MEMORY.md',
+          '',
+          '## Profile Rules',
+          '- 请用中文回答',
+          '',
+          '## Fact Slots',
+          '- 我住大阪',
+          '',
+          '## Task States',
+          '- 当前任务是重构 Cortex recall',
+          '',
+          '## Session Notes',
+          '- 最近也许会考虑换方案',
+        ].join('\n'),
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const body = JSON.parse(preview.payload);
+    expect(body.record_candidates).toHaveLength(4);
+    expect(body.record_candidates[0]?.requested_kind).toBe('profile_rule');
+    expect(body.record_candidates[1]?.requested_kind).toBe('fact_slot');
+    expect(body.record_candidates[2]?.requested_kind).toBe('task_state');
+    expect(body.record_candidates[3]?.requested_kind).toBe('session_note');
+  });
+
+  it('confirms text imports through the v2 write path and leaves derived relations pending', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-v2-import-confirm-text',
+        format: 'text',
+        content: [
+          '我住大阪',
+          '请用中文回答',
+          '当前任务是重构 Cortex recall',
+          '最近也许会考虑换方案',
+        ].join('\n'),
+      },
+    });
+    const previewBody = JSON.parse(preview.payload);
+
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/confirm',
+      payload: {
+        agent_id: 'api-v2-import-confirm-text',
+        record_candidates: previewBody.record_candidates,
+        relation_candidates: previewBody.relation_candidates,
+      },
+    });
+
+    expect(confirmed.statusCode).toBe(201);
+    const confirmedBody = JSON.parse(confirmed.payload);
+    expect(confirmedBody.summary.committed).toBe(4);
+    expect(confirmedBody.failed).toHaveLength(0);
+
+    const recallLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-v2-import-confirm-text' },
+    });
+    const recallLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'What language should the assistant use?', agent_id: 'api-v2-import-confirm-text' },
+    });
+    const recallTask = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'What is the current task?', agent_id: 'api-v2-import-confirm-text' },
+    });
+
+    expect(JSON.parse(recallLocation.payload).facts[0]?.content).toContain('大阪');
+    expect(JSON.parse(recallLanguage.payload).rules[0]?.content).toContain('中文');
+    expect(JSON.parse(recallTask.payload).task_state[0]?.content).toContain('重构 Cortex recall');
+
+    const relations = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-import-confirm-text',
+    });
+    expect(relations.statusCode).toBe(200);
+    const relationsBody = JSON.parse(relations.payload);
+    expect(relationsBody.items.some((item: any) => item.status === 'pending')).toBe(true);
+  });
+
+  it('exports canonical v2 bundles and restores confirmed relations on re-import', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        agent_id: 'api-v2-export-roundtrip-source',
+      },
+    });
+    const createdBody = JSON.parse(created.payload);
+
+    const candidateList = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-export-roundtrip-source',
+    });
+    const candidateListBody = JSON.parse(candidateList.payload);
+    expect(candidateListBody.items).toHaveLength(1);
+
+    const confirmCandidate = await app.inject({
+      method: 'POST',
+      url: `/api/v2/relation-candidates/${candidateListBody.items[0].id}/confirm`,
+    });
+    expect(confirmCandidate.statusCode).toBe(201);
+
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/api/v2/export?scope=current_agent&agent_id=api-v2-export-roundtrip-source&format=json',
+    });
+    expect(exported.statusCode).toBe(200);
+    const exportedBody = JSON.parse(exported.payload);
+    expect(exportedBody.schema_version).toBe('cortex_v2_export');
+    expect(exportedBody.records.fact_slots).toHaveLength(1);
+    expect(exportedBody.confirmed_relations).toHaveLength(1);
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-v2-export-roundtrip-target',
+        format: 'json',
+        content: JSON.stringify(exportedBody),
+      },
+    });
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.relation_candidates.some((item: any) => item.mode === 'confirmed_restore')).toBe(true);
+
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/confirm',
+      payload: {
+        agent_id: 'api-v2-export-roundtrip-target',
+        record_candidates: previewBody.record_candidates,
+        relation_candidates: previewBody.relation_candidates,
+      },
+    });
+    expect(confirmed.statusCode).toBe(201);
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: 'api-v2-export-roundtrip-target' },
+    });
+    const recalledBody = JSON.parse(recalled.payload);
+    expect(recalledBody.facts).toHaveLength(1);
+    expect(recalledBody.facts[0]?.content).toContain('大阪');
+
+    const importedRelations = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relations?agent_id=api-v2-export-roundtrip-target',
+    });
+    expect(importedRelations.statusCode).toBe(200);
+    const importedRelationsBody = JSON.parse(importedRelations.payload);
+    expect(importedRelationsBody.items).toHaveLength(1);
+    expect(importedRelationsBody.items[0]?.source_record?.content).toContain('大阪');
+    expect(importedRelationsBody.items[0]?.source_evidence?.content).toContain('我住大阪');
+  });
 });
