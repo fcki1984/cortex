@@ -10,6 +10,7 @@ import {
   type ImportFormat,
 } from '../v2/import-export.js';
 import { createLogger } from '../utils/logger.js';
+import { observedRoute } from './observability.js';
 
 const log = createLogger('import-export');
 
@@ -29,7 +30,12 @@ function parseExportScope(raw: unknown): ExportScope {
 }
 
 export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexApp): void {
-  app.post('/api/v2/import/preview', async (req, reply) => {
+  app.post('/api/v2/import/preview', observedRoute({
+    route: '/api/v2/import/preview',
+    method: 'POST',
+    timeoutMs: 20000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const body = req.body as {
       agent_id?: string;
       format?: ImportFormat;
@@ -57,7 +63,7 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
       reply.code(400);
       return { error: error.message };
     }
-  });
+  }));
 
   app.post('/api/v2/import/confirm', async (req, reply) => {
     const body = req.body as {
@@ -90,7 +96,12 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
     }
   });
 
-  app.get('/api/v2/export', async (req, reply) => {
+  app.get('/api/v2/export', observedRoute({
+    route: '/api/v2/export',
+    method: 'GET',
+    timeoutMs: 20000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const query = req.query as {
       scope?: ExportScope;
       agent_id?: string;
@@ -118,5 +129,5 @@ export function registerImportExportRoutes(app: FastifyInstance, cortex: CortexA
       reply.code(500);
       return { error: error.message };
     }
-  });
+  }));
 }

@@ -94,6 +94,12 @@ type ConfirmResponse = {
   failed: Array<Record<string, unknown>>;
 };
 
+type ExportSummary = {
+  scope: ExportScope;
+  format: ExportFormat;
+  agents: AgentRecord[];
+};
+
 const RECORD_KIND_OPTIONS: RecordKind[] = ['profile_rule', 'fact_slot', 'task_state', 'session_note'];
 
 function guessImportFormat(filename: string): ImportFormat | null {
@@ -182,10 +188,38 @@ function formatImportValidationIssue(t: (key: string, params?: Record<string, st
     : t('importExport.validationTaskStateRequired');
 }
 
+function formatRequestError(t: (key: string, params?: Record<string, string | number>) => string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  if (lower.includes('timeout')) return t('importExport.requestTimeout');
+  if (
+    lower.includes('api 500') ||
+    lower.includes('api 502') ||
+    lower.includes('api 503') ||
+    lower.includes('api 504') ||
+    lower.includes('request failed after retry')
+  ) {
+    return t('importExport.requestRetryFailed');
+  }
+  return message;
+}
+
+function formatExportScopeLabel(t: (key: string, params?: Record<string, string | number>) => string, scope: ExportScope): string {
+  return scope === 'all_agents'
+    ? t('importExport.scopeAllAgents')
+    : t('importExport.scopeCurrentAgent');
+}
+
+function formatExportFormatLabel(t: (key: string, params?: Record<string, string | number>) => string, format: ExportFormat): string {
+  return format === 'memory_md' ? 'MEMORY.md' : 'JSON';
+}
+
 export default function ImportExport() {
   const { t } = useI18n();
   const [tab, setTab] = useState<'import' | 'export'>('import');
   const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
   const [importAgentId, setImportAgentId] = useState('');
   const [exportAgentId, setExportAgentId] = useState('');
   const [importFormat, setImportFormat] = useState<ImportFormat>('json');
@@ -198,23 +232,44 @@ export default function ImportExport() {
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
   const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const fileInputId = useId();
 
+  const loadAgents = async () => {
+    setAgentsLoading(true);
+    setAgentsError(null);
+    try {
+      const response: any = await listAgents();
+      const nextAgents = (response.agents || response || []) as AgentRecord[];
+      setAgents(nextAgents);
+      if (nextAgents.length > 0) {
+        setImportAgentId((current) => (
+          current && nextAgents.some((agent) => agent.id === current)
+            ? current
+            : nextAgents[0]!.id
+        ));
+        setExportAgentId((current) => (
+          current && nextAgents.some((agent) => agent.id === current)
+            ? current
+            : nextAgents[0]!.id
+        ));
+      }
+    } catch (error: any) {
+      setAgentsError(error.message || String(error));
+      setNotice({ message: formatRequestError(t, error), type: 'error' });
+    } finally {
+      setAgentsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    listAgents()
-      .then((response: any) => {
-        const nextAgents = (response.agents || response || []) as AgentRecord[];
-        setAgents(nextAgents);
-        if (nextAgents.length > 0) {
-          setImportAgentId((current) => current || nextAgents[0].id);
-          setExportAgentId((current) => current || nextAgents[0].id);
-        }
-      })
-      .catch((error: Error) => {
-        setNotice({ message: error.message, type: 'error' });
-      });
+    void loadAgents();
   }, []);
+
+  useEffect(() => {
+    setExportSummary(null);
+  }, [exportScope, exportAgentId, exportFormat]);
 
   useEffect(() => {
     if (!notice) return;
@@ -314,7 +369,7 @@ export default function ImportExport() {
       setConfirmResult(null);
       setNotice({ message: t('importExport.previewReady'), type: 'success' });
     } catch (error: any) {
-      setNotice({ message: error.message, type: 'error' });
+      setNotice({ message: formatRequestError(t, error), type: 'error' });
     } finally {
       setPreviewing(false);
     }
@@ -339,7 +394,7 @@ export default function ImportExport() {
       setConfirmResult(result);
       setNotice({ message: t('importExport.confirmSuccess'), type: 'success' });
     } catch (error: any) {
-      setNotice({ message: error.message, type: 'error' });
+      setNotice({ message: formatRequestError(t, error), type: 'error' });
     } finally {
       setConfirming(false);
     }
@@ -354,11 +409,16 @@ export default function ImportExport() {
     setExporting(true);
     setNotice(null);
     try {
-      const result = await exportBundleV2({
+      const result: any = await exportBundleV2({
         scope: exportScope,
         agent_id: exportScope === 'current_agent' ? exportAgentId : undefined,
         format: exportFormat,
       });
+      const resolvedAgents = Array.isArray(result?.agents) && result.agents.length > 0
+        ? result.agents as AgentRecord[]
+        : (exportScope === 'current_agent' && exportAgentId
+          ? agents.filter((agent) => agent.id === exportAgentId)
+          : []);
       const today = new Date().toISOString().slice(0, 10);
       const filename = exportFormat === 'json'
         ? `cortex-v2-export-${exportScope}-${today}.json`
@@ -368,9 +428,14 @@ export default function ImportExport() {
       } else {
         downloadFile(result.content || '', filename, 'text/markdown;charset=utf-8');
       }
+      setExportSummary({
+        scope: exportScope,
+        format: exportFormat,
+        agents: resolvedAgents,
+      });
       setNotice({ message: t('importExport.exportReady'), type: 'success' });
     } catch (error: any) {
-      setNotice({ message: error.message, type: 'error' });
+      setNotice({ message: formatRequestError(t, error), type: 'error' });
     } finally {
       setExporting(false);
     }
@@ -381,6 +446,25 @@ export default function ImportExport() {
       <h1 className="page-title">{t('nav.importExport')}</h1>
 
       {notice && <Notice message={notice.message} type={notice.type} />}
+
+      {agentsError && (
+        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(239,68,68,0.35)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ margin: 0 }}>{t('importExport.agentsLoadFailed')}</h3>
+              <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.6 }}>
+                {t('importExport.agentsLoadFailedHint')}
+              </div>
+              <div style={{ marginTop: 8, color: '#fca5a5', fontSize: 12 }}>
+                {agentsError}
+              </div>
+            </div>
+            <button type="button" className="btn" onClick={() => void loadAgents()} disabled={agentsLoading}>
+              {agentsLoading ? t('importExport.retryingAgents') : t('importExport.retryAgents')}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="tabs">
         <button
@@ -417,8 +501,17 @@ export default function ImportExport() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 12 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor="import-agent-select">{t('importExport.targetAgent')}</label>
-                <select id="import-agent-select" value={importAgentId} onChange={(event) => setImportAgentId(event.target.value)}>
-                  {agents.map((agent) => (
+                <select
+                  id="import-agent-select"
+                  value={importAgentId}
+                  onChange={(event) => setImportAgentId(event.target.value)}
+                  disabled={agents.length === 0}
+                >
+                  {agents.length === 0 ? (
+                    <option value="">
+                      {agentsLoading ? t('importExport.loadingAgents') : t('importExport.noAgentsAvailable')}
+                    </option>
+                  ) : agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {formatAgentNameLabel(t, agent.id, agent.name)}
                     </option>
@@ -960,8 +1053,17 @@ export default function ImportExport() {
               {exportScope === 'current_agent' && (
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label htmlFor="export-agent-select">{t('importExport.currentAgent')}</label>
-                  <select id="export-agent-select" value={exportAgentId} onChange={(event) => setExportAgentId(event.target.value)}>
-                    {agents.map((agent) => (
+                  <select
+                    id="export-agent-select"
+                    value={exportAgentId}
+                    onChange={(event) => setExportAgentId(event.target.value)}
+                    disabled={agents.length === 0}
+                  >
+                    {agents.length === 0 ? (
+                      <option value="">
+                        {agentsLoading ? t('importExport.loadingAgents') : t('importExport.noAgentsAvailable')}
+                      </option>
+                    ) : agents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
                         {formatAgentNameLabel(t, agent.id, agent.name)}
                       </option>
@@ -980,6 +1082,33 @@ export default function ImportExport() {
               </button>
             </div>
           </div>
+
+          {exportSummary && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <h3 style={{ marginTop: 0 }}>{t('importExport.exportResultTitle')}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('importExport.exportResultScopeLabel')}</div>
+                  <div style={{ marginTop: 6, fontWeight: 600 }}>{formatExportScopeLabel(t, exportSummary.scope)}</div>
+                </div>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('importExport.exportResultFormatLabel')}</div>
+                  <div style={{ marginTop: 6, fontWeight: 600 }}>{formatExportFormatLabel(t, exportSummary.format)}</div>
+                </div>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('importExport.exportResultAgentsLabel')}</div>
+                  <div style={{ marginTop: 6, fontWeight: 600 }}>
+                    {t('importExport.exportResultSummary', { count: exportSummary.agents.length })}
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                {exportSummary.agents.length > 0
+                  ? exportSummary.agents.map((agent) => formatAgentNameLabel(t, agent.id, agent.name)).join(' / ')
+                  : t('importExport.exportResultUnknownAgents')}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

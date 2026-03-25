@@ -690,6 +690,9 @@ export function buildCanonicalExportBundle(
   opts: { scope: ExportScope; agent_id?: string },
 ): CanonicalExportBundle {
   const agentId = opts.scope === 'current_agent' ? (opts.agent_id || 'default') : undefined;
+  const allowedAgentIds = opts.scope === 'all_agents'
+    ? new Set(listExportEligibleAgentIds())
+    : new Set(agentId ? [agentId] : []);
   const totalRecords = getRecordsCount(agentId);
   const records = recordsV2.listRecords({
     ...(agentId ? { agent_id: agentId } : {}),
@@ -697,7 +700,9 @@ export function buildCanonicalExportBundle(
     limit: Math.max(50, totalRecords + 10),
     order_by: 'updated_at',
     order_dir: 'desc',
-  }).items;
+  }).items.filter((record) => (
+    allowedAgentIds.size === 0 || allowedAgentIds.has(record.agent_id)
+  ));
 
   const db = getDb();
   const relationWhere = agentId ? 'WHERE agent_id = ?' : '';
@@ -706,13 +711,12 @@ export function buildCanonicalExportBundle(
   const relations = relationsV2.listRelations({
     ...(agentId ? { agent_id: agentId } : {}),
     limit: Math.max(20, relationCount + 10),
-  }).items;
+  }).items.filter((relation) => (
+    allowedAgentIds.size === 0 || allowedAgentIds.has(relation.agent_id)
+  ));
 
-  const configuredAgentIds = opts.scope === 'all_agents'
-    ? listExportEligibleAgentIds()
-    : [];
   const agentIds = Array.from(new Set([
-    ...configuredAgentIds,
+    ...allowedAgentIds,
     ...records.map((record) => record.agent_id),
     ...relations.map((relation) => relation.agent_id),
     ...(agentId ? [agentId] : []),

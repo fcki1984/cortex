@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { closeDatabase, initDatabase } from '../src/db/index.js';
-import { ensureAgent, insertAgent } from '../src/db/agent-queries.js';
+import { deleteAgent, ensureAgent, insertAgent } from '../src/db/agent-queries.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import type { LLMProvider } from '../src/llm/interface.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
@@ -362,5 +362,41 @@ describe('V2 Import / Export', () => {
     });
 
     expect(bundle.agents.map((agent) => agent.id)).toContain('manual-empty-agent');
+  });
+
+  it('does not resurrect deleted agents or their truth data in all_agents export', async () => {
+    const { records, relations } = await createServices();
+
+    insertAgent({
+      id: 'deleted-export-agent',
+      name: 'Deleted Export Agent',
+      description: 'Created for export regression coverage',
+    });
+
+    await records.remember({
+      agent_id: 'deleted-export-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+    });
+
+    const deletedCandidates = relations.listCandidates({ agent_id: 'deleted-export-agent' });
+    expect(deletedCandidates.items).toHaveLength(1);
+    relations.confirmCandidate(deletedCandidates.items[0]!.id);
+
+    const deleted = deleteAgent('deleted-export-agent');
+    expect(deleted.deleted).toBe(true);
+
+    const bundle = buildCanonicalExportBundle(records, relations, {
+      scope: 'all_agents',
+    });
+
+    expect(bundle.agents.map((agent) => agent.id)).not.toContain('deleted-export-agent');
+    expect([
+      ...bundle.records.profile_rules,
+      ...bundle.records.fact_slots,
+      ...bundle.records.task_states,
+      ...bundle.records.session_notes,
+    ].map((record) => record.agent_id)).not.toContain('deleted-export-agent');
+    expect(bundle.confirmed_relations.map((relation) => relation.agent_id)).not.toContain('deleted-export-agent');
   });
 });

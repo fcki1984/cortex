@@ -124,15 +124,23 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
     try {
       const result = await withTimeout(Promise.resolve(handler(req, reply)), meta.timeoutMs, meta.route);
       const durationMs = Date.now() - startedAt;
+      const nearTimeout = durationMs >= Math.max(1000, Math.floor(meta.timeoutMs * 0.8));
       metrics.inc(`${meta.metricPrefix}_requests_total`, { route: meta.route, method: meta.method, status: 'ok' });
       metrics.observe(`${meta.metricPrefix}_latency_ms`, durationMs);
-      log.info({
+      const logPayload = {
         route: meta.route,
         method: meta.method,
         status_code: reply.statusCode || 200,
         duration_ms: durationMs,
+        timeout_ms: meta.timeoutMs,
+        near_timeout: nearTimeout,
         agent_id: agentId,
-      }, 'Observed route completed');
+      };
+      if (nearTimeout) {
+        log.warn(logPayload, 'Observed route near timeout');
+      } else {
+        log.info(logPayload, 'Observed route completed');
+      }
       return result;
     } catch (error) {
       const durationMs = Date.now() - startedAt;
@@ -150,6 +158,8 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
         method: meta.method,
         status_code: classified.statusCode,
         duration_ms: durationMs,
+        timeout_ms: meta.timeoutMs,
+        timed_out: classified.category.endsWith('timeout'),
         agent_id: agentId,
         category: classified.category,
         error: classified.details,

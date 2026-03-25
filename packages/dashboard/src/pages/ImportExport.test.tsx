@@ -164,4 +164,57 @@ describe('ImportExport page', () => {
 
     expect(await screen.findByText('导出文件已生成')).toBeTruthy();
   });
+
+  it('recovers agent loading in-page without losing the current draft', async () => {
+    const user = userEvent.setup();
+    apiMocks.listAgents.mockReset();
+    apiMocks.listAgents
+      .mockRejectedValueOnce(new Error('API timeout after 20000ms: /api/v2/agents'))
+      .mockResolvedValueOnce({
+        agents: [
+          { id: 'default', name: '默认智能体' },
+          { id: 'mcp', name: 'MCP' },
+        ],
+      });
+
+    renderPage();
+
+    const sourceInput = screen.getByLabelText('来源内容');
+    await user.type(sourceInput, '请用中文回答');
+
+    expect(await screen.findByText('智能体列表加载失败，请在页面内重试。')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '重试加载智能体' }));
+
+    await screen.findByLabelText('目标智能体');
+    expect((screen.getByLabelText('来源内容') as HTMLTextAreaElement).value).toBe('请用中文回答');
+  });
+
+  it('shows the exported agent scope summary after export completes', async () => {
+    const user = userEvent.setup();
+    apiMocks.exportBundleV2.mockResolvedValue({
+      schema_version: 'cortex_v2_export',
+      scope: 'all_agents',
+      agents: [
+        { id: 'default', name: '默认智能体' },
+        { id: 'mcp', name: 'MCP' },
+      ],
+      records: {
+        profile_rules: [],
+        fact_slots: [],
+        task_states: [],
+        session_notes: [],
+      },
+      confirmed_relations: [],
+    });
+
+    renderPage();
+
+    await screen.findByLabelText('目标智能体');
+    await user.click(screen.getByRole('button', { name: '导出' }));
+    await user.selectOptions(screen.getByLabelText('导出范围'), 'all_agents');
+    await user.click(screen.getByRole('button', { name: '开始导出' }));
+
+    expect(await screen.findByText('导出结果')).toBeTruthy();
+    expect(screen.getByText('本次导出覆盖 2 个智能体。')).toBeTruthy();
+  });
 });

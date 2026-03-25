@@ -7,6 +7,7 @@ import type { CortexApp } from '../app.js';
 import type { Memory } from '../db/queries.js';
 import type { SearchResult } from '../search/hybrid.js';
 import { restartLifecycleScheduler } from '../core/scheduler.js';
+import { observedRoute } from './observability.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -292,7 +293,12 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   });
 
   // Health check (?refresh=true to bypass release cache)
-  app.get('/api/v2/health', async (req) => {
+  app.get('/api/v2/health', observedRoute({
+    route: '/api/v2/health',
+    method: 'GET',
+    timeoutMs: 8000,
+    metricPrefix: 'v2_route',
+  }, async (req) => {
     const query = req.query as any;
     const releaseRepo = getReleaseRepo();
     const latest = query.refresh === 'true'
@@ -312,7 +318,7 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
-  });
+  }));
 
   // Trigger self-update: pull latest image + recreate container
   // Requires: docker socket + docker-compose.yml mounted (see docker-compose.yml)

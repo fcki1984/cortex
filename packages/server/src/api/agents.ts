@@ -2,12 +2,18 @@ import type { FastifyInstance } from 'fastify';
 import { listAgents, getAgentById, getAgentStats, insertAgent, updateAgent, deleteAgent } from '../db/agent-queries.js';
 import { getConfig } from '../utils/config.js';
 import { createLogger } from '../utils/logger.js';
+import { observedRoute } from './observability.js';
 
 const log = createLogger('agents');
 
 export function registerAgentRoutes(app: FastifyInstance): void {
   // List all agents
-  app.get('/api/v2/agents', async () => {
+  app.get('/api/v2/agents', observedRoute({
+    route: '/api/v2/agents',
+    method: 'GET',
+    timeoutMs: 20000,
+    metricPrefix: 'v2_route',
+  }, async () => {
     const agents = listAgents();
     return {
       agents: agents.map(a => ({
@@ -15,7 +21,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
         config_override: a.config_override ? maskConfigKeys(JSON.parse(a.config_override)) : null,
       })),
     };
-  });
+  }));
 
   // Get agent by ID
   app.get('/api/v2/agents/:id', async (req, reply) => {
