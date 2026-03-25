@@ -22,6 +22,14 @@ Rules:
 9. Prefer durable records only for explicit user truth, user-confirmed constraints, or explicit task/project state. Implementation details and vague plans stay session_note.
 10. For response constraints such as language, brevity, style, or "keep answers within N sentences", prefer profile_rule with a stable attribute_key over session_note.
 
+Reference examples:
+- "请用中文回答" -> profile_rule(subject_key=user, attribute_key=language_preference)
+- "请把回答控制在三句话内" -> profile_rule(subject_key=user, attribute_key=response_length)
+- "我在 OpenAI 工作" -> fact_slot(entity_key=user, attribute_key=organization)
+- "当前任务是重构 Cortex recall" -> task_state(subject_key=cortex, state_key=refactor_status)
+- "最近也许会考虑换方案" -> session_note
+- Do not convert vague implementation chatter or tentative plans into durable records.
+
 Output JSON only:
 {
   "records": [

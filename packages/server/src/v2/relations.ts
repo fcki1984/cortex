@@ -497,6 +497,32 @@ export class CortexRelationsV2 {
     return result.changes > 0;
   }
 
+  deletePendingCandidateForTriple(input: {
+    agent_id: string;
+    source_record_id: string;
+    subject_key: string;
+    predicate: string;
+    object_key: string;
+  }): number {
+    const db = getDb();
+    const result = db.prepare(`
+      DELETE FROM relation_candidates_v2
+      WHERE agent_id = ?
+        AND source_record_id = ?
+        AND subject_key = ?
+        AND predicate = ?
+        AND object_key = ?
+        AND status = 'pending'
+    `).run(
+      input.agent_id,
+      input.source_record_id,
+      normalizeKey(input.subject_key),
+      normalizePredicate(input.predicate),
+      normalizeKey(input.object_key),
+    );
+    return result.changes;
+  }
+
   createDerivedCandidates(recordId: string): V2RelationCandidate[] {
     const record = getRecordById(recordId);
     if (!record || record.kind !== 'fact_slot') return [];

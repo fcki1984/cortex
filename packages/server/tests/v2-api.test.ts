@@ -1262,6 +1262,9 @@ describe('API V2 Integration', () => {
       },
     });
     expect(confirmed.statusCode).toBe(201);
+    const confirmedBody = JSON.parse(confirmed.payload);
+    expect(confirmedBody.summary.relation_candidates_created).toBe(0);
+    expect(confirmedBody.summary.confirmed_relations_restored).toBe(1);
 
     const recalled = await app.inject({
       method: 'POST',
@@ -1281,6 +1284,14 @@ describe('API V2 Integration', () => {
     expect(importedRelationsBody.items).toHaveLength(1);
     expect(importedRelationsBody.items[0]?.source_record?.content).toContain('大阪');
     expect(importedRelationsBody.items[0]?.source_evidence?.content).toContain('我住大阪');
+
+    const importedCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-export-roundtrip-target&status=pending',
+    });
+    expect(importedCandidates.statusCode).toBe(200);
+    const importedCandidatesBody = JSON.parse(importedCandidates.payload);
+    expect(importedCandidatesBody.items).toHaveLength(0);
   });
 
   it('exports built-in agents for all_agents scope even when there are no records', async () => {

@@ -496,6 +496,7 @@ export class CortexRecordsV2 {
   async commitNormalizedCandidate(
     normalized: NormalizedRecordCandidate,
     evidence: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }> = [],
+    opts: { deriveRelationCandidates?: boolean } = {},
   ): Promise<RecordUpsertResult> {
     const result = upsertRecord({
       ...normalized.candidate,
@@ -504,7 +505,9 @@ export class CortexRecordsV2 {
     if (evidence.length > 0) {
       insertEvidence(result.record.id, normalized.candidate.agent_id, normalized.candidate.source_type, evidence);
     }
-    this.createDerivedRelationCandidatesIfNeeded(result.record);
+    if (opts.deriveRelationCandidates !== false) {
+      this.createDerivedRelationCandidatesIfNeeded(result.record);
+    }
     await this.indexRecord(result.record);
     return result;
   }

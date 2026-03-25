@@ -789,8 +789,16 @@ export async function confirmImport(
   const skipped: Array<Record<string, unknown>> = [];
   const failed: Array<Record<string, unknown>> = [];
   const recordMap = new Map<string, { record_id: string }>();
+  const confirmedRestoreBySourceCandidate = new Map<string, PreviewRelationCandidate[]>();
   let relationCandidatesCreated = 0;
   let confirmedRelationsRestored = 0;
+
+  for (const relation of input.relation_candidates || []) {
+    if (!relation?.selected || relation.mode !== 'confirmed_restore' || !relation.source_candidate_id) continue;
+    const current = confirmedRestoreBySourceCandidate.get(relation.source_candidate_id) || [];
+    current.push(relation);
+    confirmedRestoreBySourceCandidate.set(relation.source_candidate_id, current);
+  }
 
   for (const candidate of input.record_candidates || []) {
     if (!candidate?.selected) {
@@ -821,6 +829,9 @@ export async function confirmImport(
       const result = await recordsV2.commitNormalizedCandidate(
         normalized,
         normalizeEvidence(candidate.evidence, candidate.content, candidate.source_type),
+        {
+          deriveRelationCandidates: !confirmedRestoreBySourceCandidate.has(candidate.candidate_id),
+        },
       );
       recordMap.set(candidate.candidate_id, { record_id: result.record.id });
       committed.push({
@@ -871,6 +882,13 @@ export async function confirmImport(
           metadata: {
             imported_mode: relation.mode,
           },
+        });
+        relationsV2.deletePendingCandidateForTriple({
+          agent_id: input.agent_id,
+          source_record_id: sourceRef.record_id,
+          subject_key: relation.subject_key,
+          predicate: relation.predicate,
+          object_key: relation.object_key,
         });
         confirmedRelationsRestored++;
         committed.push({

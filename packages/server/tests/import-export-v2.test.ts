@@ -3,8 +3,9 @@ import { closeDatabase, initDatabase } from '../src/db/index.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import type { LLMProvider } from '../src/llm/interface.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
+import { V2_EXTRACTION_SYSTEM_PROMPT } from '../src/v2/prompts.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
-import { buildCanonicalExportBundle, previewImport } from '../src/v2/import-export.js';
+import { buildCanonicalExportBundle, confirmImport, previewImport } from '../src/v2/import-export.js';
 
 function createMockEmbedding(): EmbeddingProvider {
   return {
@@ -53,6 +54,14 @@ afterEach(() => {
 });
 
 describe('V2 Import / Export', () => {
+  it('documents the v2 extraction contract with stable and tentative examples', () => {
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('请用中文回答');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('请把回答控制在三句话内');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('我在 OpenAI 工作');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('当前任务是重构 Cortex recall');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('最近也许会考虑换方案');
+  });
+
   it('uses deep extraction for plain text preview candidates', async () => {
     const { records } = await createServices();
 
@@ -116,6 +125,42 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates[0]?.mode).toBe('confirmed_restore');
   });
 
+  it('restores confirmed relations without leaving duplicate pending candidates after import confirm', async () => {
+    const { records, relations } = await createServices();
+
+    await records.remember({
+      agent_id: 'canonical-export-source',
+      kind: 'fact_slot',
+      content: '我住大阪',
+    });
+
+    const sourceCandidates = relations.listCandidates({ agent_id: 'canonical-export-source' });
+    expect(sourceCandidates.items).toHaveLength(1);
+    relations.confirmCandidate(sourceCandidates.items[0]!.id);
+
+    const bundle = buildCanonicalExportBundle(records, relations, {
+      scope: 'current_agent',
+      agent_id: 'canonical-export-source',
+    });
+
+    const preview = await previewImport(records, {
+      agent_id: 'canonical-export-target',
+      format: 'json',
+      content: JSON.stringify(bundle),
+    });
+
+    const confirmed = await confirmImport(records, relations, {
+      agent_id: 'canonical-export-target',
+      record_candidates: preview.record_candidates,
+      relation_candidates: preview.relation_candidates,
+    });
+
+    expect(confirmed.summary.relation_candidates_created).toBe(0);
+    expect(confirmed.summary.confirmed_relations_restored).toBe(1);
+    expect(relations.listRelations({ agent_id: 'canonical-export-target' }).items).toHaveLength(1);
+    expect(relations.listCandidates({ agent_id: 'canonical-export-target', status: 'pending' }).items).toHaveLength(0);
+  });
+
   it('only derives relation candidates from stable fact slots', async () => {
     const { records, relations } = await createServices();
 
@@ -127,5 +172,28 @@ describe('V2 Import / Export', () => {
 
     const candidates = relations.listCandidates({ agent_id: 'relation-contract-agent' });
     expect(candidates.items).toHaveLength(0);
+  });
+
+  it('keeps organization facts durable and tentative ideas as session notes in text preview', async () => {
+    const { records } = await createServices();
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-mixed',
+      format: 'text',
+      content: [
+        '我在 OpenAI 工作',
+        '最近也许会考虑换方案',
+      ].join('\n'),
+    });
+
+    expect(preview.record_candidates).toHaveLength(2);
+    expect(preview.record_candidates[0]?.requested_kind).toBe('fact_slot');
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('fact_slot');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('organization');
+    expect(preview.record_candidates[1]?.requested_kind).toBe('session_note');
+    expect(preview.record_candidates[1]?.normalized_kind).toBe('session_note');
+    expect(preview.relation_candidates).toHaveLength(1);
+    expect(preview.relation_candidates[0]?.predicate).toBe('works_at');
+    expect(preview.relation_candidates[0]?.object_key).toBe('openai');
   });
 });
