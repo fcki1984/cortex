@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import fs from 'node:fs';
@@ -11,6 +11,11 @@ import { getSchedulerStatus, startLifecycleScheduler, stopLifecycleScheduler } f
 describe('API Integration', () => {
   let app: FastifyInstance;
   let cortex: CortexApp;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   beforeAll(async () => {
     const config = loadConfig({
@@ -65,13 +70,40 @@ describe('API Integration', () => {
   });
 
   describe('GET /api/v2/health', () => {
-    it('should return health status', async () => {
+    it('should return local health status without blocking on GitHub release checks', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('should not reach GitHub on default health checks'));
+      vi.stubGlobal('fetch', fetchMock);
+
       const res = await app.inject({ method: 'GET', url: '/api/v2/health' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.status).toBe('ok');
       expect(body.version).toBe('1.0.0');
       expect(body.github).toBe('https://github.com/fcki1984/cortex');
+      expect(body.latestRelease).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should only refresh latest release metadata when refresh=true is requested', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        tag_name: 'v1.2.3',
+        html_url: 'https://github.com/fcki1984/cortex/releases/tag/v1.2.3',
+        published_at: '2026-03-25T00:00:00.000Z',
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await app.inject({ method: 'GET', url: '/api/v2/health?refresh=true' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(body.latestRelease).toMatchObject({
+        version: '1.2.3',
+        url: 'https://github.com/fcki1984/cortex/releases/tag/v1.2.3',
+        publishedAt: '2026-03-25T00:00:00.000Z',
+      });
     });
   });
 

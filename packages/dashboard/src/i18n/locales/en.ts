@@ -152,6 +152,8 @@ export default {
     sourceFormat: 'Source Format',
     formatText: 'Plain Text',
     uploadOrPaste: 'Upload a file or paste content',
+    chooseFile: 'Choose File',
+    noFileChosen: 'No file chosen',
     fileLoaded: 'Loaded file: {{filename}}',
     fileSelected: 'Selected file: {{filename}}',
     fileHint: 'Supports JSON, MEMORY.md, and plain text. You can also paste content directly below.',

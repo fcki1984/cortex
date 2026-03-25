@@ -33,6 +33,73 @@ const V2 = {
   feedback: '/api/v2/feedback',
 } as const;
 const TOKEN_KEY = 'cortex_auth_token';
+const DEFAULT_READ_TIMEOUT_MS = 8000;
+const HEAVY_READ_TIMEOUT_MS = 20000;
+const WRITE_TIMEOUT_MS = 15000;
+const MAX_NETWORK_RETRIES = 1;
+
+type RequestPolicy = {
+  timeoutMs: number;
+  retryable: boolean;
+};
+
+function stripQuery(path: string): string {
+  return path.split('?')[0] || path;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'AbortError' || error.message.toLowerCase().includes('aborted');
+}
+
+function isRetryableNetworkError(error: unknown): boolean {
+  if (isAbortError(error)) return true;
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('fetch failed') || message.includes('network') || message.includes('timeout');
+}
+
+function buildRequestPolicy(path: string, opts?: RequestInit): RequestPolicy {
+  const method = (opts?.method || 'GET').toUpperCase();
+  const normalizedPath = stripQuery(path);
+  const isHeavyRead = (
+    (method === 'GET' && (
+      normalizedPath === V2.export ||
+      normalizedPath === V2.agents ||
+      normalizedPath === V2.extractionLogs ||
+      normalizedPath === V2.records ||
+      normalizedPath === V2.relationCandidates ||
+      normalizedPath === V2.relations ||
+      path.includes('refresh=true')
+    )) ||
+    (method === 'POST' && path === V2.importPreview)
+  );
+
+  return {
+    timeoutMs: method === 'GET'
+      ? (isHeavyRead ? HEAVY_READ_TIMEOUT_MS : DEFAULT_READ_TIMEOUT_MS)
+      : (normalizedPath === V2.importPreview ? HEAVY_READ_TIMEOUT_MS : WRITE_TIMEOUT_MS),
+    retryable: method === 'GET' || path === V2.importPreview,
+  };
+}
+
+function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(timer),
+  };
+}
+
+async function parseJsonResponse(res: Response) {
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
 
 // ============ Token Management ============
 
@@ -125,19 +192,40 @@ async function request(path: string, opts?: RequestInit) {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  const policy = buildRequestPolicy(path, opts);
 
-  const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401 || res.status === 403) {
-    // Token invalid or expired — clear and trigger re-login
-    clearStoredToken();
-    window.dispatchEvent(new CustomEvent('cortex:auth-expired'));
-    throw new Error(`API ${res.status}: Unauthorized`);
+  for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt += 1) {
+    const timeout = createTimeoutSignal(policy.timeoutMs);
+    try {
+      const res = await fetch(path, { ...opts, headers, signal: timeout.signal });
+      timeout.cancel();
+
+      if (res.status === 401 || res.status === 403) {
+        clearStoredToken();
+        window.dispatchEvent(new CustomEvent('cortex:auth-expired'));
+        throw new Error(`API ${res.status}: Unauthorized`);
+      }
+      if (!res.ok) {
+        if (policy.retryable && attempt < MAX_NETWORK_RETRIES && isRetryableStatus(res.status)) {
+          continue;
+        }
+        const body = await res.text();
+        throw new Error(`API ${res.status}: ${body}`);
+      }
+      return parseJsonResponse(res);
+    } catch (error) {
+      timeout.cancel();
+      if (policy.retryable && attempt < MAX_NETWORK_RETRIES && isRetryableNetworkError(error)) {
+        continue;
+      }
+      if (isAbortError(error)) {
+        throw new Error(`API timeout after ${policy.timeoutMs}ms: ${path}`);
+      }
+      throw error;
+    }
   }
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API ${res.status}: ${body}`);
-  }
-  return res.json();
+
+  throw new Error(`API request failed after retry: ${path}`);
 }
 
 // Health

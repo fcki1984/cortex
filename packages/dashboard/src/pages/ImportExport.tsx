@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import {
   confirmImportV2,
   exportBundleV2,
@@ -151,6 +151,7 @@ export default function ImportExport() {
   const [confirming, setConfirming] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const fileInputId = useId();
 
   useEffect(() => {
     listAgents()
@@ -384,14 +385,34 @@ export default function ImportExport() {
             <div className="form-group">
               <label>{t('importExport.uploadOrPaste')}</label>
               <input
+                id={fileInputId}
                 type="file"
                 accept=".json,.md,.markdown,.txt,text/plain,application/json"
                 onChange={(event) => void handleSourceFile(event.target.files?.[0] || null)}
+                style={{
+                  position: 'absolute',
+                  width: 1,
+                  height: 1,
+                  padding: 0,
+                  margin: -1,
+                  overflow: 'hidden',
+                  clip: 'rect(0, 0, 0, 0)',
+                  whiteSpace: 'nowrap',
+                  border: 0,
+                }}
               />
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label htmlFor={fileInputId} className="btn" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                  {t('importExport.chooseFile')}
+                </label>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {sourceFilename
+                    ? t('importExport.fileSelected', { filename: sourceFilename })
+                    : t('importExport.noFileChosen')}
+                </span>
+              </div>
               <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                {sourceFilename
-                  ? t('importExport.fileSelected', { filename: sourceFilename })
-                  : t('importExport.fileHint')}
+                {t('importExport.fileHint')}
               </div>
             </div>
 
@@ -455,7 +476,7 @@ export default function ImportExport() {
                 </div>
                 {preview.warnings.length > 0 && (
                   <div style={{ marginTop: 12, fontSize: 12, color: '#fbbf24' }}>
-                    {preview.warnings.join(' · ')}
+                    {preview.warnings.map((warning) => formatReasonCodeLabel(t, warning)).join(' · ')}
                   </div>
                 )}
               </div>
@@ -784,7 +805,7 @@ export default function ImportExport() {
                           </div>
                           {candidate.warnings.length > 0 && (
                             <div style={{ marginTop: 6, color: '#fbbf24' }}>
-                              <strong>{t('importExport.warnings')}:</strong> {candidate.warnings.join(' · ')}
+                              <strong>{t('importExport.warnings')}:</strong> {candidate.warnings.map((warning) => formatReasonCodeLabel(t, warning)).join(' · ')}
                             </div>
                           )}
                         </div>

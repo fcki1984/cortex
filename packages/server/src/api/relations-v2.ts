@@ -1,5 +1,19 @@
 import type { FastifyInstance } from 'fastify';
+import { Readable } from 'node:stream';
 import type { CortexApp } from '../app.js';
+
+function normalizeEmptyJsonBody(req: any, payload: any, done: any): void {
+  const contentType = String(req.headers['content-type'] || '');
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (!contentType.includes('application/json') || contentLength !== 0) {
+    done(null, payload);
+    return;
+  }
+
+  const replacement = Readable.from(['{}']);
+  (replacement as any).receivedEncodedLength = 2;
+  done(null, replacement);
+}
 
 export function registerV2RelationsRoutes(app: FastifyInstance, cortex: CortexApp): void {
   app.get('/api/v2/relation-candidates', async (req) => {
@@ -49,16 +63,22 @@ export function registerV2RelationsRoutes(app: FastifyInstance, cortex: CortexAp
     return candidate;
   });
 
-  app.post('/api/v2/relation-candidates/:id/confirm', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const confirmed = cortex.relationsV2.confirmCandidate(id);
-    if (!confirmed) {
-      reply.code(404);
-      return { error: 'Relation candidate not found' };
-    }
-    reply.code(201);
-    return confirmed;
-  });
+  app.post(
+    '/api/v2/relation-candidates/:id/confirm',
+    {
+      preParsing: (req, _reply, payload, done) => normalizeEmptyJsonBody(req, payload, done),
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const confirmed = cortex.relationsV2.confirmCandidate(id);
+      if (!confirmed) {
+        reply.code(404);
+        return { error: 'Relation candidate not found' };
+      }
+      reply.code(201);
+      return confirmed;
+    },
+  );
 
   app.delete('/api/v2/relation-candidates/:id', async (req, reply) => {
     const { id } = req.params as { id: string };

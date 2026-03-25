@@ -9,6 +9,7 @@ const README = path.join(ROOT, 'README.md');
 const README_ZH = path.join(ROOT, 'README.zh-CN.md');
 const RELEASE_PLAN = path.join(ROOT, 'RELEASE_TEST_PLAN.md');
 const SERVER_INDEX = path.join(ROOT, 'packages/server/src/index.ts');
+const SMOKE_SCRIPT = path.join(ROOT, 'scripts/smoke-v2.mjs');
 
 describe('Platform surface migration', () => {
   it('moves the OpenClaw bridge off legacy v1 endpoints', () => {
@@ -69,5 +70,15 @@ describe('Platform surface migration', () => {
     expect(releasePlan).toContain('http://localhost:18790/chat?session=main');
     expect(releasePlan).toContain('/cortex_status');
     expect(releasePlan).toContain('/cortex_remember 请用中文回答');
+  });
+
+  it('supports the three-run smoke gate used by release validation', () => {
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+    const releasePlan = fs.readFileSync(RELEASE_PLAN, 'utf8');
+
+    expect(smoke).toContain('SMOKE_ROUNDS');
+    expect(smoke).toContain('for (let round = 1; round <= smokeRounds; round += 1)');
+    expect(releasePlan).toContain('smoke:v2');
+    expect(releasePlan).toContain('3');
   });
 });

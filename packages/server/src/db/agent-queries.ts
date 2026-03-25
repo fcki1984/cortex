@@ -20,6 +20,7 @@ export interface AgentWithCount extends Agent {
 const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$|^[a-z0-9]{2}$/;
 
 const BUILT_IN_AGENTS = ['default', 'mcp'];
+export const AUTO_CREATED_AGENT_DESCRIPTION = 'Auto-created from first API request';
 
 // ============ Auto-provision ============
 
@@ -40,7 +41,7 @@ export function ensureAgent(agentId: string): void {
   db.prepare(`
     INSERT OR IGNORE INTO agents (id, name, description)
     VALUES (?, ?, ?)
-  `).run(agentId, agentId, `Auto-created from first API request`);
+  `).run(agentId, agentId, AUTO_CREATED_AGENT_DESCRIPTION);
 }
 
 // ============ Agent Queries ============

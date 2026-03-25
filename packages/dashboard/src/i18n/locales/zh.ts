@@ -152,6 +152,8 @@ export default {
     sourceFormat: '来源格式',
     formatText: '纯文本',
     uploadOrPaste: '上传文件或直接粘贴内容',
+    chooseFile: '选择文件',
+    noFileChosen: '未选择文件',
     fileLoaded: '已载入文件：{{filename}}',
     fileSelected: '当前文件：{{filename}}',
     fileHint: '支持 JSON、MEMORY.md、纯文本。也可以直接在下方文本框粘贴内容。',

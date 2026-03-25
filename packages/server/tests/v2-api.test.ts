@@ -1305,4 +1305,40 @@ describe('API V2 Integration', () => {
     expect(body.scope).toBe('all_agents');
     expect(body.agents.map((agent: any) => agent.id)).toEqual(expect.arrayContaining(['default', 'mcp']));
   });
+
+  it('accepts relation candidate confirmation with an empty JSON body for client compatibility', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-v2-confirm-empty-json-body',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const candidateList = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-v2-confirm-empty-json-body',
+    });
+    expect(candidateList.statusCode).toBe(200);
+    const candidateBody = JSON.parse(candidateList.payload);
+    expect(candidateBody.items).toHaveLength(1);
+
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: `/api/v2/relation-candidates/${candidateBody.items[0].id}/confirm`,
+      headers: { 'content-type': 'application/json' },
+      payload: '',
+    });
+    expect(confirmed.statusCode).toBe(201);
+
+    const relations = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relations?agent_id=api-v2-confirm-empty-json-body',
+    });
+    expect(relations.statusCode).toBe(200);
+    expect(JSON.parse(relations.payload).items).toHaveLength(1);
+  });
 });

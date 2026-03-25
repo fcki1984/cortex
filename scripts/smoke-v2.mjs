@@ -2,7 +2,8 @@
 
 const rawBaseUrl = process.env.CORTEX_BASE_URL || process.env.CORTEX_URL || process.argv[2] || 'http://localhost:21100';
 const authToken = process.env.CORTEX_AUTH_TOKEN || '';
-const agentId = process.env.CORTEX_AGENT_ID || `smoke-v2-${Date.now()}`;
+const baseAgentId = process.env.CORTEX_AGENT_ID || `smoke-v2-${Date.now()}`;
+const smokeRounds = Math.max(1, Number(process.env.SMOKE_ROUNDS || process.argv[3] || '1'));
 
 function normalizeBaseUrl(rawUrl) {
   const trimmed = rawUrl.trim().replace(/\/+$/, '');
@@ -44,7 +45,11 @@ function logStep(label, detail) {
   process.stdout.write(`- ${label}${detail ? `: ${detail}` : ''}\n`);
 }
 
-async function cleanup() {
+function getAgentId(round) {
+  return smokeRounds === 1 ? baseAgentId : `${baseAgentId}-r${round}`;
+}
+
+async function cleanup(agentId) {
   const listed = await request('GET', `/api/v2/records?agent_id=${encodeURIComponent(agentId)}&limit=100`);
   if (!listed.response.ok || !listed.json?.items) return;
   for (const item of listed.json.items) {
@@ -52,8 +57,9 @@ async function cleanup() {
   }
 }
 
-async function main() {
-  process.stdout.write(`Cortex V2 smoke test -> ${baseUrl} (agent: ${agentId})\n`);
+async function runRound(round) {
+  const agentId = getAgentId(round);
+  process.stdout.write(`Cortex V2 smoke test -> ${baseUrl} (agent: ${agentId}, round ${round}/${smokeRounds})\n`);
 
   const stats = await request('GET', '/api/v2/stats');
   assert(stats.response.status === 200, `GET /api/v2/stats returned ${stats.response.status}`);
@@ -138,15 +144,23 @@ async function main() {
   assert(primaryText === compatText, 'MCP search result differs between /mcp and /mcp/message');
   logStep('MCP', 'primary and compat JSON-RPC endpoints behave identically');
 
-  await cleanup();
+  await cleanup(agentId);
   logStep('cleanup', 'removed smoke records');
-  process.stdout.write('Smoke test passed.\n');
+}
+
+async function main() {
+  for (let round = 1; round <= smokeRounds; round += 1) {
+    await runRound(round);
+  }
+  process.stdout.write(`Smoke test passed (${smokeRounds} rounds).\n`);
 }
 
 main().catch(async (error) => {
   process.stderr.write(`Smoke test failed: ${error.message}\n`);
   try {
-    await cleanup();
+    for (let round = 1; round <= smokeRounds; round += 1) {
+      await cleanup(getAgentId(round));
+    }
   } catch {}
   process.exit(1);
 });

@@ -21,6 +21,7 @@ const MEMORY_DETAIL_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/
 const SETTINGS_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/index.tsx');
 const DATA_MANAGEMENT_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/Settings/sections/DataManagement.tsx');
 const APP_SOURCE = path.resolve(__dirname, '../../dashboard/src/App.tsx');
+const IMPORT_EXPORT_SOURCE = path.resolve(__dirname, '../../dashboard/src/pages/ImportExport.tsx');
 
 describe('Dashboard Integration', () => {
   const distExists = fs.existsSync(DASHBOARD_DIST);
@@ -265,6 +266,27 @@ describe('Dashboard Integration', () => {
       const src = fs.readFileSync(APP_SOURCE, 'utf-8');
       expect(src).not.toContain('⬆️ 立即更新');
       expect(src).not.toContain('⬆️ Update now');
+    });
+
+    it('should use a unified request helper with timeout and retry guards for v2 pages', () => {
+      const client = fs.readFileSync(CLIENT_SOURCE, 'utf-8');
+      expect(client).toContain('AbortController');
+      expect(client).toContain('const DEFAULT_READ_TIMEOUT_MS = 8000;');
+      expect(client).toContain('const HEAVY_READ_TIMEOUT_MS = 20000;');
+      expect(client).toContain('const WRITE_TIMEOUT_MS = 15000;');
+      expect(client).toContain('const MAX_NETWORK_RETRIES = 1;');
+      expect(client).toContain("path === V2.importPreview");
+    });
+
+    it('should provide a Chinese-first custom file picker on the import/export page', () => {
+      const src = fs.readFileSync(IMPORT_EXPORT_SOURCE, 'utf-8');
+      const zh = fs.readFileSync(ZH_LOCALE, 'utf-8');
+
+      expect(src).toContain("t('importExport.chooseFile')");
+      expect(src).toContain("t('importExport.noFileChosen')");
+      expect(src).not.toContain('Choose File');
+      expect(zh).toContain("chooseFile: '选择文件'");
+      expect(zh).toContain("noFileChosen: '未选择文件'");
     });
 
     it('should remove hardcoded English labels from Memory Browser', () => {

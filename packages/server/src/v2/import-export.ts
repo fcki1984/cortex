@@ -1,4 +1,4 @@
-import { getAgentById, listAgents } from '../db/agent-queries.js';
+import { AUTO_CREATED_AGENT_DESCRIPTION, getAgentById, listAgents } from '../db/agent-queries.js';
 import { getDb } from '../db/connection.js';
 import { ensureAgent } from '../db/index.js';
 import { normalizeEntity } from '../utils/helpers.js';
@@ -656,6 +656,31 @@ function exportedAgentsFromIds(agentIds: string[]): ExportedAgent[] {
   });
 }
 
+function listExportEligibleAgentIds(): string[] {
+  const db = getDb();
+
+  return listAgents()
+    .filter((agent) => {
+      if (agent.id === 'default' || agent.id === 'mcp') return true;
+      if (agent.name !== agent.id) return true;
+      if (agent.description !== AUTO_CREATED_AGENT_DESCRIPTION) return true;
+      if (agent.config_override) return true;
+
+      const recordCount = (db.prepare('SELECT COUNT(*) as cnt FROM record_registry WHERE agent_id = ?').get(agent.id) as { cnt: number }).cnt;
+      if (recordCount > 0) return true;
+
+      const relationCount = (db.prepare('SELECT COUNT(*) as cnt FROM record_relations_v2 WHERE agent_id = ?').get(agent.id) as { cnt: number }).cnt;
+      if (relationCount > 0) return true;
+
+      const candidateCount = (db.prepare('SELECT COUNT(*) as cnt FROM relation_candidates_v2 WHERE agent_id = ?').get(agent.id) as { cnt: number }).cnt;
+      if (candidateCount > 0) return true;
+
+      const feedbackCount = (db.prepare('SELECT COUNT(*) as cnt FROM record_feedback_v2 WHERE agent_id = ?').get(agent.id) as { cnt: number }).cnt;
+      return feedbackCount > 0;
+    })
+    .map((agent) => agent.id);
+}
+
 export function buildCanonicalExportBundle(
   recordsV2: CortexRecordsV2,
   relationsV2: CortexRelationsV2,
@@ -681,7 +706,7 @@ export function buildCanonicalExportBundle(
   }).items;
 
   const configuredAgentIds = opts.scope === 'all_agents'
-    ? listAgents().map((agent) => agent.id)
+    ? listExportEligibleAgentIds()
     : [];
   const agentIds = Array.from(new Set([
     ...configuredAgentIds,

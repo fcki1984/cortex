@@ -64,6 +64,12 @@ function getUpdateImage(repo = getReleaseRepo()): string {
 let latestReleaseCache: { repo: string; tag: string; url: string; publishedAt: string; checkedAt: number } | null = null;
 const RELEASE_CHECK_INTERVAL = 30 * 60 * 1000;
 
+function getCachedLatestRelease(repo = getReleaseRepo()): typeof latestReleaseCache {
+  if (!latestReleaseCache) return null;
+  if (latestReleaseCache.repo !== repo) return null;
+  return latestReleaseCache;
+}
+
 function isSectionChanged(section: string, current: any, updated: any): boolean {
   switch (section) {
     case 'auth':
@@ -289,7 +295,9 @@ export function registerSystemRoutes(app: FastifyInstance, cortex: CortexApp): v
   app.get('/api/v2/health', async (req) => {
     const query = req.query as any;
     const releaseRepo = getReleaseRepo();
-    const latest = await getLatestRelease(query.refresh === 'true', releaseRepo);
+    const latest = query.refresh === 'true'
+      ? await getLatestRelease(true, releaseRepo)
+      : getCachedLatestRelease(releaseRepo);
     const latestVersion = latest?.tag?.replace(/^v/, '') ?? null;
     return {
       status: 'ok',

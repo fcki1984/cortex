@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { closeDatabase, initDatabase } from '../src/db/index.js';
+import { ensureAgent, insertAgent } from '../src/db/agent-queries.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import type { LLMProvider } from '../src/llm/interface.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
@@ -195,5 +196,35 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('works_at');
     expect(preview.relation_candidates[0]?.object_key).toBe('openai');
+  });
+
+  it('excludes auto-created empty agents from all_agents export', async () => {
+    const { records, relations } = await createServices();
+
+    ensureAgent('probe-empty-agent');
+
+    const bundle = buildCanonicalExportBundle(records, relations, {
+      scope: 'all_agents',
+    });
+
+    const agentIds = bundle.agents.map((agent) => agent.id);
+    expect(agentIds).toEqual(expect.arrayContaining(['default', 'mcp']));
+    expect(agentIds).not.toContain('probe-empty-agent');
+  });
+
+  it('keeps manually created empty agents in all_agents export', async () => {
+    const { records, relations } = await createServices();
+
+    insertAgent({
+      id: 'manual-empty-agent',
+      name: 'Manual Empty Agent',
+      description: 'Created intentionally for export scope',
+    });
+
+    const bundle = buildCanonicalExportBundle(records, relations, {
+      scope: 'all_agents',
+    });
+
+    expect(bundle.agents.map((agent) => agent.id)).toContain('manual-empty-agent');
   });
 });

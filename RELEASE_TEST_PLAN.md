@@ -2,6 +2,11 @@
 
 > 目标：先完成 Cortex v2 核心服务的生产候选验收，再对 OpenClaw 做独立宿主机签收。
 
+## 额外发布门槛
+
+- `SMOKE_ROUNDS=3 pnpm smoke:v2` 必须连续三轮通过，每轮使用独立 probe agent 并完成清理。
+- 浏览器侧还需完整跑一轮主链验收，不接受一次 `fetch failed` 或页面卡死就视作通过。
+
 ## 0. RC 冻结规则
 
 - 当前阶段默认冻结 Cortex v2 主架构。
@@ -195,6 +200,7 @@
 - [ ] Docker 镜像构建通过
 - [ ] `git diff` 确认所有改动
 - [ ] 单元测试通过 (`pnpm test`)
+- [ ] `SMOKE_ROUNDS=3 pnpm smoke:v2` 连续 3 轮通过
 - [ ] `/api/v1/*` 全部返回 `404`
 - [ ] write normalization 能将稳定事实写入 durable（如“我住大阪”）
 - [ ] relation candidate -> confirm -> formal relation 流程通过
