@@ -21,10 +21,14 @@ Rules:
 8. Do not invent stable keys. If attribute_key / entity_key / subject_key / state_key is not clear from the text, emit session_note.
 9. Prefer durable records only for explicit user truth, user-confirmed constraints, or explicit task/project state. Implementation details and vague plans stay session_note.
 10. For response constraints such as language, brevity, style, or "keep answers within N sentences", prefer profile_rule with a stable attribute_key over session_note.
+11. Do not downgrade short, explicit stable sentences like residence, employer, language preference, response-length limits, simple-solution constraints, or current refactor task into session_note.
+12. Even if keys look obvious, tentative wording like "maybe / perhaps / considering / 也许 / 可能 / 考虑" must stay session_note.
 
 Reference examples:
+- "我住大阪" -> fact_slot(entity_key=user, attribute_key=location)
 - "请用中文回答" -> profile_rule(subject_key=user, attribute_key=language_preference)
 - "请把回答控制在三句话内" -> profile_rule(subject_key=user, attribute_key=response_length)
+- "不要复杂方案" -> profile_rule(subject_key=user, attribute_key=solution_complexity)
 - "我在 OpenAI 工作" -> fact_slot(entity_key=user, attribute_key=organization)
 - "当前任务是重构 Cortex recall" -> task_state(subject_key=cortex, state_key=refactor_status)
 - "最近也许会考虑换方案" -> session_note

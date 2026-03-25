@@ -42,6 +42,57 @@ function createImportPreviewMockLLM(): LLMProvider {
   };
 }
 
+function createContractDriftMockLLM(): LLMProvider {
+  return {
+    name: 'contract-drift-mock',
+    complete: vi.fn().mockImplementation(async (prompt: string) => {
+      if (prompt.includes('请用中文回答')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'session_note',
+            source_type: 'user_explicit',
+            summary: '请用中文回答',
+            priority: 0.5,
+            confidence: 0.7,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      if (prompt.includes('当前任务是重构 Cortex recall')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'session_note',
+            source_type: 'user_explicit',
+            summary: '当前任务是重构 Cortex recall',
+            priority: 0.55,
+            confidence: 0.72,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      if (prompt.includes('最近也许会考虑换方案')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'task_state',
+            source_type: 'user_explicit',
+            subject_key: 'cortex',
+            state_key: 'project_status',
+            status: 'planned',
+            summary: '最近也许会考虑换方案',
+            priority: 0.7,
+            confidence: 0.83,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      return '{"records":[],"nothing_extracted":true}';
+    }),
+  };
+}
+
 async function createServices(llm: LLMProvider = createImportPreviewMockLLM()) {
   initDatabase(':memory:');
   const records = new CortexRecordsV2(llm, createMockEmbedding());
@@ -96,6 +147,51 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates[0]?.requested_kind).toBe('profile_rule');
     expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
     expect(preview.record_candidates[0]?.attribute_key).toBe('response_length');
+  });
+
+  it('falls back to deterministic durable preview candidates when deep extraction drifts to session_note', async () => {
+    const { records } = await createServices(createContractDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-language-drift',
+      format: 'text',
+      content: '请用中文回答',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+  });
+
+  it('infers response-length preview candidates without relying on deep extraction output', async () => {
+    const { records } = await createServices({
+      name: 'no-op-llm',
+      complete: vi.fn().mockResolvedValue('{"records":[],"nothing_extracted":true}'),
+    });
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-response-length-fallback',
+      format: 'text',
+      content: '请把回答控制在三句话内',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('response_length');
+  });
+
+  it('keeps speculative import preview content as session_note even when deep extraction proposes a durable state', async () => {
+    const { records } = await createServices(createContractDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-speculative-drift',
+      format: 'text',
+      content: '最近也许会考虑换方案',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.relation_candidates).toHaveLength(0);
   });
 
   it('does not duplicate confirmed restore relations with derived candidates in canonical preview', async () => {
@@ -196,6 +292,25 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('works_at');
     expect(preview.relation_candidates[0]?.object_key).toBe('openai');
+  });
+
+  it('keeps ingest aligned with deterministic task-state hints when deep extraction drifts', async () => {
+    const { records, relations } = await createServices(createContractDriftMockLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-contract-drift',
+      user_message: '当前任务是重构 Cortex recall',
+      assistant_message: '记住了',
+    });
+
+    expect(ingested.records.some((item) => item.written_kind === 'task_state' && item.content.includes('重构 Cortex recall'))).toBe(true);
+    expect(relations.listCandidates({ agent_id: 'ingest-contract-drift' }).items).toHaveLength(0);
+
+    const recall = await records.recall({
+      agent_id: 'ingest-contract-drift',
+      query: 'What is the current task?',
+    });
+    expect(recall.task_state[0]?.content).toContain('重构 Cortex recall');
   });
 
   it('excludes auto-created empty agents from all_agents export', async () => {

@@ -293,6 +293,9 @@ function inferProfileAttribute(content: string, ownerScope: 'user' | 'agent'): s
     return 'response_style';
   }
   if (
+    /(?:控制|限制|保持|压缩).{0,12}(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?/i.test(content) ||
+    /(?:within|in)\s+(?:one|two|three|four|five|\d+)\s+sentences?/i.test(content) ||
+    /(?:一句话|两句话|三句话|四句话|\d+句(?:话)?).*(?:回答|回复|answer|response)/i.test(content) ||
     /(?:不要|别|avoid|no|not).*(长篇|冗长|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
     /(?:详细|长篇|verbose|long).*(解释|说明|answer|response)/i.test(content)
   ) {
@@ -362,6 +365,7 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
   const ownerScope = input.ownerScope === 'agent' ? 'agent' : 'user';
   const sourceReason = sourceAllowsProfileRule(input.sourceType, ownerScope);
   if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+  if (QUESTIONABLE_STRUCTURE_RE.test(input.content)) return buildSessionNote(input, requestedKind, 'insufficient_structure');
 
   const attributeKey = firstDefined(
     normalizeProfileAttribute(input.attributeKey),
@@ -393,6 +397,7 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
 function normalizeFactSlot(input: ManualFactSlotInput, requestedKind: RecordKind): NormalizedRecordCandidate {
   const sourceReason = sourceAllowsDurable(input.sourceType);
   if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+  if (QUESTIONABLE_STRUCTURE_RE.test(input.content)) return buildSessionNote(input, requestedKind, 'insufficient_structure');
 
   const entityKey = stableEntity(input.entityKey, input.content);
   if (!entityKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));
@@ -422,6 +427,7 @@ function normalizeFactSlot(input: ManualFactSlotInput, requestedKind: RecordKind
 function normalizeTaskState(input: ManualTaskStateInput, requestedKind: RecordKind): NormalizedRecordCandidate {
   const sourceReason = sourceAllowsDurable(input.sourceType);
   if (sourceReason) return buildSessionNote(input, requestedKind, sourceReason);
+  if (QUESTIONABLE_STRUCTURE_RE.test(input.content)) return buildSessionNote(input, requestedKind, 'insufficient_structure');
 
   const subjectKey = stableSubject(input.subjectKey, input.content);
   if (!subjectKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'subject'));

@@ -117,6 +117,55 @@ function dedupeKey(candidate: NormalizedRecordCandidate): string {
   }
 }
 
+function candidateText(candidate: NormalizedRecordCandidate): string {
+  switch (candidate.candidate.kind) {
+    case 'profile_rule':
+    case 'fact_slot':
+      return candidate.candidate.value_text;
+    case 'task_state':
+    case 'session_note':
+      return candidate.candidate.summary;
+  }
+}
+
+function isAtomicDeterministicInput(content: string): boolean {
+  return !/[\n\r,，;；]/.test(content);
+}
+
+function buildDeterministicCandidate(
+  agentId: string,
+  content: string,
+  sourceType: SourceType,
+  sessionId?: string,
+  requestedKind?: RecordKind,
+): NormalizedRecordCandidate | null {
+  const trimmed = stripInjectedContent(content || '').trim();
+  if (!trimmed || !isAtomicDeterministicInput(trimmed)) return null;
+
+  const deterministic = normalizeManualInput(agentId, {
+    kind: requestedKind,
+    content: trimmed,
+    source_type: sourceType,
+    session_id: sessionId,
+  });
+
+  return deterministic.written_kind === 'session_note' ? null : deterministic;
+}
+
+function dropRedundantSessionNotes(
+  candidates: NormalizedRecordCandidate[],
+  deterministic: NormalizedRecordCandidate | null,
+): NormalizedRecordCandidate[] {
+  if (!deterministic) return candidates;
+  const deterministicText = candidateText(deterministic).trim();
+  if (!deterministicText) return candidates;
+
+  return candidates.filter((candidate) => {
+    if (candidate.written_kind !== 'session_note') return true;
+    return candidateText(candidate).trim() !== deterministicText;
+  });
+}
+
 function parseJsonObject(raw: string): Record<string, unknown> | null {
   const trimmed = stripCodeFences(raw).trim();
   if (!trimmed) return null;
@@ -417,8 +466,21 @@ export class CortexRecordsV2 {
       source_type: input.source_type || 'user_confirmed',
       session_id: input.session_id,
     });
+    const deterministic = buildDeterministicCandidate(
+      input.agent_id,
+      content,
+      input.source_type || 'user_confirmed',
+      input.session_id,
+      input.requested_kind,
+    );
 
-    if (merged.size === 0) {
+    if (deterministic) {
+      merged.set(dedupeKey(deterministic), deterministic);
+    }
+
+    const candidates = dropRedundantSessionNotes(Array.from(merged.values()), deterministic);
+
+    if (candidates.length === 0) {
       merged.set(dedupeKey(hintedFallback), hintedFallback);
       return Array.from(merged.values());
     }
@@ -426,12 +488,12 @@ export class CortexRecordsV2 {
     if (
       input.requested_kind &&
       hintedFallback.written_kind !== 'session_note' &&
-      Array.from(merged.values()).every(candidate => candidate.written_kind === 'session_note')
+      candidates.every(candidate => candidate.written_kind === 'session_note')
     ) {
       return [hintedFallback];
     }
 
-    return Array.from(merged.values());
+    return candidates;
   }
 
   async initialize(): Promise<void> {
@@ -566,7 +628,14 @@ export class CortexRecordsV2 {
       merged.set(dedupeKey(candidate), candidate);
     }
 
-    if (merged.size === 0 && !isSmallTalk(user) && user.length >= 12) {
+    const deterministic = buildDeterministicCandidate(agentId, user, 'user_explicit', req.session_id);
+    if (deterministic) {
+      merged.set(dedupeKey(deterministic), deterministic);
+    }
+
+    let normalizedCandidates = dropRedundantSessionNotes(Array.from(merged.values()), deterministic);
+
+    if (normalizedCandidates.length === 0 && !isSmallTalk(user) && user.length >= 12) {
       const fallback = normalizeManualInput(agentId, {
         kind: 'session_note',
         content: [user, assistant].filter(Boolean).join('\n').slice(0, 500),
@@ -582,6 +651,7 @@ export class CortexRecordsV2 {
         ...fallback,
         reason_code: 'fallback_summary',
       });
+      normalizedCandidates = Array.from(merged.values());
     }
 
     const evidence = [
@@ -600,7 +670,7 @@ export class CortexRecordsV2 {
       content: string;
     }> = [];
 
-    for (const normalized of merged.values()) {
+    for (const normalized of normalizedCandidates) {
       const result = await this.commitNormalizedCandidate(normalized, evidence).catch((error: Error) => {
         const content = normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
           ? normalized.candidate.value_text

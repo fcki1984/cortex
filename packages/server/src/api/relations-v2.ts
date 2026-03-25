@@ -1,18 +1,18 @@
 import type { FastifyInstance } from 'fastify';
-import { Readable } from 'node:stream';
 import type { CortexApp } from '../app.js';
 
-function normalizeEmptyJsonBody(req: any, payload: any, done: any): void {
-  const contentType = String(req.headers['content-type'] || '');
-  const contentLength = Number(req.headers['content-length'] || 0);
-  if (!contentType.includes('application/json') || contentLength !== 0) {
-    done(null, payload);
+function parseOptionalJsonBody(_req: any, body: string, done: (error: Error | null, value?: unknown) => void): void {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    done(null, {});
     return;
   }
 
-  const replacement = Readable.from(['{}']);
-  (replacement as any).receivedEncodedLength = 2;
-  done(null, replacement);
+  try {
+    done(null, JSON.parse(trimmed));
+  } catch (error) {
+    done(error as Error);
+  }
 }
 
 export function registerV2RelationsRoutes(app: FastifyInstance, cortex: CortexApp): void {
@@ -63,12 +63,10 @@ export function registerV2RelationsRoutes(app: FastifyInstance, cortex: CortexAp
     return candidate;
   });
 
-  app.post(
-    '/api/v2/relation-candidates/:id/confirm',
-    {
-      preParsing: (req, _reply, payload, done) => normalizeEmptyJsonBody(req, payload, done),
-    },
-    async (req, reply) => {
+  void app.register(async (scope) => {
+    scope.addContentTypeParser('application/json', { parseAs: 'string' }, parseOptionalJsonBody);
+
+    scope.post('/api/v2/relation-candidates/:id/confirm', async (req, reply) => {
       const { id } = req.params as { id: string };
       const confirmed = cortex.relationsV2.confirmCandidate(id);
       if (!confirmed) {
@@ -77,8 +75,8 @@ export function registerV2RelationsRoutes(app: FastifyInstance, cortex: CortexAp
       }
       reply.code(201);
       return confirmed;
-    },
-  );
+    });
+  });
 
   app.delete('/api/v2/relation-candidates/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
