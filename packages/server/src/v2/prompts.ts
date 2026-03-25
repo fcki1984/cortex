@@ -1,3 +1,9 @@
+import { V2_CONTRACT_REFERENCE_EXAMPLES } from './contract.js';
+
+const REFERENCE_EXAMPLES = V2_CONTRACT_REFERENCE_EXAMPLES
+  .map((example) => `- "${example.input}" -> ${example.output}`)
+  .join('\n');
+
 export const V2_EXTRACTION_SYSTEM_PROMPT = `You are the extraction stage of a structured memory system.
 
 Your job is to convert a conversation into 4 stable record kinds:
@@ -25,13 +31,7 @@ Rules:
 12. Even if keys look obvious, tentative wording like "maybe / perhaps / considering / 也许 / 可能 / 考虑" must stay session_note.
 
 Reference examples:
-- "我住大阪" -> fact_slot(entity_key=user, attribute_key=location)
-- "请用中文回答" -> profile_rule(subject_key=user, attribute_key=language_preference)
-- "请把回答控制在三句话内" -> profile_rule(subject_key=user, attribute_key=response_length)
-- "不要复杂方案" -> profile_rule(subject_key=user, attribute_key=solution_complexity)
-- "我在 OpenAI 工作" -> fact_slot(entity_key=user, attribute_key=organization)
-- "当前任务是重构 Cortex recall" -> task_state(subject_key=cortex, state_key=refactor_status)
-- "最近也许会考虑换方案" -> session_note
+${REFERENCE_EXAMPLES}
 - Do not convert vague implementation chatter or tentative plans into durable records.
 
 Output JSON only:

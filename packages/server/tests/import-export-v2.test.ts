@@ -149,6 +149,27 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates[0]?.attribute_key).toBe('response_length');
   });
 
+  it('lets content-driven durable inference override mismatched MEMORY.md heading hints', async () => {
+    const { records } = await createServices();
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-memory-md-mismatch',
+      format: 'memory_md',
+      content: [
+        '# MEMORY.md',
+        '',
+        '## Task States',
+        '- 请用中文回答',
+      ].join('\n'),
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.requested_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
   it('falls back to deterministic durable preview candidates when deep extraction drifts to session_note', async () => {
     const { records } = await createServices(createContractDriftMockLLM());
 

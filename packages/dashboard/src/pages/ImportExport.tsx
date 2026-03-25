@@ -12,6 +12,10 @@ import {
   formatRecordKindLabel,
   formatSourceTypeLabel,
 } from '../utils/v2Display.js';
+import {
+  type ImportValidationIssue,
+  validateSelectedImportPreview,
+} from './importExportValidation.js';
 
 type AgentRecord = {
   id: string;
@@ -132,6 +136,50 @@ function Notice({
       {message}
     </div>
   );
+}
+
+function importFormatHintKey(format: ImportFormat): string {
+  switch (format) {
+    case 'json':
+      return 'importExport.currentFormatJsonHint';
+    case 'memory_md':
+      return 'importExport.currentFormatMemoryHint';
+    case 'text':
+    default:
+      return 'importExport.currentFormatTextHint';
+  }
+}
+
+function formatImportValidationIssue(t: (key: string, params?: Record<string, string | number>) => string, issue: ImportValidationIssue): string {
+  if (issue.type === 'relation') {
+    switch (issue.field) {
+      case 'subject_key':
+        return t('importExport.validationRelationSubjectRequired');
+      case 'predicate':
+        return t('importExport.validationRelationPredicateRequired');
+      case 'object_key':
+      default:
+        return t('importExport.validationRelationObjectRequired');
+    }
+  }
+
+  if (issue.field === 'content') {
+    return t('importExport.validationRecordContentRequired');
+  }
+
+  if (issue.requested_kind === 'profile_rule') {
+    return t('importExport.validationProfileAttributeRequired');
+  }
+
+  if (issue.requested_kind === 'fact_slot') {
+    return issue.field === 'entity_key'
+      ? t('importExport.validationFactEntityRequired')
+      : t('importExport.validationFactAttributeRequired');
+  }
+
+  return issue.field === 'subject_key'
+    ? t('importExport.validationTaskSubjectRequired')
+    : t('importExport.validationTaskStateRequired');
 }
 
 export default function ImportExport() {
@@ -274,6 +322,12 @@ export default function ImportExport() {
 
   const handleConfirm = async () => {
     if (!preview) return;
+    const issues = validateSelectedImportPreview(preview);
+    if (issues.length > 0) {
+      setNotice({ message: formatImportValidationIssue(t, issues[0]!), type: 'error' });
+      return;
+    }
+
     setConfirming(true);
     setNotice(null);
     try {
@@ -362,8 +416,8 @@ export default function ImportExport() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 12 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('importExport.targetAgent')}</label>
-                <select value={importAgentId} onChange={(event) => setImportAgentId(event.target.value)}>
+                <label htmlFor="import-agent-select">{t('importExport.targetAgent')}</label>
+                <select id="import-agent-select" value={importAgentId} onChange={(event) => setImportAgentId(event.target.value)}>
                   {agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {formatAgentNameLabel(t, agent.id, agent.name)}
@@ -373,12 +427,15 @@ export default function ImportExport() {
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('importExport.sourceFormat')}</label>
-                <select value={importFormat} onChange={(event) => setImportFormat(event.target.value as ImportFormat)}>
+                <label htmlFor="import-format-select">{t('importExport.sourceFormat')}</label>
+                <select id="import-format-select" value={importFormat} onChange={(event) => setImportFormat(event.target.value as ImportFormat)}>
                   <option value="json">JSON</option>
                   <option value="memory_md">MEMORY.md</option>
                   <option value="text">{t('importExport.formatText')}</option>
                 </select>
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  {t(importFormatHintKey(importFormat))}
+                </div>
               </div>
             </div>
 
@@ -417,8 +474,9 @@ export default function ImportExport() {
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>{t('importExport.sourceContent')}</label>
+              <label htmlFor="import-source-content">{t('importExport.sourceContent')}</label>
               <textarea
+                id="import-source-content"
                 value={sourceContent}
                 onChange={(event) => {
                   setSourceFilename('');
@@ -566,6 +624,7 @@ export default function ImportExport() {
                         <div className="form-group">
                           <label>{t('importExport.contentLabel')}</label>
                           <textarea
+                            aria-label={`${t('importExport.contentLabel')} ${candidate.candidate_id}`}
                             value={candidate.content}
                             rows={3}
                             onChange={(event) => setRecordCandidate(candidate.candidate_id, (current) => ({
@@ -707,6 +766,11 @@ export default function ImportExport() {
                           <div>
                             <strong>{t('importExport.sourceExcerpt')}:</strong> {candidate.source_excerpt || '—'}
                           </div>
+                          {candidate.normalized_kind === 'session_note' && candidate.requested_kind !== 'session_note' && (
+                            <div style={{ marginTop: 6 }}>
+                              {t('importExport.recordHintDowngraded')}
+                            </div>
+                          )}
                           {candidate.warnings.length > 0 && (
                             <div style={{ marginTop: 6, color: '#fbbf24' }}>
                               <strong>{t('importExport.warnings')}:</strong>{' '}
@@ -800,6 +864,11 @@ export default function ImportExport() {
                         </div>
 
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                          <div style={{ marginBottom: 6 }}>
+                            {candidate.mode === 'confirmed_restore'
+                              ? t('importExport.relationHintConfirmedRestore')
+                              : t('importExport.relationHintCandidate')}
+                          </div>
                           <div>
                             <strong>{t('importExport.sourceExcerpt')}:</strong> {candidate.source_excerpt || '—'}
                           </div>
@@ -873,16 +942,16 @@ export default function ImportExport() {
           <div className="card">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('importExport.exportScope')}</label>
-                <select value={exportScope} onChange={(event) => setExportScope(event.target.value as ExportScope)}>
+                <label htmlFor="export-scope-select">{t('importExport.exportScope')}</label>
+                <select id="export-scope-select" value={exportScope} onChange={(event) => setExportScope(event.target.value as ExportScope)}>
                   <option value="current_agent">{t('importExport.scopeCurrentAgent')}</option>
                   <option value="all_agents">{t('importExport.scopeAllAgents')}</option>
                 </select>
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('importExport.exportFormat')}</label>
-                <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
+                <label htmlFor="export-format-select">{t('importExport.exportFormat')}</label>
+                <select id="export-format-select" value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
                   <option value="json">JSON</option>
                   <option value="memory_md">MEMORY.md</option>
                 </select>
@@ -890,8 +959,8 @@ export default function ImportExport() {
 
               {exportScope === 'current_agent' && (
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>{t('importExport.currentAgent')}</label>
-                  <select value={exportAgentId} onChange={(event) => setExportAgentId(event.target.value)}>
+                  <label htmlFor="export-agent-select">{t('importExport.currentAgent')}</label>
+                  <select id="export-agent-select" value={exportAgentId} onChange={(event) => setExportAgentId(event.target.value)}>
                     {agents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
                         {formatAgentNameLabel(t, agent.id, agent.name)}

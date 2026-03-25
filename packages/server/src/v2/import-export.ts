@@ -2,6 +2,7 @@ import { AUTO_CREATED_AGENT_DESCRIPTION, getAgentById, listAgents } from '../db/
 import { getDb } from '../db/connection.js';
 import { ensureAgent } from '../db/index.js';
 import { normalizeEntity } from '../utils/helpers.js';
+import { shouldApplyRequestedKindHint } from './contract.js';
 import { normalizeManualInput } from './normalize.js';
 import { getRecordsCount } from './store.js';
 import type { CortexRelationsV2, V2Relation } from './relations.js';
@@ -439,7 +440,9 @@ async function buildPreviewFromSegments(
     const normalizedCandidates = await recordsV2.previewImportCandidates({
       agent_id: agentId,
       content: segment.content,
-      requested_kind: segment.requested_kind,
+      requested_kind: shouldApplyRequestedKindHint(segment.content, segment.requested_kind)
+        ? segment.requested_kind
+        : undefined,
       source_type: 'user_confirmed',
     });
 

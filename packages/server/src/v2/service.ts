@@ -5,6 +5,7 @@ import { detectHighSignals, isSmallTalk } from '../signals/index.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
+import { canDeriveRelationCandidate } from './contract.js';
 import { CortexRelationsV2 } from './relations.js';
 import {
   deleteRecord,
@@ -427,7 +428,7 @@ export class CortexRecordsV2 {
 
   private createDerivedRelationCandidatesIfNeeded(record: CortexRecord): void {
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return;
-    if (record.kind !== 'fact_slot') return;
+    if (!canDeriveRelationCandidate(record.kind)) return;
     this.relations.createDerivedCandidates(record.id);
   }
 
