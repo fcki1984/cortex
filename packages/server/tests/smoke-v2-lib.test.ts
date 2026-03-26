@@ -133,4 +133,18 @@ describe('smoke-v2 helper library', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
     expect(result.requestId).toBe('req-null-body');
   });
+
+  it('allows cleanup steps to ignore an already-deleted probe agent', async () => {
+    const warnings = await runBestEffortSteps([
+      {
+        label: 'cleanup agent probe-deleted',
+        ignoreError: (error: unknown) => String(error).includes('status 404') && String(error).includes('Agent not found'),
+        run: async () => {
+          throw new Error('delete probe deleted-agent DELETE /api/v2/agents/probe-deleted failed with status 404: {"error":"Agent not found"}');
+        },
+      },
+    ]);
+
+    expect(warnings).toEqual([]);
+  });
 });

@@ -120,6 +120,10 @@ async function cleanupAgent(agentId, smokeRunId) {
     },
     {
       label: `cleanup agent ${agentId}`,
+      ignoreError: (error) => (
+        String(error).includes('status 404') &&
+        String(error).includes('Agent not found')
+      ),
       run: async () => {
         if (!['default', 'mcp'].includes(agentId)) {
           await runSmokeRequest({

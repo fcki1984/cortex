@@ -1,5 +1,6 @@
 import { getDb } from '../db/connection.js';
 import { generateId } from '../utils/helpers.js';
+import { relationPredicateForFactAttribute } from './contract.js';
 import { getRecordById, listEvidence } from './store.js';
 import type { CortexRecord, RecordEvidence } from './types.js';
 
@@ -76,14 +77,6 @@ function inflateCandidate(row: RelationCandidateRow): V2RelationCandidate {
   };
 }
 
-const FACT_SLOT_PREDICATES: Record<string, string> = {
-  location: 'lives_in',
-  organization: 'works_at',
-  occupation: 'has_role',
-  relationship: 'related_to',
-  skill: 'has_skill',
-};
-
 function parseMetadata(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -152,7 +145,7 @@ function deriveSubjectKey(record: CortexRecord): string | null {
 function derivePredicate(record: CortexRecord): string | null {
   switch (record.kind) {
     case 'fact_slot':
-      return FACT_SLOT_PREDICATES[record.attribute_key] || null;
+      return relationPredicateForFactAttribute(record.attribute_key);
     default:
       return null;
   }

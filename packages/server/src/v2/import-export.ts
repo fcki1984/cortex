@@ -2,7 +2,7 @@ import { AUTO_CREATED_AGENT_DESCRIPTION, getAgentById, listAgents } from '../db/
 import { getDb } from '../db/connection.js';
 import { ensureAgent } from '../db/index.js';
 import { normalizeEntity } from '../utils/helpers.js';
-import { shouldApplyRequestedKindHint } from './contract.js';
+import { relationPredicateForFactAttribute, shouldApplyRequestedKindHint } from './contract.js';
 import { normalizeManualInput } from './normalize.js';
 import { getRecordsCount } from './store.js';
 import type { CortexRelationsV2, V2Relation } from './relations.js';
@@ -124,14 +124,6 @@ const PROFILE_SECTION_RE = /profile rules?|画像|规则|画像\/规则/i;
 const FACT_SECTION_RE = /fact slots?|事实槽|事实/i;
 const TASK_SECTION_RE = /task states?|任务状态|任务/i;
 const NOTE_SECTION_RE = /session notes?|会话笔记|笔记/i;
-
-const FACT_SLOT_PREDICATES: Record<string, string> = {
-  location: 'lives_in',
-  organization: 'works_at',
-  occupation: 'has_role',
-  relationship: 'related_to',
-  skill: 'has_skill',
-};
 
 function generateCandidateId(prefix: string, index: number): string {
   return `${prefix}_${index + 1}`;
@@ -333,7 +325,7 @@ function valueTail(content: string, patterns: RegExp[]): string {
 function deriveRelationTriple(candidate: PreviewRecordCandidate): RelationTriple | null {
   if (candidate.normalized_kind === 'fact_slot') {
     const subjectKey = candidate.entity_key ? normalizeRelationKey(candidate.entity_key) : '';
-    const predicate = candidate.attribute_key ? FACT_SLOT_PREDICATES[candidate.attribute_key] : '';
+    const predicate = relationPredicateForFactAttribute(candidate.attribute_key) || '';
     if (!subjectKey || !predicate) return null;
 
     let objectKey = '';

@@ -29,6 +29,7 @@ Rules:
 10. For response constraints such as language, brevity, style, or "keep answers within N sentences", prefer profile_rule with a stable attribute_key over session_note.
 11. Do not downgrade short, explicit stable sentences like residence, employer, language preference, response-length limits, simple-solution constraints, or current refactor task into session_note.
 12. Even if keys look obvious, tentative wording like "maybe / perhaps / considering / 也许 / 可能 / 考虑" must stay session_note.
+13. If the only evidence is assistant interpretation, emit session_note with source_type assistant_inferred instead of a durable record.
 
 Reference examples:
 ${REFERENCE_EXAMPLES}

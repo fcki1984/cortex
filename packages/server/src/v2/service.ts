@@ -439,7 +439,7 @@ export class CortexRecordsV2 {
 
   private createDerivedRelationCandidatesIfNeeded(record: CortexRecord): void {
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return;
-    if (!canDeriveRelationCandidate(record.kind)) return;
+    if (!canDeriveRelationCandidate(record.kind, record.kind === 'fact_slot' ? record.attribute_key : undefined)) return;
     this.relations.createDerivedCandidates(record.id);
   }
 

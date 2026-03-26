@@ -120,6 +120,9 @@ export async function runBestEffortSteps(steps) {
     try {
       await step.run();
     } catch (error) {
+      if (typeof step.ignoreError === 'function' && step.ignoreError(error)) {
+        continue;
+      }
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`${step.label}: ${message}`);
     }

@@ -161,6 +161,7 @@ describe('V2 Import / Export', () => {
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('我在 OpenAI 工作');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('当前任务是重构 Cortex recall');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('最近也许会考虑换方案');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('If the only evidence is assistant interpretation, emit session_note with source_type assistant_inferred instead of a durable record.');
   });
 
   it('uses deep extraction for plain text preview candidates', async () => {

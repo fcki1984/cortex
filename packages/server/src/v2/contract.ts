@@ -10,6 +10,14 @@ export type V2ContractCanonicalCase = {
   output: string;
 };
 
+export type AtomicContractDecision = {
+  requested_kind: RecordKind;
+  attribute_key?: string;
+  state_key?: string;
+  relation_predicate?: string | null;
+  speculative: boolean;
+};
+
 export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   {
     input: '我住大阪',
@@ -73,12 +81,19 @@ export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: stri
 );
 
 const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|probably)/i;
+const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
+  location: 'lives_in',
+  organization: 'works_at',
+  occupation: 'has_role',
+  relationship: 'related_to',
+  skill: 'has_skill',
+};
 
 export function isSpeculativeContent(content: string): boolean {
   return SPECULATIVE_CONTENT_RE.test(content);
 }
 
-export function inferProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'): string | null {
+function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'): string | null {
   if (ownerScope === 'agent') {
     if (/(?:answer|respond|reply|回答|回复)/i.test(content) || /(?:style|tone|persona|风格|人设)/i.test(content)) {
       return 'persona_style';
@@ -118,7 +133,7 @@ export function inferProfileRuleAttribute(content: string, ownerScope: 'user' | 
   return null;
 }
 
-export function inferFactSlotAttribute(content: string): string | null {
+function matchFactSlotAttribute(content: string): string | null {
   if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
   if (/我在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
@@ -129,7 +144,7 @@ export function inferFactSlotAttribute(content: string): string | null {
   return null;
 }
 
-export function inferTaskStateKey(content: string): string | null {
+function matchTaskStateKey(content: string): string | null {
   if (/重构|rewrite|refactor/i.test(content)) return 'refactor_status';
   if (/部署|deploy|deployment/i.test(content)) return 'deployment_status';
   if (/迁移|migrate|migration/i.test(content)) return 'migration_status';
@@ -140,28 +155,96 @@ export function inferTaskStateKey(content: string): string | null {
   return null;
 }
 
+export function relationPredicateForFactAttribute(attributeKey?: string | null): string | null {
+  if (!attributeKey) return null;
+  return FACT_SLOT_RELATION_PREDICATES[attributeKey] || null;
+}
+
+export function resolveAtomicContractDecision(content: string, ownerScope: 'user' | 'agent' = 'user'): AtomicContractDecision {
+  if (isSpeculativeContent(content)) {
+    return {
+      requested_kind: 'session_note',
+      relation_predicate: null,
+      speculative: true,
+    };
+  }
+
+  const profileAttribute = matchProfileRuleAttribute(content, ownerScope);
+  if (profileAttribute) {
+    return {
+      requested_kind: 'profile_rule',
+      attribute_key: profileAttribute,
+      relation_predicate: null,
+      speculative: false,
+    };
+  }
+
+  const factAttribute = matchFactSlotAttribute(content);
+  if (factAttribute) {
+    return {
+      requested_kind: 'fact_slot',
+      attribute_key: factAttribute,
+      relation_predicate: relationPredicateForFactAttribute(factAttribute),
+      speculative: false,
+    };
+  }
+
+  const taskStateKey = matchTaskStateKey(content);
+  if (taskStateKey) {
+    return {
+      requested_kind: 'task_state',
+      state_key: taskStateKey,
+      relation_predicate: null,
+      speculative: false,
+    };
+  }
+
+  return {
+    requested_kind: 'session_note',
+    relation_predicate: null,
+    speculative: false,
+  };
+}
+
+export function inferProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'): string | null {
+  const decision = resolveAtomicContractDecision(content, ownerScope);
+  return decision.requested_kind === 'profile_rule' ? decision.attribute_key || null : null;
+}
+
+export function inferFactSlotAttribute(content: string): string | null {
+  const decision = resolveAtomicContractDecision(content);
+  return decision.requested_kind === 'fact_slot' ? decision.attribute_key || null : null;
+}
+
+export function inferTaskStateKey(content: string): string | null {
+  const decision = resolveAtomicContractDecision(content);
+  return decision.requested_kind === 'task_state' ? decision.state_key || null : null;
+}
+
 export function inferRequestedKindFromContent(content: string): RecordKind {
-  if (inferProfileRuleAttribute(content, 'user')) return 'profile_rule';
-  if (inferFactSlotAttribute(content)) return 'fact_slot';
-  if (inferTaskStateKey(content)) return 'task_state';
-  return 'session_note';
+  return resolveAtomicContractDecision(content).requested_kind;
 }
 
 export function shouldApplyRequestedKindHint(content: string, requestedKind?: RecordKind): boolean {
   if (!requestedKind) return false;
   if (requestedKind === 'session_note') return true;
-  if (isSpeculativeContent(content)) return false;
+  if (resolveAtomicContractDecision(content).speculative) return false;
+
+  const userDecision = resolveAtomicContractDecision(content, 'user');
+  const agentDecision = requestedKind === 'profile_rule'
+    ? resolveAtomicContractDecision(content, 'agent')
+    : null;
 
   switch (requestedKind) {
     case 'profile_rule':
-      return !!inferProfileRuleAttribute(content, 'user') || !!inferProfileRuleAttribute(content, 'agent');
+      return userDecision.requested_kind === 'profile_rule' || agentDecision?.requested_kind === 'profile_rule';
     case 'fact_slot':
-      return !!inferFactSlotAttribute(content);
+      return userDecision.requested_kind === 'fact_slot';
     case 'task_state':
-      return !!inferTaskStateKey(content);
+      return userDecision.requested_kind === 'task_state';
   }
 }
 
-export function canDeriveRelationCandidate(kind: RecordKind): boolean {
-  return kind === 'fact_slot';
+export function canDeriveRelationCandidate(kind: RecordKind, attributeKey?: string | null): boolean {
+  return kind === 'fact_slot' && relationPredicateForFactAttribute(attributeKey) !== null;
 }
