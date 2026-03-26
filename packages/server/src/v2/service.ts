@@ -5,7 +5,7 @@ import { detectHighSignals, isSmallTalk } from '../signals/index.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
-import { canDeriveRelationCandidate } from './contract.js';
+import { canDeriveRelationCandidate, isSpeculativeContent } from './contract.js';
 import { CortexRelationsV2 } from './relations.js';
 import {
   deleteRecord,
@@ -165,6 +165,17 @@ function dropRedundantSessionNotes(
     if (candidate.written_kind !== 'session_note') return true;
     return candidateText(candidate).trim() !== deterministicText;
   });
+}
+
+function preferDeterministicAtomicCandidate(
+  candidates: NormalizedRecordCandidate[],
+  deterministic: NormalizedRecordCandidate | null,
+): NormalizedRecordCandidate[] {
+  if (!deterministic) return candidates;
+
+  const deterministicKey = dedupeKey(deterministic);
+  const winner = candidates.find(candidate => dedupeKey(candidate) === deterministicKey) || deterministic;
+  return [winner];
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -432,6 +443,61 @@ export class CortexRecordsV2 {
     this.relations.createDerivedCandidates(record.id);
   }
 
+  private async collectExchangeCandidates(input: {
+    agent_id: string;
+    content: string;
+    exchange: {
+      user: string;
+      assistant: string;
+      messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    };
+    requested_kind?: RecordKind;
+    source_type: SourceType;
+    session_id?: string;
+  }): Promise<{
+    candidates: NormalizedRecordCandidate[];
+    hintedFallback: NormalizedRecordCandidate;
+  }> {
+    const fast = detectHighSignals(input.exchange).map(signal => signalToCandidate(signal, input.agent_id));
+    const deep = !isSmallTalk(input.content)
+      ? await this.extractDeepCandidates(input.exchange, input.agent_id, input.session_id).catch((error: Error) => {
+          log.warn({ error: error.message }, 'V2 extraction failed');
+          return [] as NormalizedRecordCandidate[];
+        })
+      : [];
+
+    const merged = new Map<string, NormalizedRecordCandidate>();
+    for (const candidate of [...fast, ...deep]) {
+      merged.set(dedupeKey(candidate), candidate);
+    }
+
+    const hintedFallback = normalizeManualInput(input.agent_id, {
+      kind: input.requested_kind,
+      content: input.content,
+      source_type: input.source_type,
+      session_id: input.session_id,
+    });
+    const deterministic = buildDeterministicCandidate(
+      input.agent_id,
+      input.content,
+      input.source_type,
+      input.session_id,
+      input.requested_kind,
+    );
+
+    if (deterministic) {
+      merged.set(dedupeKey(deterministic), deterministic);
+    }
+
+    return {
+      candidates: preferDeterministicAtomicCandidate(
+        dropRedundantSessionNotes(Array.from(merged.values()), deterministic),
+        deterministic,
+      ),
+      hintedFallback,
+    };
+  }
+
   async previewImportCandidates(input: {
     agent_id: string;
     content: string;
@@ -447,43 +513,17 @@ export class CortexRecordsV2 {
       assistant: '',
       messages: [{ role: 'user' as const, content }],
     };
-
-    const fast = detectHighSignals(exchange).map(signal => signalToCandidate(signal, input.agent_id));
-    const deep = !isSmallTalk(content)
-      ? await this.extractDeepCandidates(exchange, input.agent_id, input.session_id).catch((error: Error) => {
-          log.warn({ error: error.message }, 'V2 preview extraction failed');
-          return [] as NormalizedRecordCandidate[];
-        })
-      : [];
-
-    const merged = new Map<string, NormalizedRecordCandidate>();
-    for (const candidate of [...fast, ...deep]) {
-      merged.set(dedupeKey(candidate), candidate);
-    }
-
-    const hintedFallback = normalizeManualInput(input.agent_id, {
-      kind: input.requested_kind,
+    const { candidates, hintedFallback } = await this.collectExchangeCandidates({
+      agent_id: input.agent_id,
       content,
+      exchange,
+      requested_kind: input.requested_kind,
       source_type: input.source_type || 'user_confirmed',
       session_id: input.session_id,
     });
-    const deterministic = buildDeterministicCandidate(
-      input.agent_id,
-      content,
-      input.source_type || 'user_confirmed',
-      input.session_id,
-      input.requested_kind,
-    );
-
-    if (deterministic) {
-      merged.set(dedupeKey(deterministic), deterministic);
-    }
-
-    const candidates = dropRedundantSessionNotes(Array.from(merged.values()), deterministic);
 
     if (candidates.length === 0) {
-      merged.set(dedupeKey(hintedFallback), hintedFallback);
-      return Array.from(merged.values());
+      return [hintedFallback];
     }
 
     if (
@@ -616,43 +656,31 @@ export class CortexRecordsV2 {
     });
 
     const exchange = { user, assistant, messages };
-    const fast = detectHighSignals(exchange).map(signal => signalToCandidate(signal, agentId));
-    const deep = !isSmallTalk(user)
-      ? await this.extractDeepCandidates(exchange, agentId, req.session_id).catch((error: Error) => {
-          log.warn({ error: error.message }, 'V2 deep extraction failed');
-          return [] as NormalizedRecordCandidate[];
-        })
-      : [];
+    let { candidates: normalizedCandidates, hintedFallback } = await this.collectExchangeCandidates({
+      agent_id: agentId,
+      content: user,
+      exchange,
+      source_type: 'user_explicit',
+      session_id: req.session_id,
+    });
 
-    const merged = new Map<string, NormalizedRecordCandidate>();
-    for (const candidate of [...fast, ...deep]) {
-      merged.set(dedupeKey(candidate), candidate);
-    }
-
-    const deterministic = buildDeterministicCandidate(agentId, user, 'user_explicit', req.session_id);
-    if (deterministic) {
-      merged.set(dedupeKey(deterministic), deterministic);
-    }
-
-    let normalizedCandidates = dropRedundantSessionNotes(Array.from(merged.values()), deterministic);
-
-    if (normalizedCandidates.length === 0 && !isSmallTalk(user) && user.length >= 12) {
-      const fallback = normalizeManualInput(agentId, {
-        kind: 'session_note',
-        content: [user, assistant].filter(Boolean).join('\n').slice(0, 500),
-        source_type: 'user_explicit',
-        priority: 0.55,
-        session_id: req.session_id,
-        tags: ['fallback_note'],
-      });
-      merged.set(dedupeKey({
-        ...fallback,
-        reason_code: 'fallback_summary',
-      }), {
-        ...fallback,
-        reason_code: 'fallback_summary',
-      });
-      normalizedCandidates = Array.from(merged.values());
+    if (normalizedCandidates.length === 0 && !isSmallTalk(user) && hintedFallback.written_kind === 'session_note') {
+      if (isSpeculativeContent(user)) {
+        normalizedCandidates = [hintedFallback];
+      } else if (user.length >= 12) {
+        const fallback = normalizeManualInput(agentId, {
+          kind: 'session_note',
+          content: [user, assistant].filter(Boolean).join('\n').slice(0, 500),
+          source_type: 'user_explicit',
+          priority: 0.55,
+          session_id: req.session_id,
+          tags: ['fallback_note'],
+        });
+        normalizedCandidates = [{
+          ...fallback,
+          reason_code: 'fallback_summary',
+        }];
+      }
     }
 
     const evidence = [

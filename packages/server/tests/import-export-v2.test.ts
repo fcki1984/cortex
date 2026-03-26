@@ -3,6 +3,7 @@ import { closeDatabase, initDatabase } from '../src/db/index.js';
 import { deleteAgent, ensureAgent, insertAgent } from '../src/db/agent-queries.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import type { LLMProvider } from '../src/llm/interface.js';
+import { V2_CONTRACT_CANONICAL_CASES } from '../src/v2/contract.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from '../src/v2/prompts.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
@@ -14,6 +15,13 @@ function createMockEmbedding(): EmbeddingProvider {
     dimensions: 4,
     embed: vi.fn().mockResolvedValue([]),
     embedBatch: vi.fn().mockResolvedValue([]),
+  };
+}
+
+function createNoOpLLM(): LLMProvider {
+  return {
+    name: 'no-op-llm',
+    complete: vi.fn().mockResolvedValue('{"records":[],"nothing_extracted":true}'),
   };
 }
 
@@ -83,6 +91,47 @@ function createContractDriftMockLLM(): LLMProvider {
             summary: '最近也许会考虑换方案',
             priority: 0.7,
             confidence: 0.83,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      return '{"records":[],"nothing_extracted":true}';
+    }),
+  };
+}
+
+function createConflictingDurableMockLLM(): LLMProvider {
+  return {
+    name: 'conflicting-durable-mock',
+    complete: vi.fn().mockImplementation(async (prompt: string) => {
+      if (prompt.includes('请用中文回答')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'task_state',
+            source_type: 'user_explicit',
+            subject_key: 'cortex',
+            state_key: 'project_status',
+            status: 'active',
+            summary: '请用中文回答',
+            priority: 0.72,
+            confidence: 0.88,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      if (prompt.includes('我在 OpenAI 工作')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'profile_rule',
+            source_type: 'user_explicit',
+            owner_scope: 'user',
+            subject_key: 'user',
+            attribute_key: 'persona_style',
+            value_text: '我在 OpenAI 工作',
+            priority: 0.7,
+            confidence: 0.86,
           }],
           nothing_extracted: false,
         });
@@ -182,6 +231,21 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates).toHaveLength(1);
     expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
     expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+  });
+
+  it('prefers deterministic durable preview candidates over conflicting deep durable output for atomic text', async () => {
+    const { records } = await createServices(createConflictingDurableMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-durable-conflict',
+      format: 'text',
+      content: '请用中文回答',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(preview.relation_candidates).toHaveLength(0);
   });
 
   it('infers response-length preview candidates without relying on deep extraction output', async () => {
@@ -332,6 +396,58 @@ describe('V2 Import / Export', () => {
       query: 'What is the current task?',
     });
     expect(recall.task_state[0]?.content).toContain('重构 Cortex recall');
+  });
+
+  it('keeps text preview and ingest aligned with canonical contract samples', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    for (const [index, sample] of V2_CONTRACT_CANONICAL_CASES.entries()) {
+      const preview = await previewImport(records, {
+        agent_id: `contract-preview-${index}`,
+        format: 'text',
+        content: sample.input,
+      });
+
+      expect(preview.record_candidates).toHaveLength(1);
+      expect(preview.record_candidates[0]?.requested_kind).toBe(sample.requested_kind);
+      expect(preview.record_candidates[0]?.normalized_kind).toBe(sample.written_kind);
+      expect(preview.record_candidates[0]?.attribute_key || null).toBe(sample.attribute_key || null);
+      expect(preview.record_candidates[0]?.state_key || null).toBe(sample.state_key || null);
+      expect(preview.relation_candidates.map((item) => item.predicate)).toEqual(
+        sample.relation_predicate ? [sample.relation_predicate] : [],
+      );
+
+      const ingested = await records.ingest({
+        agent_id: `contract-ingest-${index}`,
+        user_message: sample.input,
+        assistant_message: '记住了',
+      });
+
+      expect(ingested.records).toHaveLength(1);
+      expect(ingested.records[0]?.requested_kind).toBe(sample.requested_kind);
+      expect(ingested.records[0]?.written_kind).toBe(sample.written_kind);
+      expect(relations.listCandidates({ agent_id: `contract-ingest-${index}` }).items.map((item) => item.predicate)).toEqual(
+        sample.relation_predicate ? [sample.relation_predicate] : [],
+      );
+    }
+  });
+
+  it('prefers deterministic durable ingest candidates over conflicting deep durable output for atomic user input', async () => {
+    const { records, relations } = await createServices(createConflictingDurableMockLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-durable-conflict',
+      user_message: '我在 OpenAI 工作',
+      assistant_message: '记住了',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.content).toContain('我在 OpenAI 工作');
+
+    const relationCandidates = relations.listCandidates({ agent_id: 'ingest-durable-conflict' });
+    expect(relationCandidates.items).toHaveLength(1);
+    expect(relationCandidates.items[0]?.predicate).toBe('works_at');
   });
 
   it('excludes auto-created empty agents from all_agents export', async () => {

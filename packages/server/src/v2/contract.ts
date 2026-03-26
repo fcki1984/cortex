@@ -1,14 +1,76 @@
 import type { RecordKind } from './types.js';
 
-export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: string }> = [
-  { input: '我住大阪', output: 'fact_slot(entity_key=user, attribute_key=location)' },
-  { input: '请用中文回答', output: 'profile_rule(subject_key=user, attribute_key=language_preference)' },
-  { input: '请把回答控制在三句话内', output: 'profile_rule(subject_key=user, attribute_key=response_length)' },
-  { input: '不要复杂方案', output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)' },
-  { input: '我在 OpenAI 工作', output: 'fact_slot(entity_key=user, attribute_key=organization)' },
-  { input: '当前任务是重构 Cortex recall', output: 'task_state(subject_key=cortex, state_key=refactor_status)' },
-  { input: '最近也许会考虑换方案', output: 'session_note' },
+export type V2ContractCanonicalCase = {
+  input: string;
+  requested_kind: RecordKind;
+  written_kind: RecordKind;
+  attribute_key?: string;
+  state_key?: string;
+  relation_predicate?: string | null;
+  output: string;
+};
+
+export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
+  {
+    input: '我住大阪',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'location',
+    relation_predicate: 'lives_in',
+    output: 'fact_slot(entity_key=user, attribute_key=location)',
+  },
+  {
+    input: '请用中文回答',
+    requested_kind: 'profile_rule',
+    written_kind: 'profile_rule',
+    attribute_key: 'language_preference',
+    relation_predicate: null,
+    output: 'profile_rule(subject_key=user, attribute_key=language_preference)',
+  },
+  {
+    input: '请把回答控制在三句话内',
+    requested_kind: 'profile_rule',
+    written_kind: 'profile_rule',
+    attribute_key: 'response_length',
+    relation_predicate: null,
+    output: 'profile_rule(subject_key=user, attribute_key=response_length)',
+  },
+  {
+    input: '不要复杂方案',
+    requested_kind: 'profile_rule',
+    written_kind: 'profile_rule',
+    attribute_key: 'solution_complexity',
+    relation_predicate: null,
+    output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)',
+  },
+  {
+    input: '我在 OpenAI 工作',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
+    input: '当前任务是重构 Cortex recall',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    state_key: 'refactor_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
+    input: '最近也许会考虑换方案',
+    requested_kind: 'session_note',
+    written_kind: 'session_note',
+    relation_predicate: null,
+    output: 'session_note',
+  },
 ];
+
+export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: string }> = V2_CONTRACT_CANONICAL_CASES.map(
+  ({ input, output }) => ({ input, output }),
+);
 
 const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|probably)/i;
 

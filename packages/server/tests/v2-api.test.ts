@@ -7,6 +7,7 @@ import { getDb } from '../src/db/connection.js';
 import { CortexApp } from '../src/app.js';
 import { registerAllRoutes } from '../src/api/router.js';
 import { registerAuthRoutes } from '../src/api/security.js';
+import { V2_CONTRACT_CANONICAL_CASES } from '../src/v2/contract.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import { startLifecycleScheduler, stopLifecycleScheduler } from '../src/core/scheduler.js';
@@ -192,6 +193,84 @@ describe('API V2 Integration', () => {
     expect(Array.isArray(body.records)).toBe(true);
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.every((item: any) => item.requested_kind && item.written_kind && item.normalization)).toBe(true);
+  });
+
+  it('keeps public record, preview, and ingest endpoints aligned with canonical contract samples', async () => {
+    for (const [index, sample] of V2_CONTRACT_CANONICAL_CASES.entries()) {
+      const recordAgent = `api-contract-record-${index}`;
+      const previewAgent = `api-contract-preview-${index}`;
+      const ingestAgent = `api-contract-ingest-${index}`;
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/v2/records',
+        payload: {
+          content: sample.input,
+          agent_id: recordAgent,
+        },
+      });
+
+      expect(created.statusCode).toBe(201);
+      const createdBody = JSON.parse(created.payload);
+      expect(createdBody.requested_kind).toBe(sample.requested_kind);
+      expect(createdBody.written_kind).toBe(sample.written_kind);
+      expect(createdBody.record.attribute_key || null).toBe(sample.attribute_key || null);
+      expect(createdBody.record.state_key || null).toBe(sample.state_key || null);
+
+      const recordRelations = await app.inject({
+        method: 'GET',
+        url: `/api/v2/relation-candidates?agent_id=${recordAgent}`,
+      });
+      expect(recordRelations.statusCode).toBe(200);
+      expect(JSON.parse(recordRelations.payload).items.map((item: any) => item.predicate)).toEqual(
+        sample.relation_predicate ? [sample.relation_predicate] : [],
+      );
+
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: previewAgent,
+          format: 'text',
+          content: sample.input,
+        },
+      });
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(1);
+      expect(previewBody.record_candidates[0]?.requested_kind).toBe(sample.requested_kind);
+      expect(previewBody.record_candidates[0]?.normalized_kind).toBe(sample.written_kind);
+      expect(previewBody.record_candidates[0]?.attribute_key || null).toBe(sample.attribute_key || null);
+      expect(previewBody.record_candidates[0]?.state_key || null).toBe(sample.state_key || null);
+      expect(previewBody.relation_candidates.map((item: any) => item.predicate)).toEqual(
+        sample.relation_predicate ? [sample.relation_predicate] : [],
+      );
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: sample.input,
+          assistant_message: '记住了',
+          agent_id: ingestAgent,
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestedBody = JSON.parse(ingested.payload);
+      expect(ingestedBody.records).toHaveLength(1);
+      expect(ingestedBody.records[0]?.requested_kind).toBe(sample.requested_kind);
+      expect(ingestedBody.records[0]?.written_kind).toBe(sample.written_kind);
+
+      const ingestRelations = await app.inject({
+        method: 'GET',
+        url: `/api/v2/relation-candidates?agent_id=${ingestAgent}`,
+      });
+      expect(ingestRelations.statusCode).toBe(200);
+      expect(JSON.parse(ingestRelations.payload).items.map((item: any) => item.predicate)).toEqual(
+        sample.relation_predicate ? [sample.relation_predicate] : [],
+      );
+    }
   });
 
   it('filters extraction logs by v2 channel', async () => {
