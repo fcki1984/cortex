@@ -309,6 +309,20 @@ async function runRound(round) {
     assert((compoundPreview.json?.record_candidates || []).length === 3, 'compound preview did not keep three clause winners');
     assert((compoundPreview.json?.relation_candidates || []).map((item) => item.predicate).join(',') === 'lives_in', 'compound preview did not keep only lives_in');
 
+    const implicitFollowupPreview = await request('preview implicit follow-up fact after speculative clause', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: compoundAgentId,
+        format: 'text',
+        content: '最近也许会考虑换方案。现在住东京',
+      },
+      retryable: true,
+    });
+    assert(implicitFollowupPreview.response.status === 200, `POST /api/v2/import/preview implicit follow-up returned ${implicitFollowupPreview.response.status}`);
+    assert((implicitFollowupPreview.json?.record_candidates || []).map((item) => item.normalized_kind).join(',') === 'session_note,fact_slot', 'implicit follow-up preview did not keep note + fact winners');
+    assert(implicitFollowupPreview.json?.record_candidates?.[1]?.entity_key === 'user', 'implicit follow-up preview did not infer user entity');
+    assert((implicitFollowupPreview.json?.relation_candidates || []).length === 1, 'implicit follow-up preview should keep one relation candidate');
+    assert(implicitFollowupPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'implicit follow-up preview relation winner should point at 东京');
+
     const conflictPreview = await request('preview compound fact conflict', 'POST', '/api/v2/import/preview', {
       body: {
         agent_id: conflictAgentId,

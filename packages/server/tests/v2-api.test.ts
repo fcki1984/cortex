@@ -444,6 +444,35 @@ describe('API V2 Integration', () => {
     expect(recallBody.facts[0]?.content).toContain('大阪');
   });
 
+  it('admits implicit user follow-up location statements as durable facts through the public write API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '现在住东京',
+        agent_id: 'api-implicit-location',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const body = JSON.parse(created.payload);
+    expect(body.record.kind).toBe('fact_slot');
+    expect(body.record.entity_key).toBe('user');
+    expect(body.record.attribute_key).toBe('location');
+    expect(body.normalization).toBe('durable');
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live now?', agent_id: 'api-implicit-location' },
+    });
+    expect(recalled.statusCode).toBe(200);
+    const recallBody = JSON.parse(recalled.payload);
+    expect(recallBody.facts).toHaveLength(1);
+    expect(recallBody.facts[0]?.content).toContain('东京');
+  });
+
   it('admits imperative language preference and constraint statements as durable profile rules', async () => {
     const language = await app.inject({
       method: 'POST',
@@ -546,6 +575,34 @@ describe('API V2 Integration', () => {
     });
     expect(relationCandidates.statusCode).toBe(200);
     expect(JSON.parse(relationCandidates.payload).items).toHaveLength(0);
+  });
+
+  it('keeps implicit user follow-up fact clauses durable after speculative ingest clauses', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '最近也许会考虑换方案。现在住东京',
+        assistant_message: '记住了',
+        agent_id: 'api-compound-implicit-fact-ingest',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((record: any) => record.written_kind)).toEqual([
+      'session_note',
+      'fact_slot',
+    ]);
+    expect(body.records[1]?.content).toBe('现在住东京');
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-compound-implicit-fact-ingest',
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
   });
 
   it('lets later compound fact clauses win in ingest and relation derivation', async () => {

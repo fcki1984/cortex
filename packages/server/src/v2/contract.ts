@@ -60,6 +60,22 @@ export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
   },
   {
+    input: '现在住东京',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'location',
+    relation_predicate: 'lives_in',
+    output: 'fact_slot(entity_key=user, attribute_key=location)',
+  },
+  {
+    input: '现在在 OpenAI 工作',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
     input: '当前任务是重构 Cortex recall',
     requested_kind: 'task_state',
     written_kind: 'task_state',
