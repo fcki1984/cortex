@@ -5,7 +5,13 @@ import { detectHighSignals, isSmallTalk } from '../signals/index.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
-import { canDeriveRelationCandidate, isSpeculativeContent } from './contract.js';
+import {
+  canDeriveRelationCandidate,
+  isSpeculativeContent,
+  resolveAtomicContractDecision,
+  shouldApplyRequestedKindHint,
+  splitCompoundClauses,
+} from './contract.js';
 import { CortexRelationsV2 } from './relations.js';
 import {
   deleteRecord,
@@ -76,6 +82,10 @@ type NoteEligibility = {
   excluded_reason: string;
 };
 
+type ClauseCarryContext = {
+  entity_key?: string;
+};
+
 const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'user', patterns: [/\buser\b/i, /\bi\b/i, /\bme\b/i, /\bmy\b/i, /用户/i, /我/i, /我的/i] },
   { key: 'agent', patterns: [/\bagent\b/i, /\bassistant\b/i, /\byou\b/i, /助手/i, /你/i, /回答方式/i] },
@@ -131,6 +141,54 @@ function candidateText(candidate: NormalizedRecordCandidate): string {
 
 function isAtomicDeterministicInput(content: string): boolean {
   return !/[\n\r,，;；]/.test(content);
+}
+
+function clauseRequestedKind(clause: string, requestedKind?: RecordKind): RecordKind | undefined {
+  if (!requestedKind) return undefined;
+  return shouldApplyRequestedKindHint(clause, requestedKind) ? requestedKind : undefined;
+}
+
+function updateClauseCarryContext(context: ClauseCarryContext, normalized: NormalizedRecordCandidate): ClauseCarryContext {
+  const record = normalized.candidate;
+  if (record.kind === 'fact_slot') {
+    return {
+      ...context,
+      entity_key: record.entity_key,
+    };
+  }
+
+  if (record.kind === 'profile_rule' && record.owner_scope === 'user' && record.subject_key === 'user') {
+    return {
+      ...context,
+      entity_key: context.entity_key || 'user',
+    };
+  }
+
+  return context;
+}
+
+function buildDeterministicClauseCandidate(
+  agentId: string,
+  content: string,
+  sourceType: SourceType,
+  sessionId?: string,
+  requestedKind?: RecordKind,
+  carry?: ClauseCarryContext,
+): NormalizedRecordCandidate | null {
+  const trimmed = stripInjectedContent(content || '').trim();
+  if (!trimmed || !isAtomicDeterministicInput(trimmed)) return null;
+
+  const decision = resolveAtomicContractDecision(trimmed);
+  const normalized = normalizeManualInput(agentId, {
+    kind: requestedKind,
+    content: trimmed,
+    source_type: sourceType,
+    session_id: sessionId,
+    entity_key: decision.requested_kind === 'fact_slot' ? carry?.entity_key : undefined,
+  });
+
+  if (normalized.written_kind !== 'session_note') return normalized;
+  return decision.speculative ? normalized : null;
 }
 
 function buildDeterministicCandidate(
@@ -443,7 +501,7 @@ export class CortexRecordsV2 {
     this.relations.createDerivedCandidates(record.id);
   }
 
-  private async collectExchangeCandidates(input: {
+  private async collectAtomicExchangeCandidates(input: {
     agent_id: string;
     content: string;
     exchange: {
@@ -494,6 +552,81 @@ export class CortexRecordsV2 {
         dropRedundantSessionNotes(Array.from(merged.values()), deterministic),
         deterministic,
       ),
+      hintedFallback,
+    };
+  }
+
+  private async collectExchangeCandidates(input: {
+    agent_id: string;
+    content: string;
+    exchange: {
+      user: string;
+      assistant: string;
+      messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    };
+    requested_kind?: RecordKind;
+    source_type: SourceType;
+    session_id?: string;
+  }): Promise<{
+    candidates: NormalizedRecordCandidate[];
+    hintedFallback: NormalizedRecordCandidate;
+  }> {
+    const clauses = splitCompoundClauses(input.content);
+    if (clauses.length <= 1) {
+      return this.collectAtomicExchangeCandidates(input);
+    }
+
+    const hintedFallback = normalizeManualInput(input.agent_id, {
+      kind: input.requested_kind,
+      content: input.content,
+      source_type: input.source_type,
+      session_id: input.session_id,
+    });
+
+    const winners = new Map<string, { candidate: NormalizedRecordCandidate; order: number }>();
+    let carry: ClauseCarryContext = {};
+    let order = 0;
+
+    for (const clause of clauses) {
+      const requestedKind = clauseRequestedKind(clause, input.requested_kind);
+      const deterministic = buildDeterministicClauseCandidate(
+        input.agent_id,
+        clause,
+        input.source_type,
+        input.session_id,
+        requestedKind,
+        carry,
+      );
+
+      let clauseCandidates: NormalizedRecordCandidate[] = [];
+      if (deterministic) {
+        clauseCandidates = [deterministic];
+      } else {
+        const clauseExchange = {
+          user: clause,
+          assistant: '',
+          messages: [{ role: 'user' as const, content: clause }],
+        };
+        const collected = await this.collectAtomicExchangeCandidates({
+          ...input,
+          content: clause,
+          exchange: clauseExchange,
+          requested_kind: requestedKind,
+        });
+        clauseCandidates = collected.candidates;
+      }
+
+      for (const candidate of clauseCandidates) {
+        winners.set(dedupeKey(candidate), { candidate, order });
+        carry = updateClauseCarryContext(carry, candidate);
+        order += 1;
+      }
+    }
+
+    return {
+      candidates: Array.from(winners.values())
+        .sort((left, right) => left.order - right.order)
+        .map(entry => entry.candidate),
       hintedFallback,
     };
   }

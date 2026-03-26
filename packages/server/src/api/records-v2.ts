@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { ensureAgent } from '../db/index.js';
+import { splitCompoundClauses } from '../v2/contract.js';
 
 export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp): void {
   app.get('/api/v2/records', async (req) => {
@@ -33,6 +34,12 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
 
   app.post('/api/v2/records', async (req, reply) => {
     const body = req.body as any;
+    if (typeof body.content === 'string' && splitCompoundClauses(body.content).length > 1) {
+      reply.code(400);
+      return {
+        error: 'Compound input is not allowed on /api/v2/records. Use /api/v2/ingest or /api/v2/import/preview instead.',
+      };
+    }
     if (body.agent_id) ensureAgent(body.agent_id);
     const result = await cortex.recordsV2.remember({
       agent_id: body.agent_id,

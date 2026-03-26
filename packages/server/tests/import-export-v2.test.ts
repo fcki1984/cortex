@@ -380,6 +380,63 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates[0]?.object_key).toBe('openai');
   });
 
+  it('keeps compound text preview aligned with clause-level durable winners', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-compound-durable',
+      format: 'text',
+      content: '我住大阪。请用中文回答。当前任务是重构 Cortex recall',
+    });
+
+    expect(preview.record_candidates).toHaveLength(3);
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'fact_slot',
+      'profile_rule',
+      'task_state',
+    ]);
+    expect(preview.record_candidates[0]?.attribute_key).toBe('location');
+    expect(preview.record_candidates[1]?.attribute_key).toBe('language_preference');
+    expect(preview.record_candidates[2]?.state_key).toBe('refactor_status');
+    expect(preview.relation_candidates.map((candidate) => candidate.predicate)).toEqual(['lives_in']);
+  });
+
+  it('keeps compound text preview aligned for speculative and durable mixed clauses', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-compound-mixed',
+      format: 'text',
+      content: '最近也许会考虑换方案。请用中文回答',
+    });
+
+    expect(preview.record_candidates).toHaveLength(2);
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'session_note',
+      'profile_rule',
+    ]);
+    expect(preview.record_candidates[1]?.attribute_key).toBe('language_preference');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('lets later compound clauses win when they supersede the same stable fact key', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-compound-conflict',
+      format: 'text',
+      content: '我住大阪。现在住东京',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('fact_slot');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('location');
+    expect(preview.record_candidates[0]?.content).toBe('现在住东京');
+    expect(preview.relation_candidates).toHaveLength(1);
+    expect(preview.relation_candidates[0]?.predicate).toBe('lives_in');
+    expect(preview.relation_candidates[0]?.object_key).toBe('东京');
+  });
+
   it('keeps ingest aligned with deterministic task-state hints when deep extraction drifts', async () => {
     const { records, relations } = await createServices(createContractDriftMockLLM());
 
@@ -449,6 +506,47 @@ describe('V2 Import / Export', () => {
     const relationCandidates = relations.listCandidates({ agent_id: 'ingest-durable-conflict' });
     expect(relationCandidates.items).toHaveLength(1);
     expect(relationCandidates.items[0]?.predicate).toBe('works_at');
+  });
+
+  it('keeps ingest aligned with clause-level winners for compound user input', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-compound-durable',
+      user_message: '我住大阪。请用中文回答。当前任务是重构 Cortex recall',
+      assistant_message: '记住了',
+    });
+
+    expect(ingested.records).toHaveLength(3);
+    expect(ingested.records.map((record) => record.written_kind)).toEqual([
+      'fact_slot',
+      'profile_rule',
+      'task_state',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-compound-durable' }).items.map((item) => item.predicate)).toEqual([
+      'lives_in',
+    ]);
+  });
+
+  it('lets later compound ingest clauses win when they supersede the same stable fact key', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-compound-conflict',
+      user_message: '我住大阪。现在住东京',
+      assistant_message: '记住了',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.content).toBe('现在住东京');
+
+    const stored = records.listRecords({ agent_id: 'ingest-compound-conflict' }).items;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.content).toBe('现在住东京');
+    expect(relations.listCandidates({ agent_id: 'ingest-compound-conflict' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
   });
 
   it('excludes auto-created empty agents from all_agents export', async () => {

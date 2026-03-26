@@ -332,6 +332,7 @@ function deriveRelationTriple(candidate: PreviewRecordCandidate): RelationTriple
     switch (candidate.attribute_key) {
       case 'location':
         objectKey = normalizeRelationKey(valueTail(candidate.content, [
+          /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
           /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
           /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,
           /\bbased in\s+([a-z0-9_\- ]+)/i,
@@ -342,6 +343,7 @@ function deriveRelationTriple(candidate: PreviewRecordCandidate): RelationTriple
         break;
       case 'organization':
         objectKey = normalizeRelationKey(valueTail(candidate.content, [
+          /(?:现在|目前|如今)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
           /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
           /\bwork(?:s|ed|ing)?\s+(?:at|for|in)\s+([a-z0-9_\- ]+)/i,
         ]));

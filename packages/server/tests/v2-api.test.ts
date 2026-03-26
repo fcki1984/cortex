@@ -477,6 +477,110 @@ describe('API V2 Integration', () => {
     expect(constraintBody.normalization).toBe('durable');
   });
 
+  it('rejects compound manual writes on the public records API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        content: '我住大阪。请用中文回答',
+        agent_id: 'api-compound-record-reject',
+      },
+    });
+
+    expect(created.statusCode).toBe(400);
+    const body = JSON.parse(created.payload);
+    expect(body.error).toContain('/api/v2/ingest');
+    expect(body.error).toContain('/api/v2/import/preview');
+  });
+
+  it('keeps ingest aligned with compound clause winners and durable-note mix', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '我住大阪。请用中文回答。当前任务是重构 Cortex recall',
+        assistant_message: '记住了',
+        agent_id: 'api-compound-ingest',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.records).toHaveLength(3);
+    expect(body.records.map((record: any) => record.written_kind)).toEqual([
+      'fact_slot',
+      'profile_rule',
+      'task_state',
+    ]);
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-compound-ingest',
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.predicate)).toEqual(['lives_in']);
+  });
+
+  it('keeps speculative and durable clauses aligned in compound ingest flows', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '最近也许会考虑换方案。请用中文回答',
+        assistant_message: '记住了',
+        agent_id: 'api-compound-mixed-ingest',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((record: any) => record.written_kind)).toEqual([
+      'session_note',
+      'profile_rule',
+    ]);
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-compound-mixed-ingest',
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items).toHaveLength(0);
+  });
+
+  it('lets later compound fact clauses win in ingest and relation derivation', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '我住大阪。现在住东京',
+        assistant_message: '记住了',
+        agent_id: 'api-compound-conflict-ingest',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.content).toBe('现在住东京');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-compound-conflict-ingest',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(1);
+    expect(JSON.parse(listed.payload).items[0]?.content).toBe('现在住东京');
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-compound-conflict-ingest',
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+  });
+
   it('bridges cross-language organization and task queries into durable recall', async () => {
     await app.inject({
       method: 'POST',

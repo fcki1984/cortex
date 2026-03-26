@@ -147,4 +147,65 @@ describe('smoke-v2 helper library', () => {
 
     expect(warnings).toEqual([]);
   });
+
+  it('waits for rate-limit reset after exhausting the budget on a successful response', async () => {
+    const sleepMock = vi.fn().mockResolvedValue(undefined);
+    const now = 1_000;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ok' }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': String(Math.ceil((now + 1_200) / 1000)),
+      },
+    }));
+
+    await runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      label: 'health',
+      method: 'GET',
+      path: '/api/v2/health',
+      now: () => now,
+      sleep: sleepMock,
+    });
+
+    expect(sleepMock).toHaveBeenCalledTimes(1);
+    expect(sleepMock.mock.calls[0]?.[0]).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it('waits before retrying a safe request that hit rate-limit exhaustion', async () => {
+    const sleepMock = vi.fn().mockResolvedValue(undefined);
+    const now = 5_000;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Too Many Requests' }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': String(Math.ceil((now + 1_500) / 1000)),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+      }));
+
+    const result = await runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      label: 'health',
+      method: 'GET',
+      path: '/api/v2/health',
+      retryable: true,
+      now: () => now,
+      sleep: sleepMock,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleepMock).toHaveBeenCalledTimes(1);
+    expect(result.json).toEqual({ status: 'ok' });
+  });
 });

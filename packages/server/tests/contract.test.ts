@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { V2_CONTRACT_CANONICAL_CASES, shouldApplyRequestedKindHint } from '../src/v2/contract.js';
+import {
+  V2_CONTRACT_CANONICAL_CASES,
+  shouldApplyRequestedKindHint,
+  splitCompoundClauses,
+} from '../src/v2/contract.js';
 import { normalizeManualInput } from '../src/v2/normalize.js';
 
 describe('V2 shared atomic contract', () => {
@@ -63,5 +67,17 @@ describe('V2 shared atomic contract', () => {
     expect(shouldApplyRequestedKindHint('请用中文回答', 'profile_rule')).toBe(true);
     expect(shouldApplyRequestedKindHint('请用中文回答', 'task_state')).toBe(false);
     expect(shouldApplyRequestedKindHint('最近也许会考虑换方案', 'task_state')).toBe(false);
+  });
+
+  it('splits compound input on conservative clause boundaries only', () => {
+    expect(splitCompoundClauses('我住大阪。请用中文回答；当前任务是重构 Cortex recall')).toEqual([
+      '我住大阪',
+      '请用中文回答',
+      '当前任务是重构 Cortex recall',
+    ]);
+
+    expect(splitCompoundClauses('我住大阪，然后请用中文回答')).toEqual([
+      '我住大阪，然后请用中文回答',
+    ]);
   });
 });

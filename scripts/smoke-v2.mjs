@@ -180,7 +180,16 @@ async function runRound(round) {
   const roundtripSourceAgentId = `${probeAgentId}-src`;
   const roundtripTargetAgentId = `${probeAgentId}-dst`;
   const deletedAgentId = `${probeAgentId}-deleted`;
-  const cleanupAgentIds = [probeAgentId, roundtripSourceAgentId, roundtripTargetAgentId, deletedAgentId];
+  const compoundAgentId = `${probeAgentId}-compound`;
+  const conflictAgentId = `${probeAgentId}-conflict`;
+  const cleanupAgentIds = [
+    probeAgentId,
+    roundtripSourceAgentId,
+    roundtripTargetAgentId,
+    deletedAgentId,
+    compoundAgentId,
+    conflictAgentId,
+  ];
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus } = {}) {
     return runSmokeRequest({
@@ -265,6 +274,53 @@ async function runRound(round) {
     assert(recall.response.status === 200, `POST /api/v2/recall returned ${recall.response.status}`);
     assert(typeof recall.json?.context === 'string', 'v2 recall did not return context');
     logStep('v2 REST', 'records, ingest, recall all passed');
+
+    const compoundWrite = await request('reject compound public record write', 'POST', '/api/v2/records', {
+      body: {
+        content: '我住大阪。请用中文回答',
+        agent_id: compoundAgentId,
+      },
+      expectedStatus: 400,
+    });
+    assert(compoundWrite.response.status === 400, `POST /api/v2/records compound returned ${compoundWrite.response.status}`);
+
+    const compoundIngest = await request('ingest compound contract sample', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '我住大阪。请用中文回答。当前任务是重构 Cortex recall',
+        assistant_message: '记住了',
+        agent_id: compoundAgentId,
+      },
+    });
+    assert(compoundIngest.response.status === 201, `POST /api/v2/ingest compound returned ${compoundIngest.response.status}`);
+    const compoundKinds = compoundIngest.json?.records?.map((item) => item.written_kind) || [];
+    assert(compoundKinds.includes('fact_slot'), 'compound ingest missing fact_slot');
+    assert(compoundKinds.includes('profile_rule'), 'compound ingest missing profile_rule');
+    assert(compoundKinds.includes('task_state'), 'compound ingest missing task_state');
+
+    const compoundPreview = await request('preview compound text contract', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: compoundAgentId,
+        format: 'text',
+        content: '我住大阪。请用中文回答。当前任务是重构 Cortex recall',
+      },
+      retryable: true,
+    });
+    assert(compoundPreview.response.status === 200, `POST /api/v2/import/preview compound returned ${compoundPreview.response.status}`);
+    assert((compoundPreview.json?.record_candidates || []).length === 3, 'compound preview did not keep three clause winners');
+    assert((compoundPreview.json?.relation_candidates || []).map((item) => item.predicate).join(',') === 'lives_in', 'compound preview did not keep only lives_in');
+
+    const conflictPreview = await request('preview compound fact conflict', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: conflictAgentId,
+        format: 'text',
+        content: '我住大阪。现在住东京',
+      },
+      retryable: true,
+    });
+    assert(conflictPreview.response.status === 200, `POST /api/v2/import/preview conflict returned ${conflictPreview.response.status}`);
+    assert((conflictPreview.json?.record_candidates || []).length === 1, 'compound conflict preview should keep one winner');
+    assert(conflictPreview.json?.record_candidates?.[0]?.content === '现在住东京', 'compound conflict preview kept the wrong winner');
+    logStep('compound contract', 'records boundary, ingest, and preview all passed');
 
     const preview = await request('preview text import contract', 'POST', '/api/v2/import/preview', {
       body: {

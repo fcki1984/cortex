@@ -51,6 +51,43 @@ function formatStatusError({ label, method, path, response, text, requestId }) {
   return new Error(`${label} ${method} ${path} failed with status ${response.status}${requestDetail}${detail}`);
 }
 
+function defaultSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parseRateLimitHeaders(response) {
+  const remaining = Number(response.headers.get('x-ratelimit-remaining'));
+  const resetSeconds = Number(response.headers.get('x-ratelimit-reset'));
+  if (!Number.isFinite(remaining) || !Number.isFinite(resetSeconds)) return null;
+  return {
+    remaining,
+    resetAtMs: resetSeconds * 1000,
+  };
+}
+
+async function maybeWaitForRateLimitReset(response, {
+  now = () => Date.now(),
+  sleep = defaultSleep,
+  onRateLimitWait,
+} = {}) {
+  const rateLimit = parseRateLimitHeaders(response);
+  if (!rateLimit || rateLimit.remaining > 0) return false;
+
+  const waitMs = rateLimit.resetAtMs - now() + 100;
+  if (waitMs <= 0) return false;
+
+  if (typeof onRateLimitWait === 'function') {
+    onRateLimitWait({
+      remaining: rateLimit.remaining,
+      resetAtMs: rateLimit.resetAtMs,
+      waitMs,
+    });
+  }
+
+  await sleep(waitMs);
+  return true;
+}
+
 export async function runSmokeRequest({
   fetchImpl = fetch,
   baseUrl,
@@ -63,6 +100,9 @@ export async function runSmokeRequest({
   headers,
   retryable = false,
   expectedStatus,
+  now = () => Date.now(),
+  sleep = defaultSleep,
+  onRateLimitWait,
 }) {
   const attempts = retryable ? 2 : 1;
   let lastError;
@@ -90,12 +130,16 @@ export async function runSmokeRequest({
       if (!matchesExpectedStatus) {
         const statusError = formatStatusError({ label, method, path, response, text, requestId });
         if (retryable && attempt < attempts && shouldRetryStatus(response.status)) {
+          if (response.status === 429) {
+            await maybeWaitForRateLimitReset(response, { now, sleep, onRateLimitWait });
+          }
           lastError = statusError;
           continue;
         }
         throw statusError;
       }
 
+      await maybeWaitForRateLimitReset(response, { now, sleep, onRateLimitWait });
       return { response, text, json, requestId };
     } catch (error) {
       if (error instanceof Error && error.message.includes('failed with status')) {

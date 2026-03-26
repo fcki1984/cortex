@@ -81,6 +81,7 @@ export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: stri
 );
 
 const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|probably)/i;
+const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
 const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   location: 'lives_in',
   organization: 'works_at',
@@ -89,8 +90,33 @@ const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   skill: 'has_skill',
 };
 
+function stripBulletPrefix(line: string): string {
+  return line.replace(/^(?:[-*+]|\d+\.)\s+/, '');
+}
+
 export function isSpeculativeContent(content: string): boolean {
   return SPECULATIVE_CONTENT_RE.test(content);
+}
+
+export function splitCompoundClauses(content: string): string[] {
+  const clauses: string[] = [];
+  const lines = content.replace(/\r\n?/g, '\n').split('\n');
+
+  for (const rawLine of lines) {
+    const normalizedLine = stripBulletPrefix(rawLine.trim());
+    if (!normalizedLine) continue;
+
+    const parts = normalizedLine
+      .split(CLAUSE_BOUNDARY_RE)
+      .map(part => part.trim())
+      .filter(Boolean);
+
+    if (parts.length > 0) {
+      clauses.push(...parts);
+    }
+  }
+
+  return clauses;
 }
 
 function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'): string | null {
@@ -135,7 +161,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
 
 function matchFactSlotAttribute(content: string): string | null {
   if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
-  if (/我在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
+  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
     return 'occupation';
   }
