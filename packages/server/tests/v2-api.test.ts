@@ -581,6 +581,30 @@ describe('API V2 Integration', () => {
     expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
   });
 
+  it('keeps multiline import preview aligned with ingest winners across segment boundaries', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-multiline-preview-conflict',
+        format: 'text',
+        content: ['我住大阪', '请用中文回答', '现在住东京'].join('\n'),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.record_candidates).toHaveLength(2);
+    expect(body.record_candidates.map((candidate: any) => candidate.normalized_kind)).toEqual([
+      'profile_rule',
+      'fact_slot',
+    ]);
+    expect(body.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(body.record_candidates[1]?.content).toBe('现在住东京');
+    expect(body.relation_candidates).toHaveLength(1);
+    expect(body.relation_candidates[0]?.object_key).toBe('东京');
+  });
+
   it('bridges cross-language organization and task queries into durable recall', async () => {
     await app.inject({
       method: 'POST',

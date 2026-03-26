@@ -197,15 +197,18 @@ function buildDeterministicCandidate(
   sourceType: SourceType,
   sessionId?: string,
   requestedKind?: RecordKind,
+  carry?: ClauseCarryContext,
 ): NormalizedRecordCandidate | null {
   const trimmed = stripInjectedContent(content || '').trim();
   if (!trimmed || !isAtomicDeterministicInput(trimmed)) return null;
 
+  const decision = resolveAtomicContractDecision(trimmed);
   const deterministic = normalizeManualInput(agentId, {
     kind: requestedKind,
     content: trimmed,
     source_type: sourceType,
     session_id: sessionId,
+    entity_key: decision.requested_kind === 'fact_slot' ? carry?.entity_key : undefined,
   });
 
   return deterministic.written_kind === 'session_note' ? null : deterministic;
@@ -512,6 +515,7 @@ export class CortexRecordsV2 {
     requested_kind?: RecordKind;
     source_type: SourceType;
     session_id?: string;
+    carry_context?: ClauseCarryContext;
   }): Promise<{
     candidates: NormalizedRecordCandidate[];
     hintedFallback: NormalizedRecordCandidate;
@@ -541,6 +545,7 @@ export class CortexRecordsV2 {
       input.source_type,
       input.session_id,
       input.requested_kind,
+      input.carry_context,
     );
 
     if (deterministic) {
@@ -567,6 +572,7 @@ export class CortexRecordsV2 {
     requested_kind?: RecordKind;
     source_type: SourceType;
     session_id?: string;
+    carry_context?: ClauseCarryContext;
   }): Promise<{
     candidates: NormalizedRecordCandidate[];
     hintedFallback: NormalizedRecordCandidate;
@@ -584,7 +590,7 @@ export class CortexRecordsV2 {
     });
 
     const winners = new Map<string, { candidate: NormalizedRecordCandidate; order: number }>();
-    let carry: ClauseCarryContext = {};
+    let carry: ClauseCarryContext = { ...(input.carry_context || {}) };
     let order = 0;
 
     for (const clause of clauses) {
@@ -612,6 +618,7 @@ export class CortexRecordsV2 {
           content: clause,
           exchange: clauseExchange,
           requested_kind: requestedKind,
+          carry_context: carry,
         });
         clauseCandidates = collected.candidates;
       }
@@ -637,6 +644,7 @@ export class CortexRecordsV2 {
     requested_kind?: RecordKind;
     source_type?: SourceType;
     session_id?: string;
+    carry_context?: ClauseCarryContext;
   }): Promise<NormalizedRecordCandidate[]> {
     const content = stripInjectedContent(input.content || '').trim();
     if (!content) return [];
@@ -653,6 +661,7 @@ export class CortexRecordsV2 {
       requested_kind: input.requested_kind,
       source_type: input.source_type || 'user_confirmed',
       session_id: input.session_id,
+      carry_context: input.carry_context,
     });
 
     if (candidates.length === 0) {

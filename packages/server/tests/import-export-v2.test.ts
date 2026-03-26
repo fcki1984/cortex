@@ -437,6 +437,56 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
   });
 
+  it('keeps multiline text preview aligned with ingest winners across segment boundaries', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-multiline-conflict',
+      format: 'text',
+      content: ['我住大阪', '请用中文回答', '现在住东京'].join('\n'),
+    });
+
+    expect(preview.record_candidates).toHaveLength(2);
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'profile_rule',
+      'fact_slot',
+    ]);
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(preview.record_candidates[1]?.content).toBe('现在住东京');
+    expect(preview.relation_candidates).toHaveLength(1);
+    expect(preview.relation_candidates[0]?.object_key).toBe('东京');
+  });
+
+  it('keeps MEMORY.md preview aligned when later segments supersede the same durable key', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-memory-md-conflict',
+      format: 'memory_md',
+      content: [
+        '# MEMORY.md',
+        '',
+        '## Fact Slots',
+        '- 我住大阪',
+        '- 现在住东京',
+        '',
+        '## Profile Rules',
+        '- 请用中文回答',
+      ].join('\n'),
+    });
+
+    expect(preview.record_candidates).toHaveLength(2);
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'fact_slot',
+      'profile_rule',
+    ]);
+    expect(preview.record_candidates[0]?.content).toBe('现在住东京');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('location');
+    expect(preview.record_candidates[1]?.attribute_key).toBe('language_preference');
+    expect(preview.relation_candidates).toHaveLength(1);
+    expect(preview.relation_candidates[0]?.object_key).toBe('东京');
+  });
+
   it('keeps ingest aligned with deterministic task-state hints when deep extraction drifts', async () => {
     const { records, relations } = await createServices(createContractDriftMockLLM());
 

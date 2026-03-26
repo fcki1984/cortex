@@ -65,6 +65,10 @@ type PreviewRelationCandidate = {
   } | null;
 };
 
+type PreviewCarryContext = {
+  entity_key?: string;
+};
+
 export type ImportPreviewResponse = {
   record_candidates: PreviewRecordCandidate[];
   relation_candidates: PreviewRelationCandidate[];
@@ -422,6 +426,62 @@ function dedupeRelationCandidates(candidates: PreviewRelationCandidate[]): Previ
   return Array.from(deduped.values());
 }
 
+function previewRecordStableKey(candidate: PreviewRecordCandidate): string | null {
+  switch (candidate.normalized_kind) {
+    case 'fact_slot':
+      if (!candidate.entity_key || !candidate.attribute_key) return null;
+      return `fact_slot:${candidate.entity_key}:${candidate.attribute_key}`;
+    case 'profile_rule':
+      if (!candidate.subject_key || !candidate.attribute_key || !candidate.owner_scope) return null;
+      return `profile_rule:${candidate.owner_scope}:${candidate.subject_key}:${candidate.attribute_key}`;
+    case 'task_state':
+      if (!candidate.subject_key || !candidate.state_key) return null;
+      return `task_state:${candidate.subject_key}:${candidate.state_key}`;
+    default:
+      return null;
+  }
+}
+
+function arbitratePreviewRecordCandidates(candidates: PreviewRecordCandidate[]): PreviewRecordCandidate[] {
+  const ordered = new Map<string, { candidate: PreviewRecordCandidate; order: number }>();
+  const passthrough: Array<{ candidate: PreviewRecordCandidate; order: number }> = [];
+
+  for (const [index, candidate] of candidates.entries()) {
+    const stableKey = previewRecordStableKey(candidate);
+    if (!stableKey) {
+      passthrough.push({ candidate, order: index });
+      continue;
+    }
+    ordered.set(stableKey, { candidate, order: index });
+  }
+
+  return [...passthrough, ...ordered.values()]
+    .sort((left, right) => left.order - right.order)
+    .map(entry => entry.candidate);
+}
+
+function updatePreviewCarryContext(
+  carry: PreviewCarryContext,
+  normalized: NormalizedRecordCandidate,
+): PreviewCarryContext {
+  const record = normalized.candidate;
+  if (record.kind === 'fact_slot') {
+    return {
+      ...carry,
+      entity_key: record.entity_key,
+    };
+  }
+
+  if (record.kind === 'profile_rule' && record.owner_scope === 'user' && record.subject_key === 'user') {
+    return {
+      ...carry,
+      entity_key: carry.entity_key || 'user',
+    };
+  }
+
+  return carry;
+}
+
 async function buildPreviewFromSegments(
   recordsV2: CortexRecordsV2,
   agentId: string,
@@ -429,6 +489,7 @@ async function buildPreviewFromSegments(
   segments: Array<{ content: string; requested_kind?: RecordKind }>,
 ): Promise<ImportPreviewResponse> {
   const recordCandidates: PreviewRecordCandidate[] = [];
+  let carry: PreviewCarryContext = {};
 
   for (const segment of segments) {
     const normalizedCandidates = await recordsV2.previewImportCandidates({
@@ -438,9 +499,11 @@ async function buildPreviewFromSegments(
         ? segment.requested_kind
         : undefined,
       source_type: 'user_confirmed',
+      carry_context: carry,
     });
 
     for (const normalized of normalizedCandidates) {
+      carry = updatePreviewCarryContext(carry, normalized);
       recordCandidates.push(previewRecordFromNormalized(
         normalized,
         recordCandidates.length,
@@ -450,20 +513,21 @@ async function buildPreviewFromSegments(
     }
   }
 
+  const winningRecordCandidates = arbitratePreviewRecordCandidates(recordCandidates);
   const relationCandidates = dedupeRelationCandidates(
-    recordCandidates
+    winningRecordCandidates
       .map((candidate, index) => previewRelationFromRecord(candidate, index))
       .filter((item): item is PreviewRelationCandidate => !!item),
   );
 
   return {
-    record_candidates: recordCandidates,
+    record_candidates: winningRecordCandidates,
     relation_candidates: relationCandidates,
     warnings: [],
     stats: {
       format,
       total_segments: segments.length,
-      record_candidates: recordCandidates.length,
+      record_candidates: winningRecordCandidates.length,
       relation_candidates: relationCandidates.length,
     },
   };

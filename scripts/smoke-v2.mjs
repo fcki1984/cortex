@@ -320,6 +320,43 @@ async function runRound(round) {
     assert(conflictPreview.response.status === 200, `POST /api/v2/import/preview conflict returned ${conflictPreview.response.status}`);
     assert((conflictPreview.json?.record_candidates || []).length === 1, 'compound conflict preview should keep one winner');
     assert(conflictPreview.json?.record_candidates?.[0]?.content === '现在住东京', 'compound conflict preview kept the wrong winner');
+
+    const multilinePreview = await request('preview multiline text conflict', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: conflictAgentId,
+        format: 'text',
+        content: ['我住大阪', '请用中文回答', '现在住东京'].join('\n'),
+      },
+      retryable: true,
+    });
+    assert(multilinePreview.response.status === 200, `POST /api/v2/import/preview multiline returned ${multilinePreview.response.status}`);
+    assert((multilinePreview.json?.record_candidates || []).length === 2, 'multiline preview should keep two winning records');
+    assert(multilinePreview.json?.record_candidates?.[1]?.content === '现在住东京', 'multiline preview kept the wrong durable winner');
+    assert((multilinePreview.json?.relation_candidates || []).length === 1, 'multiline preview should keep one relation candidate');
+    assert(multilinePreview.json?.relation_candidates?.[0]?.object_key === '东京', 'multiline preview relation winner should point at 东京');
+
+    const memoryPreview = await request('preview MEMORY.md multiline conflict', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: compoundAgentId,
+        format: 'memory_md',
+        content: [
+          '# MEMORY.md',
+          '',
+          '## Fact Slots',
+          '- 我住大阪',
+          '- 现在住东京',
+          '',
+          '## Profile Rules',
+          '- 请用中文回答',
+        ].join('\n'),
+      },
+      retryable: true,
+    });
+    assert(memoryPreview.response.status === 200, `POST /api/v2/import/preview memory_md returned ${memoryPreview.response.status}`);
+    assert((memoryPreview.json?.record_candidates || []).length === 2, 'MEMORY.md preview should keep two winning records');
+    assert(memoryPreview.json?.record_candidates?.[0]?.content === '现在住东京', 'MEMORY.md preview kept the wrong durable winner');
+    assert((memoryPreview.json?.relation_candidates || []).length === 1, 'MEMORY.md preview should keep one relation candidate');
+    assert(memoryPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'MEMORY.md preview relation winner should point at 东京');
     logStep('compound contract', 'records boundary, ingest, and preview all passed');
 
     const preview = await request('preview text import contract', 'POST', '/api/v2/import/preview', {
