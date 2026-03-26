@@ -20,15 +20,39 @@ type ClassifiedError = {
 
 type Handler<T> = (req: FastifyRequest, reply: FastifyReply) => Promise<T> | T;
 
+function readSingleHeader(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
+  const value = headers[name];
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const first = value.find(item => typeof item === 'string' && item.trim());
+    if (first) return first.trim();
+  }
+  return undefined;
+}
+
 function inferAgentId(req: FastifyRequest): string | undefined {
   const headers = req.headers as Record<string, string | string[] | undefined>;
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : undefined;
   const query = (req.query && typeof req.query === 'object') ? req.query as Record<string, unknown> : undefined;
-  const fromHeader = headers['x-agent-id'];
-  if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim();
+  const fromHeader = readSingleHeader(headers, 'x-agent-id');
+  if (fromHeader) return fromHeader;
   if (typeof body?.agent_id === 'string' && body.agent_id.trim()) return body.agent_id.trim();
   if (typeof query?.agent_id === 'string' && query.agent_id.trim()) return query.agent_id.trim();
   return undefined;
+}
+
+function inferSmokeRunId(req: FastifyRequest): string | undefined {
+  return readSingleHeader(req.headers as Record<string, string | string[] | undefined>, 'x-cortex-smoke-run');
+}
+
+function applyTraceHeaders(req: FastifyRequest, reply: FastifyReply) {
+  const requestId = typeof req.id === 'string' ? req.id : String(req.id);
+  const smokeRunId = inferSmokeRunId(req);
+  reply.header('x-cortex-request-id', requestId);
+  if (smokeRunId) {
+    reply.header('x-cortex-smoke-run', smokeRunId);
+  }
+  return { requestId, smokeRunId };
 }
 
 function classifyError(error: unknown): ClassifiedError {
@@ -120,6 +144,7 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<T | { error: string; category: string; details: string }> => {
     const startedAt = Date.now();
     const agentId = inferAgentId(req);
+    const trace = applyTraceHeaders(req, reply);
 
     try {
       const result = await withTimeout(Promise.resolve(handler(req, reply)), meta.timeoutMs, meta.route);
@@ -135,6 +160,8 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
         timeout_ms: meta.timeoutMs,
         near_timeout: nearTimeout,
         agent_id: agentId,
+        request_id: trace.requestId,
+        smoke_run_id: trace.smokeRunId,
       };
       if (nearTimeout) {
         log.warn(logPayload, 'Observed route near timeout');
@@ -161,6 +188,8 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
         timeout_ms: meta.timeoutMs,
         timed_out: classified.category.endsWith('timeout'),
         agent_id: agentId,
+        request_id: trace.requestId,
+        smoke_run_id: trace.smokeRunId,
         category: classified.category,
         error: classified.details,
       }, 'Observed route failed');

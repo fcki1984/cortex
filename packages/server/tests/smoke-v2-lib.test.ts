@@ -1,0 +1,136 @@
+import { describe, expect, it, vi } from 'vitest';
+import { runBestEffortSteps, runSmokeRequest } from '../../../scripts/smoke-v2-lib.mjs';
+
+describe('smoke-v2 helper library', () => {
+  it('retries a retryable safe request once after a transient fetch failure', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'x-cortex-request-id': 'req-2',
+        },
+      }));
+
+    const result = await runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-1',
+      label: 'health',
+      method: 'GET',
+      path: '/api/v2/health',
+      retryable: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer secret-token',
+      'x-cortex-smoke-run': 'smoke-run-1',
+    });
+    expect(result.requestId).toBe('req-2');
+    expect(result.json).toEqual({ status: 'ok' });
+  });
+
+  it('fails fast for non-retryable writes with a detailed step label', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('bad gateway', {
+      status: 502,
+      headers: {
+        'x-cortex-request-id': 'req-write-1',
+      },
+    }));
+
+    await expect(runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-2',
+      label: 'create probe record',
+      method: 'POST',
+      path: '/api/v2/records',
+      body: { kind: 'fact_slot', content: '我住大阪' },
+      retryable: false,
+    })).rejects.toThrow('create probe record POST /api/v2/records failed with status 502');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('records cleanup warnings and continues later cleanup steps', async () => {
+    const events: string[] = [];
+
+    const warnings = await runBestEffortSteps([
+      {
+        label: 'cleanup records',
+        run: async () => {
+          events.push('records');
+          throw new Error('socket hang up');
+        },
+      },
+      {
+        label: 'cleanup agent',
+        run: async () => {
+          events.push('agent');
+        },
+      },
+    ]);
+
+    expect(events).toEqual(['records', 'agent']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('cleanup records');
+    expect(warnings[0]).toContain('socket hang up');
+  });
+
+  it('accepts an explicitly expected non-2xx status for release gate checks', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Not found' }), {
+      status: 404,
+      headers: {
+        'content-type': 'application/json',
+        'x-cortex-request-id': 'req-404',
+      },
+    }));
+
+    const result = await runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-404',
+      label: 'legacy route POST /api/v1/recall',
+      method: 'POST',
+      path: '/api/v1/recall',
+      body: { query: 'smoke' },
+      expectedStatus: 404,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.response.status).toBe(404);
+    expect(result.requestId).toBe('req-404');
+    expect(result.json).toEqual({ error: 'Not found' });
+  });
+
+  it('treats a null body as absent so GET-based release checks stay valid', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Not found' }), {
+      status: 404,
+      headers: {
+        'content-type': 'application/json',
+        'x-cortex-request-id': 'req-null-body',
+      },
+    }));
+
+    const result = await runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-null-body',
+      label: 'legacy route GET /api/v1/memories',
+      method: 'GET',
+      path: '/api/v1/memories',
+      body: null,
+      expectedStatus: 404,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(result.requestId).toBe('req-null-body');
+  });
+});

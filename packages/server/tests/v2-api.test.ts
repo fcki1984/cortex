@@ -316,6 +316,22 @@ describe('API V2 Integration', () => {
     expect(extractionLogsV1.statusCode).toBe(404);
   });
 
+  it('emits request tracing headers for observed routes', async () => {
+    const smokeRunId = 'smoke-observed-route-1';
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/health',
+      headers: {
+        'x-cortex-smoke-run': smokeRunId,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['x-cortex-request-id']).toBeTruthy();
+    expect(response.headers['x-cortex-smoke-run']).toBe(smokeRunId);
+  });
+
   it('exposes auth bootstrap under /api/v2 and closes /api/v1 auth aliases', async () => {
     const checkV2 = await app.inject({ method: 'GET', url: '/api/v2/auth/check' });
     const checkV1 = await app.inject({ method: 'GET', url: '/api/v1/auth/check' });
