@@ -463,6 +463,28 @@ describe('V2 Import / Export', () => {
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
   });
 
+  it('keeps implicit follow-up organization variants durable after a speculative clause in text preview', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-compound-implicit-organization-variant',
+      format: 'text',
+      content: '最近也许会考虑换方案。目前任职于 OpenAI',
+    });
+
+    expect(preview.record_candidates).toHaveLength(2);
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'session_note',
+      'fact_slot',
+    ]);
+    expect(preview.record_candidates[1]?.attribute_key).toBe('organization');
+    expect(preview.record_candidates[1]?.entity_key).toBe('user');
+    expect(preview.record_candidates[1]?.content).toBe('目前任职于 OpenAI');
+    expect(preview.relation_candidates).toHaveLength(1);
+    expect(preview.relation_candidates[0]?.predicate).toBe('works_at');
+    expect(preview.relation_candidates[0]?.object_key).toBe('openai');
+  });
+
   it('lets later compound clauses win when they supersede the same stable fact key', async () => {
     const { records } = await createServices(createNoOpLLM());
 

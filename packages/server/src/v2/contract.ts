@@ -84,6 +84,14 @@ export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
   },
   {
+    input: '目前任职于 OpenAI',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
     input: '当前任务是重构 Cortex recall',
     requested_kind: 'task_state',
     written_kind: 'task_state',
@@ -113,6 +121,16 @@ const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   relationship: 'related_to',
   skill: 'has_skill',
 };
+
+function matchRelationObjectValue(content: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    const value = match?.[1]?.trim();
+    if (value) return value;
+  }
+  const fallback = content.trim();
+  return fallback || null;
+}
 
 function stripBulletPrefix(line: string): string {
   return line.replace(/^(?:[-*+]|\d+\.)\s+/, '');
@@ -185,7 +203,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
 
 function matchFactSlotAttribute(content: string): string | null {
   if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
-  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
+  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|任职于|就职于|供职于|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
     return 'occupation';
   }
@@ -208,6 +226,42 @@ function matchTaskStateKey(content: string): string | null {
 export function relationPredicateForFactAttribute(attributeKey?: string | null): string | null {
   if (!attributeKey) return null;
   return FACT_SLOT_RELATION_PREDICATES[attributeKey] || null;
+}
+
+export function extractFactRelationObjectValue(attributeKey: string | null | undefined, content: string): string | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  switch (attributeKey) {
+    case 'location':
+      return matchRelationObjectValue(trimmed, [
+        /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+        /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+        /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,
+        /\bbased in\s+([a-z0-9_\- ]+)/i,
+        /\bfrom\s+([a-z0-9_\- ]+)/i,
+        /来自\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+        /位于\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+      ]);
+    case 'organization':
+      return matchRelationObjectValue(trimmed, [
+        /(?:现在|目前|如今)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
+        /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
+        /(?:现在|目前|如今)?(?:任职于|就职于|供职于)\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+        /(?:我|用户)?(?:任职于|就职于|供职于)\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
+        /\bwork(?:s|ed|ing)?\s+(?:at|for|in)\s+([a-z0-9_\- ]+)/i,
+      ]);
+    case 'occupation':
+      return matchRelationObjectValue(trimmed, [
+        /(?:我|用户)?是\s*(.+)$/i,
+        /\bi(?:'m| am)\s+(?:a |an )?(.+)$/i,
+      ]);
+    case 'relationship':
+    case 'skill':
+      return trimmed;
+    default:
+      return null;
+  }
 }
 
 export function resolveAtomicContractDecision(content: string, ownerScope: 'user' | 'agent' = 'user'): AtomicContractDecision {

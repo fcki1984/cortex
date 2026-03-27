@@ -1,6 +1,6 @@
 import { getDb } from '../db/connection.js';
 import { generateId } from '../utils/helpers.js';
-import { relationPredicateForFactAttribute } from './contract.js';
+import { extractFactRelationObjectValue, relationPredicateForFactAttribute } from './contract.js';
 import { getRecordById, listEvidence } from './store.js';
 import type { CortexRecord, RecordEvidence } from './types.js';
 
@@ -87,46 +87,13 @@ function parseMetadata(raw: string | null | undefined): Record<string, unknown> 
   }
 }
 
-function extractTail(content: string, patterns: RegExp[]): string {
-  for (const pattern of patterns) {
-    const match = content.match(pattern);
-    const candidate = match?.[1]?.trim();
-    if (candidate) return candidate;
-  }
-  return content.trim();
-}
-
 function deriveObjectKey(record: CortexRecord): string | null {
   const content = record.content.trim();
   if (!content) return null;
 
   if (record.kind === 'fact_slot') {
-    switch (record.attribute_key) {
-      case 'location':
-        return normalizeKey(extractTail(content, [
-          /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-          /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,
-          /\bbased in\s+([a-z0-9_\- ]+)/i,
-          /\bfrom\s+([a-z0-9_\- ]+)/i,
-          /来自\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-          /位于\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-        ]));
-      case 'organization':
-        return normalizeKey(extractTail(content, [
-          /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
-          /\bwork(?:s|ed|ing)?\s+(?:at|for|in)\s+([a-z0-9_\- ]+)/i,
-        ]));
-      case 'occupation':
-        return normalizeKey(extractTail(content, [
-          /(?:我|用户)?是\s*(.+)$/i,
-          /\bi(?:'m| am)\s+(?:a |an )?(.+)$/i,
-        ]));
-      case 'relationship':
-      case 'skill':
-        return normalizeKey(content);
-      default:
-        return null;
-    }
+    const objectValue = extractFactRelationObjectValue(record.attribute_key, content);
+    return objectValue ? normalizeKey(objectValue) : null;
   }
   return null;
 }

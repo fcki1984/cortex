@@ -2,7 +2,11 @@ import { AUTO_CREATED_AGENT_DESCRIPTION, getAgentById, listAgents } from '../db/
 import { getDb } from '../db/connection.js';
 import { ensureAgent } from '../db/index.js';
 import { normalizeEntity } from '../utils/helpers.js';
-import { relationPredicateForFactAttribute, shouldApplyRequestedKindHint } from './contract.js';
+import {
+  extractFactRelationObjectValue,
+  relationPredicateForFactAttribute,
+  shouldApplyRequestedKindHint,
+} from './contract.js';
 import { normalizeManualInput } from './normalize.js';
 import { getRecordsCount } from './store.js';
 import type { CortexRelationsV2, V2Relation } from './relations.js';
@@ -317,55 +321,14 @@ function previewRecordFromNormalized(
   };
 }
 
-function valueTail(content: string, patterns: RegExp[]): string {
-  for (const pattern of patterns) {
-    const match = content.match(pattern);
-    const value = match?.[1]?.trim();
-    if (value) return value;
-  }
-  return content.trim();
-}
-
 function deriveRelationTriple(candidate: PreviewRecordCandidate): RelationTriple | null {
   if (candidate.normalized_kind === 'fact_slot') {
     const subjectKey = candidate.entity_key ? normalizeRelationKey(candidate.entity_key) : '';
     const predicate = relationPredicateForFactAttribute(candidate.attribute_key) || '';
     if (!subjectKey || !predicate) return null;
 
-    let objectKey = '';
-    switch (candidate.attribute_key) {
-      case 'location':
-        objectKey = normalizeRelationKey(valueTail(candidate.content, [
-          /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-          /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-          /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,
-          /\bbased in\s+([a-z0-9_\- ]+)/i,
-          /\bfrom\s+([a-z0-9_\- ]+)/i,
-          /来自\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-          /位于\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-        ]));
-        break;
-      case 'organization':
-        objectKey = normalizeRelationKey(valueTail(candidate.content, [
-          /(?:现在|目前|如今)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
-          /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
-          /\bwork(?:s|ed|ing)?\s+(?:at|for|in)\s+([a-z0-9_\- ]+)/i,
-        ]));
-        break;
-      case 'occupation':
-        objectKey = normalizeRelationKey(valueTail(candidate.content, [
-          /(?:我|用户)?是\s*(.+)$/i,
-          /\bi(?:'m| am)\s+(?:a |an )?(.+)$/i,
-        ]));
-        break;
-      case 'relationship':
-      case 'skill':
-        objectKey = normalizeRelationKey(candidate.content);
-        break;
-      default:
-        objectKey = '';
-        break;
-    }
+    const objectValue = extractFactRelationObjectValue(candidate.attribute_key, candidate.content);
+    const objectKey = objectValue ? normalizeRelationKey(objectValue) : '';
     if (!objectKey) return null;
     return { subject_key: subjectKey, predicate, object_key: objectKey };
   }

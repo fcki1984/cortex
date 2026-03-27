@@ -182,6 +182,7 @@ async function runRound(round) {
   const deletedAgentId = `${probeAgentId}-deleted`;
   const compoundAgentId = `${probeAgentId}-compound`;
   const conflictAgentId = `${probeAgentId}-conflict`;
+  const organizationVariantAgentId = `${probeAgentId}-org`;
   const cleanupAgentIds = [
     probeAgentId,
     roundtripSourceAgentId,
@@ -189,6 +190,7 @@ async function runRound(round) {
     deletedAgentId,
     compoundAgentId,
     conflictAgentId,
+    organizationVariantAgentId,
   ];
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus } = {}) {
@@ -336,6 +338,36 @@ async function runRound(round) {
     assert(implicitLocationVariantPreview.json?.record_candidates?.[1]?.entity_key === 'user', 'implicit location variant preview did not infer user entity');
     assert((implicitLocationVariantPreview.json?.relation_candidates || []).length === 1, 'implicit location variant preview should keep one relation candidate');
     assert(implicitLocationVariantPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'implicit location variant preview relation winner should point at 东京');
+
+    const implicitOrganizationVariantPreview = await request('preview implicit follow-up organization variant after speculative clause', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: organizationVariantAgentId,
+        format: 'text',
+        content: '最近也许会考虑换方案。目前任职于 OpenAI',
+      },
+      retryable: true,
+    });
+    assert(implicitOrganizationVariantPreview.response.status === 200, `POST /api/v2/import/preview implicit organization variant returned ${implicitOrganizationVariantPreview.response.status}`);
+    assert((implicitOrganizationVariantPreview.json?.record_candidates || []).map((item) => item.normalized_kind).join(',') === 'session_note,fact_slot', 'implicit organization variant preview did not keep note + fact winners');
+    assert(implicitOrganizationVariantPreview.json?.record_candidates?.[1]?.entity_key === 'user', 'implicit organization variant preview did not infer user entity');
+    assert((implicitOrganizationVariantPreview.json?.relation_candidates || []).length === 1, 'implicit organization variant preview should keep one relation candidate');
+    assert(implicitOrganizationVariantPreview.json?.relation_candidates?.[0]?.object_key === 'openai', 'implicit organization variant preview relation winner should point at openai');
+
+    const implicitOrganizationVariantIngest = await request('ingest implicit follow-up organization variant after speculative clause', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '最近也许会考虑换方案。目前任职于 OpenAI',
+        assistant_message: '记住了',
+        agent_id: organizationVariantAgentId,
+      },
+    });
+    assert(implicitOrganizationVariantIngest.response.status === 201, `POST /api/v2/ingest implicit organization variant returned ${implicitOrganizationVariantIngest.response.status}`);
+    assert((implicitOrganizationVariantIngest.json?.records || []).map((item) => item.written_kind).join(',') === 'session_note,fact_slot', 'implicit organization variant ingest did not keep note + fact winners');
+
+    const implicitOrganizationVariantCandidates = await request('list implicit organization variant relation candidates', 'GET', `/api/v2/relation-candidates${query({ agent_id: organizationVariantAgentId, status: 'pending', limit: 20 })}`, {
+      retryable: true,
+    });
+    assert(implicitOrganizationVariantCandidates.response.status === 200, `GET /api/v2/relation-candidates implicit organization variant returned ${implicitOrganizationVariantCandidates.response.status}`);
+    assert((implicitOrganizationVariantCandidates.json?.items || []).map((item) => item.object_key).join(',') === 'openai', 'implicit organization variant derived candidate should point at openai');
 
     const conflictPreview = await request('preview compound fact conflict', 'POST', '/api/v2/import/preview', {
       body: {

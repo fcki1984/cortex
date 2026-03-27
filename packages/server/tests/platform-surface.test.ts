@@ -81,6 +81,7 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('我住大阪。请用中文回答。当前任务是重构 Cortex recall');
     expect(smoke).toContain('最近也许会考虑换方案。现在住东京');
     expect(smoke).toContain('最近也许会考虑换方案。目前位于东京');
+    expect(smoke).toContain('最近也许会考虑换方案。目前任职于 OpenAI');
     expect(smoke).toContain('我住大阪。现在住东京');
     expect(smoke).toContain("['我住大阪', '请用中文回答', '现在住东京'].join('\\n')");
     expect(smoke).toContain("'## Fact Slots'");
