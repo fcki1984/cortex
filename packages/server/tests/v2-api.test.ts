@@ -473,6 +473,25 @@ describe('API V2 Integration', () => {
     expect(recallBody.facts[0]?.content).toContain('东京');
   });
 
+  it('admits implicit follow-up location variants as durable facts through the public write API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '目前位于东京',
+        agent_id: 'api-implicit-location-variant',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const body = JSON.parse(created.payload);
+    expect(body.record.kind).toBe('fact_slot');
+    expect(body.record.entity_key).toBe('user');
+    expect(body.record.attribute_key).toBe('location');
+    expect(body.normalization).toBe('durable');
+  });
+
   it('admits imperative language preference and constraint statements as durable profile rules', async () => {
     const language = await app.inject({
       method: 'POST',
@@ -600,6 +619,34 @@ describe('API V2 Integration', () => {
     const relationCandidates = await app.inject({
       method: 'GET',
       url: '/api/v2/relation-candidates?agent_id=api-compound-implicit-fact-ingest',
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+  });
+
+  it('keeps implicit follow-up location variants durable after speculative ingest clauses', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '最近也许会考虑换方案。目前位于东京',
+        assistant_message: '记住了',
+        agent_id: 'api-compound-implicit-location-variant-ingest',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((record: any) => record.written_kind)).toEqual([
+      'session_note',
+      'fact_slot',
+    ]);
+    expect(body.records[1]?.content).toBe('目前位于东京');
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-compound-implicit-location-variant-ingest',
     });
     expect(relationCandidates.statusCode).toBe(200);
     expect(JSON.parse(relationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);

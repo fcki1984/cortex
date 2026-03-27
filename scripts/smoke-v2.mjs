@@ -323,6 +323,20 @@ async function runRound(round) {
     assert((implicitFollowupPreview.json?.relation_candidates || []).length === 1, 'implicit follow-up preview should keep one relation candidate');
     assert(implicitFollowupPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'implicit follow-up preview relation winner should point at 东京');
 
+    const implicitLocationVariantPreview = await request('preview implicit follow-up location variant after speculative clause', 'POST', '/api/v2/import/preview', {
+      body: {
+        agent_id: compoundAgentId,
+        format: 'text',
+        content: '最近也许会考虑换方案。目前位于东京',
+      },
+      retryable: true,
+    });
+    assert(implicitLocationVariantPreview.response.status === 200, `POST /api/v2/import/preview implicit location variant returned ${implicitLocationVariantPreview.response.status}`);
+    assert((implicitLocationVariantPreview.json?.record_candidates || []).map((item) => item.normalized_kind).join(',') === 'session_note,fact_slot', 'implicit location variant preview did not keep note + fact winners');
+    assert(implicitLocationVariantPreview.json?.record_candidates?.[1]?.entity_key === 'user', 'implicit location variant preview did not infer user entity');
+    assert((implicitLocationVariantPreview.json?.relation_candidates || []).length === 1, 'implicit location variant preview should keep one relation candidate');
+    assert(implicitLocationVariantPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'implicit location variant preview relation winner should point at 东京');
+
     const conflictPreview = await request('preview compound fact conflict', 'POST', '/api/v2/import/preview', {
       body: {
         agent_id: conflictAgentId,

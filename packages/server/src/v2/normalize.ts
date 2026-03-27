@@ -85,7 +85,7 @@ const TASK_STATE_KEY_ALIASES: Record<string, string> = {
 
 const USER_SUBJECT_RE = /(?:我|我的|用户|user\b|i\b|my\b)/i;
 const AGENT_SUBJECT_RE = /(?:agent\b|助手|assistant\b)/i;
-const IMPLICIT_USER_FOLLOWUP_FACT_RE = /^(?:现在|目前|如今|currently|now)\s*(?:住(?:在)?|在.+工作|work(?:s|ed|ing)?\s+(?:at|for|in)\b|live(?:s|d|ing)?\s+in\b)/i;
+const IMPLICIT_USER_FOLLOWUP_PREFIX_RE = /^(?:现在|目前|如今|currently|now)\s*/i;
 
 type ManualInput = {
   kind?: string;
@@ -242,7 +242,10 @@ function firstDefined<T>(...values: Array<T | null | undefined>): T | null {
 function inferUserSubject(content: string): string | null {
   const trimmed = content.trim();
   if (USER_SUBJECT_RE.test(trimmed)) return 'user';
-  return IMPLICIT_USER_FOLLOWUP_FACT_RE.test(trimmed) ? 'user' : null;
+  if (IMPLICIT_USER_FOLLOWUP_PREFIX_RE.test(trimmed) && inferRequestedKindFromContent(trimmed) === 'fact_slot') {
+    return 'user';
+  }
+  return null;
 }
 
 function inferSubjectKey(content: string): string | null {
