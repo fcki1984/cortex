@@ -8,6 +8,12 @@ import { CortexRelationsV2 } from '../src/v2/relations.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from '../src/v2/prompts.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import { buildCanonicalExportBundle, confirmImport, previewImport } from '../src/v2/import-export.js';
+import {
+  createConflictingDurableMockLLM,
+  createContractDriftMockLLM,
+  createNoOpLLM,
+  createPrecisionFirstDriftMockLLM,
+} from './helpers/v2-contract-fixtures.js';
 
 function createMockEmbedding(): EmbeddingProvider {
   return {
@@ -15,13 +21,6 @@ function createMockEmbedding(): EmbeddingProvider {
     dimensions: 4,
     embed: vi.fn().mockResolvedValue([]),
     embedBatch: vi.fn().mockResolvedValue([]),
-  };
-}
-
-function createNoOpLLM(): LLMProvider {
-  return {
-    name: 'no-op-llm',
-    complete: vi.fn().mockResolvedValue('{"records":[],"nothing_extracted":true}'),
   };
 }
 
@@ -40,98 +39,6 @@ function createImportPreviewMockLLM(): LLMProvider {
             value_text: '请把回答控制在三句话内',
             priority: 0.82,
             confidence: 0.94,
-          }],
-          nothing_extracted: false,
-        });
-      }
-
-      return '{"records":[],"nothing_extracted":true}';
-    }),
-  };
-}
-
-function createContractDriftMockLLM(): LLMProvider {
-  return {
-    name: 'contract-drift-mock',
-    complete: vi.fn().mockImplementation(async (prompt: string) => {
-      if (prompt.includes('请用中文回答')) {
-        return JSON.stringify({
-          records: [{
-            kind: 'session_note',
-            source_type: 'user_explicit',
-            summary: '请用中文回答',
-            priority: 0.5,
-            confidence: 0.7,
-          }],
-          nothing_extracted: false,
-        });
-      }
-
-      if (prompt.includes('当前任务是重构 Cortex recall')) {
-        return JSON.stringify({
-          records: [{
-            kind: 'session_note',
-            source_type: 'user_explicit',
-            summary: '当前任务是重构 Cortex recall',
-            priority: 0.55,
-            confidence: 0.72,
-          }],
-          nothing_extracted: false,
-        });
-      }
-
-      if (prompt.includes('最近也许会考虑换方案')) {
-        return JSON.stringify({
-          records: [{
-            kind: 'task_state',
-            source_type: 'user_explicit',
-            subject_key: 'cortex',
-            state_key: 'project_status',
-            status: 'planned',
-            summary: '最近也许会考虑换方案',
-            priority: 0.7,
-            confidence: 0.83,
-          }],
-          nothing_extracted: false,
-        });
-      }
-
-      return '{"records":[],"nothing_extracted":true}';
-    }),
-  };
-}
-
-function createConflictingDurableMockLLM(): LLMProvider {
-  return {
-    name: 'conflicting-durable-mock',
-    complete: vi.fn().mockImplementation(async (prompt: string) => {
-      if (prompt.includes('请用中文回答')) {
-        return JSON.stringify({
-          records: [{
-            kind: 'task_state',
-            source_type: 'user_explicit',
-            subject_key: 'cortex',
-            state_key: 'project_status',
-            status: 'active',
-            summary: '请用中文回答',
-            priority: 0.72,
-            confidence: 0.88,
-          }],
-          nothing_extracted: false,
-        });
-      }
-
-      if (prompt.includes('我在 OpenAI 工作')) {
-        return JSON.stringify({
-          records: [{
-            kind: 'profile_rule',
-            source_type: 'user_explicit',
-            owner_scope: 'user',
-            subject_key: 'user',
-            attribute_key: 'persona_style',
-            value_text: '我在 OpenAI 工作',
-            priority: 0.7,
-            confidence: 0.86,
           }],
           nothing_extracted: false,
         });
@@ -162,6 +69,9 @@ describe('V2 Import / Export', () => {
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('当前任务是重构 Cortex recall');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('最近也许会考虑换方案');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('If the only evidence is assistant interpretation, emit session_note with source_type assistant_inferred instead of a durable record.');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('Do not collapse compound inputs into a single vague summary.');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('If multiple clauses set the same stable key, keep only the later winner.');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('Do not keep superseded earlier durable records.');
   });
 
   it('uses deep extraction for plain text preview candidates', async () => {
@@ -277,6 +187,21 @@ describe('V2 Import / Export', () => {
 
     expect(preview.record_candidates).toHaveLength(1);
     expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('prunes deep durable preview drift when the explicit input does not support a stable key', async () => {
+    const { records } = await createServices(createPrecisionFirstDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-precision-first-drift',
+      format: 'text',
+      content: '这个方向先别定',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.record_candidates[0]?.content).toBe('这个方向先别定');
     expect(preview.relation_candidates).toHaveLength(0);
   });
 
@@ -622,6 +547,168 @@ describe('V2 Import / Export', () => {
     const relationCandidates = relations.listCandidates({ agent_id: 'ingest-durable-conflict' });
     expect(relationCandidates.items).toHaveLength(1);
     expect(relationCandidates.items[0]?.predicate).toBe('works_at');
+  });
+
+  it('prunes deep durable ingest drift when the explicit input does not support a stable key', async () => {
+    const { records, relations } = await createServices(createPrecisionFirstDriftMockLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-precision-first-drift',
+      user_message: '这个方向先别定',
+      assistant_message: '记住了',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('session_note');
+    expect(ingested.records[0]?.content).toBe('这个方向先别定');
+    expect(relations.listCandidates({ agent_id: 'ingest-precision-first-drift' }).items).toHaveLength(0);
+  });
+
+  it('treats a short user confirmation as user_confirmed durable when the prior assistant proposal has a single stable winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-confirmed-assistant-proposal',
+      user_message: '好，就这么定',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答。' },
+        { role: 'user', content: '好，就这么定' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toContain('中文回答');
+    expect(relations.listCandidates({ agent_id: 'ingest-confirmed-assistant-proposal' }).items).toHaveLength(0);
+  });
+
+  it('keeps a short user confirmation as session_note when the prior assistant proposal contains multiple durable winners', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-confirmed-assistant-proposal-ambiguous',
+      user_message: '好，就这么定',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+        { role: 'user', content: '好，就这么定' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('session_note');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(relations.listCandidates({ agent_id: 'ingest-confirmed-assistant-proposal-ambiguous' }).items).toHaveLength(0);
+  });
+
+  it('treats a short user rewrite as explicit durable when it disambiguates a prior assistant proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-rewrite-assistant-proposal',
+      user_message: '不，改成英文',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+        { role: 'user', content: '不，改成英文' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toContain('英文回答');
+    expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal' }).items).toHaveLength(0);
+  });
+
+  it('keeps a short user rewrite as session_note when it does not provide a stable replacement', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-rewrite-assistant-proposal-unstable',
+      user_message: '不，换一个',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答。' },
+        { role: 'user', content: '不，换一个' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('session_note');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal-unstable' }).items).toHaveLength(0);
+  });
+
+  it('keeps only language_preference when a short follow-up drops the response_length part of a prior proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-keep-language',
+      user_message: '就中文，别加三句话限制',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+        { role: 'user', content: '就中文，别加三句话限制' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toContain('中文回答');
+    expect(ingested.records[0]?.content).not.toContain('三句话');
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-language' }).items).toHaveLength(0);
+  });
+
+  it('keeps only response_length when a short follow-up keeps the length constraint from a prior proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-keep-length',
+      user_message: '只保留三句话限制',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+        { role: 'user', content: '只保留三句话限制' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toContain('三句话');
+    expect(ingested.records[0]?.content).not.toContain('中文回答');
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-length' }).items).toHaveLength(0);
+  });
+
+  it('keeps a short selective follow-up as session_note when it drops every stable winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-drop-all',
+      user_message: '都不要',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+        { role: 'user', content: '都不要' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('session_note');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('都不要');
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-drop-all' }).items).toHaveLength(0);
   });
 
   it('keeps ingest aligned with clause-level winners for compound user input', async () => {

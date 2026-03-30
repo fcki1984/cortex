@@ -31,6 +31,7 @@ const V2 = {
   relations: '/api/v2/relations',
   lifecycle: '/api/v2/lifecycle',
   feedback: '/api/v2/feedback',
+  reviewInbox: '/api/v2/review-inbox',
 } as const;
 const TOKEN_KEY = 'cortex_auth_token';
 const DEFAULT_READ_TIMEOUT_MS = 8000;
@@ -283,6 +284,45 @@ export const exportBundleV2 = (params?: {
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return request(`${V2.export}${suffix}`);
 };
+
+export const listReviewInboxBatchesV2 = (params?: {
+  agent_id?: string;
+  status?: 'pending' | 'partially_applied' | 'completed' | 'dismissed';
+  source_kind?: 'live_ingest' | 'import_preview';
+  limit?: number | string;
+  offset?: number | string;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.agent_id) qs.set('agent_id', params.agent_id);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.source_kind) qs.set('source_kind', params.source_kind);
+  if (params?.limit != null) qs.set('limit', String(params.limit));
+  if (params?.offset != null) qs.set('offset', String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request(`${V2.reviewInbox}${suffix}`);
+};
+
+export const getReviewInboxBatchV2 = (id: string) =>
+  request(`${V2.reviewInbox}/${id}`);
+
+export const applyReviewInboxBatchV2 = (id: string, data: {
+  accept_all?: boolean;
+  reject_all?: boolean;
+  item_actions?: Array<{
+    item_id: string;
+    action: 'accept' | 'reject' | 'edit_then_accept';
+    payload_override?: Record<string, unknown>;
+  }>;
+}) =>
+  request(`${V2.reviewInbox}/${id}/apply`, { method: 'POST', body: JSON.stringify(data) });
+
+export const createReviewInboxImportV2 = (data: {
+  agent_id: string;
+  format: 'text' | 'memory_md';
+  content: string;
+  filename?: string;
+}) =>
+  request(`${V2.reviewInbox}/import`, { method: 'POST', body: JSON.stringify(data) });
 
 // Reindex
 export const triggerReindex = () =>

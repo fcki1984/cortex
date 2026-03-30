@@ -18,6 +18,16 @@ export type AtomicContractDecision = {
   speculative: boolean;
 };
 
+export type ShortUserProposalRewrite = {
+  synthesized_content: string;
+};
+
+export type ShortUserProposalSelection = {
+  keep_profile_rule_attributes: string[];
+  drop_profile_rule_attributes: string[];
+  drop_all: boolean;
+};
+
 export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   {
     input: '我住大阪',
@@ -114,6 +124,13 @@ export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: stri
 
 const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|probably)/i;
 const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
+const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
+const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
+const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
+const SHORT_USER_RESPONSE_LENGTH_REWRITE_RE = /(?:改成|换成|改为|换为|控制在|限制在)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)/i;
+const SHORT_USER_DISAGREEMENT_PREFIX_RE = /^(?:不(?:是)?|别|先别|不要|不用)[，,、 ]*/i;
+const SHORT_USER_DROP_ALL_RE = /^(?:都不要|全都不要|都别要|都别加|都去掉|都删掉)$/i;
+const ASSISTANT_PROPOSAL_CONJUNCTION_RE = /[，,]\s*(?:并(?:且)?|以及|and\b)\s*/i;
 const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   location: 'lives_in',
   organization: 'works_at',
@@ -138,6 +155,127 @@ function stripBulletPrefix(line: string): string {
 
 export function isSpeculativeContent(content: string): boolean {
   return SPECULATIVE_CONTENT_RE.test(content);
+}
+
+export function isShortUserConfirmation(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 16) return false;
+  return SHORT_USER_CONFIRMATION_RE.test(trimmed);
+}
+
+function canonicalLanguageLabel(raw: string): string | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === '中文' || normalized === 'chinese') return '中文';
+  if (normalized === '英文' || normalized === 'english') return '英文';
+  if (normalized === '日文' || normalized === 'japanese') return '日文';
+  return null;
+}
+
+function canonicalSentenceCount(raw: string): string {
+  return raw.replace(/\s+/g, '');
+}
+
+function stripShortUserDisagreementPrefix(content: string): string {
+  return content.replace(SHORT_USER_DISAGREEMENT_PREFIX_RE, '').trim();
+}
+
+function mentionsLanguagePreference(content: string): boolean {
+  return /(中文|英文|日文|english|chinese|japanese)/i.test(content);
+}
+
+function mentionsResponseLength(content: string): boolean {
+  return /(?:(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:限制|内|以内)?|句数限制|长度限制)/i.test(content);
+}
+
+function dropsLanguagePreference(content: string): boolean {
+  return /(?:别|不要|别用|取消|去掉|删掉).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content);
+}
+
+function dropsResponseLength(content: string): boolean {
+  return /(?:别|不要|别加|取消|去掉|删掉).{0,10}(?:(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:限制|内|以内)?|句数|长度限制)/i.test(content);
+}
+
+export function inferShortUserProposalRewrite(content: string): ShortUserProposalRewrite | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 20) return null;
+  const normalized = stripShortUserDisagreementPrefix(trimmed) || trimmed;
+
+  const languageMatch = normalized.match(SHORT_USER_LANGUAGE_REWRITE_RE);
+  if (languageMatch?.[1]) {
+    const label = canonicalLanguageLabel(languageMatch[1]);
+    if (label) {
+      return {
+        synthesized_content: `请用${label}回答`,
+      };
+    }
+  }
+
+  const responseLengthMatch = normalized.match(SHORT_USER_RESPONSE_LENGTH_REWRITE_RE);
+  if (responseLengthMatch?.[1]) {
+    return {
+      synthesized_content: `请把回答控制在${canonicalSentenceCount(responseLengthMatch[1])}`,
+    };
+  }
+
+  return null;
+}
+
+export function inferShortUserProposalSelection(content: string): ShortUserProposalSelection | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+  if (SHORT_USER_DROP_ALL_RE.test(trimmed)) {
+    return {
+      keep_profile_rule_attributes: [],
+      drop_profile_rule_attributes: [],
+      drop_all: true,
+    };
+  }
+
+  const keep = new Set<string>();
+  const drop = new Set<string>();
+
+  if (dropsLanguagePreference(trimmed)) {
+    drop.add('language_preference');
+  } else if (mentionsLanguagePreference(trimmed)) {
+    keep.add('language_preference');
+  }
+
+  if (dropsResponseLength(trimmed)) {
+    drop.add('response_length');
+  } else if (mentionsResponseLength(trimmed)) {
+    keep.add('response_length');
+  }
+
+  if (keep.size === 0 && drop.size === 0) return null;
+
+  return {
+    keep_profile_rule_attributes: Array.from(keep),
+    drop_profile_rule_attributes: Array.from(drop),
+    drop_all: false,
+  };
+}
+
+export function isShortUserProposalRejection(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 16) return false;
+  if (SHORT_USER_REJECTION_RE.test(trimmed)) return true;
+  const normalized = stripShortUserDisagreementPrefix(trimmed);
+  return normalized.length > 0 && SHORT_USER_REJECTION_RE.test(normalized);
+}
+
+export function splitAssistantProposalClauses(content: string): string[] {
+  const baseClauses = splitCompoundClauses(content);
+  const clauses: string[] = [];
+
+  for (const clause of baseClauses) {
+    const parts = clause
+      .split(ASSISTANT_PROPOSAL_CONJUNCTION_RE)
+      .map(part => part.trim())
+      .filter(Boolean);
+    if (parts.length > 0) clauses.push(...parts);
+  }
+
+  return clauses;
 }
 
 export function splitCompoundClauses(content: string): string[] {

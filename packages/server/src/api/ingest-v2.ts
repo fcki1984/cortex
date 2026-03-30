@@ -41,6 +41,15 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
       agent_id: body.agent_id,
       session_id: body.session_id,
     });
+    const reviewBatch = result.review_record_candidates.length > 0
+      ? cortex.reviewInboxV2.createLiveBatch({
+          agent_id: body.agent_id || 'default',
+          conversation_ref_id: result.conversation_ref_id,
+          session_id: body.session_id,
+          source_preview: [body.user_message || '', body.assistant_message || ''].filter(Boolean).join('\n').slice(0, 500),
+          items: result.review_record_candidates,
+        })
+      : null;
 
     if (cortex.config.sieve.extractionLogging) {
       insertExtractionLog(body.agent_id || 'default', body.session_id, {
@@ -66,6 +75,13 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
     }
 
     reply.code(201);
-    return result;
+    return {
+      records: result.records,
+      conversation_ref_id: result.conversation_ref_id,
+      skipped: result.skipped,
+      review_batch_id: reviewBatch?.batch.id || null,
+      review_pending_count: reviewBatch?.summary.pending || 0,
+      auto_committed_count: result.records.length,
+    };
   });
 }

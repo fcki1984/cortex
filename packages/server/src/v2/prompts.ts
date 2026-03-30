@@ -30,6 +30,9 @@ Rules:
 11. Do not downgrade short, explicit stable sentences like residence, employer, language preference, response-length limits, simple-solution constraints, or current refactor task into session_note.
 12. Even if keys look obvious, tentative wording like "maybe / perhaps / considering / 也许 / 可能 / 考虑" must stay session_note.
 13. If the only evidence is assistant interpretation, emit session_note with source_type assistant_inferred instead of a durable record.
+14. Do not collapse compound inputs into a single vague summary. Prefer clause-level extraction for explicit inputs.
+15. If multiple clauses set the same stable key, keep only the later winner.
+16. Do not keep superseded earlier durable records.
 
 Reference examples:
 ${REFERENCE_EXAMPLES}

@@ -11,6 +11,7 @@ import { V2_CONTRACT_CANONICAL_CASES } from '../src/v2/contract.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import { startLifecycleScheduler, stopLifecycleScheduler } from '../src/core/scheduler.js';
+import { createPrecisionFirstDriftMockLLM } from './helpers/v2-contract-fixtures.js';
 
 function createVectorOnlyEmbedding(): EmbeddingProvider {
   const vector = [1, 0, 0, 0];
@@ -1488,6 +1489,121 @@ describe('API V2 Integration', () => {
     });
     expect(listed.statusCode).toBe(200);
     expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
+  it('keeps ambiguous explicit input as session_note on preview and ingest when deep extraction invents a durable key', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createPrecisionFirstDriftMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: 'api-precision-first-preview',
+          format: 'text',
+          content: '这个方向先别定',
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(1);
+      expect(previewBody.record_candidates[0]?.normalized_kind).toBe('session_note');
+      expect(previewBody.record_candidates[0]?.content).toBe('这个方向先别定');
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '这个方向先别定',
+          assistant_message: '记住了',
+          agent_id: 'api-precision-first-ingest',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.records).toHaveLength(1);
+      expect(ingestBody.records[0]?.written_kind).toBe('session_note');
+      expect(ingestBody.records[0]?.content).toBe('这个方向先别定');
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('commits a user_confirmed durable when a short confirmation follows a single assistant proposal winner', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '好，就这么定',
+        assistant_message: '收到',
+        agent_id: 'api-user-confirmed-assistant-proposal',
+        messages: [
+          { role: 'assistant', content: '之后请始终用中文回答。' },
+          { role: 'user', content: '好，就这么定' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('profile_rule');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toContain('中文回答');
+  });
+
+  it('commits an explicit durable when a short user rewrite disambiguates a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '不，改成英文',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-assistant-proposal',
+        messages: [
+          { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+          { role: 'user', content: '不，改成英文' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('profile_rule');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toContain('英文回答');
+  });
+
+  it('commits only the selected durable winner when a short follow-up keeps one part of a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '就中文，别加三句话限制',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-assistant-proposal',
+        messages: [
+          { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内。' },
+          { role: 'user', content: '就中文，别加三句话限制' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('profile_rule');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toContain('中文回答');
+    expect(body.records[0]?.content).not.toContain('三句话');
   });
 
   it('previews MEMORY.md sections with v2 kind hints', async () => {

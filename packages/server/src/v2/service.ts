@@ -7,9 +7,14 @@ import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
 import {
   canDeriveRelationCandidate,
+  inferShortUserProposalSelection,
+  inferShortUserProposalRewrite,
+  isShortUserProposalRejection,
+  isShortUserConfirmation,
   isSpeculativeContent,
   resolveAtomicContractDecision,
   shouldApplyRequestedKindHint,
+  splitAssistantProposalClauses,
   splitCompoundClauses,
 } from './contract.js';
 import { CortexRelationsV2 } from './relations.js';
@@ -86,6 +91,22 @@ type ClauseCarryContext = {
   entity_key?: string;
 };
 
+type ExchangeMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+type CandidateOrigin = 'fast' | 'deep' | 'deterministic' | 'fallback';
+
+type CollectedCandidateDetail = {
+  candidate: NormalizedRecordCandidate;
+  origins: CandidateOrigin[];
+};
+
+type ShortUserProposalArbitration =
+  | { action: 'keep'; candidate: NormalizedRecordCandidate }
+  | { action: 'drop_all' };
+
 const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'user', patterns: [/\buser\b/i, /\bi\b/i, /\bme\b/i, /\bmy\b/i, /用户/i, /我/i, /我的/i] },
   { key: 'agent', patterns: [/\bagent\b/i, /\bassistant\b/i, /\byou\b/i, /助手/i, /你/i, /回答方式/i] },
@@ -137,6 +158,118 @@ function candidateText(candidate: NormalizedRecordCandidate): string {
     case 'session_note':
       return candidate.candidate.summary;
   }
+}
+
+function originPriority(origin: CandidateOrigin): number {
+  switch (origin) {
+    case 'deterministic':
+      return 4;
+    case 'fast':
+      return 3;
+    case 'deep':
+      return 2;
+    case 'fallback':
+    default:
+      return 1;
+  }
+}
+
+function mergeCandidateDetails(
+  merged: Map<string, CollectedCandidateDetail>,
+  candidate: NormalizedRecordCandidate,
+  origin: CandidateOrigin,
+): void {
+  const key = dedupeKey(candidate);
+  const existing = merged.get(key);
+  if (!existing) {
+    merged.set(key, { candidate, origins: [origin] });
+    return;
+  }
+
+  const origins = Array.from(new Set([...existing.origins, origin]));
+  const existingPriority = Math.max(...existing.origins.map(originPriority));
+  const nextPriority = originPriority(origin);
+
+  merged.set(key, {
+    candidate: nextPriority >= existingPriority ? candidate : existing.candidate,
+    origins,
+  });
+}
+
+function filterRedundantSessionNoteDetails(
+  details: CollectedCandidateDetail[],
+  deterministic: NormalizedRecordCandidate | null,
+): CollectedCandidateDetail[] {
+  if (!deterministic) return details;
+  const deterministicText = candidateText(deterministic).trim();
+  if (!deterministicText) return details;
+
+  return details.filter((detail) => {
+    if (detail.candidate.written_kind !== 'session_note') return true;
+    return candidateText(detail.candidate).trim() !== deterministicText;
+  });
+}
+
+function preferDeterministicAtomicDetail(
+  details: CollectedCandidateDetail[],
+  deterministic: NormalizedRecordCandidate | null,
+): CollectedCandidateDetail[] {
+  if (!deterministic) return details;
+
+  const deterministicKey = dedupeKey(deterministic);
+  const winner = details.find((detail) => dedupeKey(detail.candidate) === deterministicKey);
+  return [winner || { candidate: deterministic, origins: ['deterministic'] }];
+}
+
+function buildReviewRecordCandidate(
+  normalized: NormalizedRecordCandidate,
+  index: number,
+  sourceExcerpt: string,
+  evidence: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }>,
+): Record<string, unknown> {
+  const candidate = normalized.candidate;
+  const content = candidate.kind === 'profile_rule' || candidate.kind === 'fact_slot'
+    ? candidate.value_text
+    : candidate.summary;
+
+  return {
+    candidate_id: `review_record_${index + 1}`,
+    selected: true,
+    requested_kind: normalized.requested_kind,
+    normalized_kind: normalized.written_kind,
+    content,
+    source_type: candidate.source_type,
+    tags: candidate.tags || [],
+    priority: candidate.priority ?? 0.7,
+    confidence: candidate.confidence,
+    owner_scope: candidate.kind === 'profile_rule' ? candidate.owner_scope : undefined,
+    subject_key: candidate.kind === 'profile_rule'
+      ? candidate.subject_key
+      : candidate.kind === 'task_state'
+        ? candidate.subject_key
+        : undefined,
+    attribute_key: candidate.kind === 'profile_rule'
+      ? candidate.attribute_key
+      : candidate.kind === 'fact_slot'
+        ? candidate.attribute_key
+        : undefined,
+    entity_key: candidate.kind === 'fact_slot' ? candidate.entity_key : undefined,
+    state_key: candidate.kind === 'task_state' ? candidate.state_key : undefined,
+    status: candidate.kind === 'task_state' ? candidate.status : undefined,
+    session_id: candidate.kind === 'session_note' ? candidate.session_id || null : undefined,
+    expires_at: candidate.kind === 'session_note' ? candidate.expires_at || null : undefined,
+    lifecycle_state: candidate.kind === 'session_note' ? candidate.lifecycle_state : undefined,
+    retired_at: candidate.kind === 'session_note' ? candidate.retired_at || null : undefined,
+    purge_after: candidate.kind === 'session_note' ? candidate.purge_after || null : undefined,
+    source_excerpt: sourceExcerpt,
+    warnings: normalized.reason_code ? [normalized.reason_code] : [],
+    evidence,
+  };
+}
+
+function shouldAutoCommitIngestDetail(detail: CollectedCandidateDetail): boolean {
+  if (detail.candidate.written_kind === 'session_note') return true;
+  return detail.origins.includes('deterministic') || detail.origins.includes('fast');
 }
 
 function isAtomicDeterministicInput(content: string): boolean {
@@ -214,6 +347,86 @@ function buildDeterministicCandidate(
   return deterministic.written_kind === 'session_note' ? null : deterministic;
 }
 
+function collectAssistantProposalDurables(
+  agentId: string,
+  proposalContent: string,
+  sessionId?: string,
+): NormalizedRecordCandidate[] {
+  const clauses = splitAssistantProposalClauses(proposalContent);
+  const winners = new Map<string, { candidate: NormalizedRecordCandidate; order: number }>();
+  let carry: ClauseCarryContext = {};
+  let order = 0;
+
+  for (const clause of clauses) {
+    const candidate = buildDeterministicClauseCandidate(
+      agentId,
+      clause,
+      'user_confirmed',
+      sessionId,
+      undefined,
+      carry,
+    );
+    if (!candidate || candidate.written_kind === 'session_note') continue;
+
+    const key = stableContractKey(candidate);
+    if (!key) continue;
+
+    winners.set(key, { candidate, order });
+    carry = updateClauseCarryContext(carry, candidate);
+    order += 1;
+  }
+
+  return Array.from(winners.values())
+    .sort((left, right) => left.order - right.order)
+    .map(entry => entry.candidate);
+}
+
+function selectableProposalProfileRuleAttribute(candidate: NormalizedRecordCandidate): string | null {
+  const record = candidate.candidate;
+  if (
+    record.kind === 'profile_rule' &&
+    record.owner_scope === 'user' &&
+    record.subject_key === 'user' &&
+    (record.attribute_key === 'language_preference' || record.attribute_key === 'response_length')
+  ) {
+    return record.attribute_key;
+  }
+  return null;
+}
+
+function arbitrateShortUserProposalSelection(
+  userContent: string,
+  proposalDurables: NormalizedRecordCandidate[],
+): ShortUserProposalArbitration | null {
+  if (proposalDurables.length === 0) return null;
+
+  const selection = inferShortUserProposalSelection(userContent);
+  if (!selection) return null;
+  if (selection.drop_all) return { action: 'drop_all' };
+
+  const selectable = proposalDurables.map(candidate => ({
+    candidate,
+    attribute: selectableProposalProfileRuleAttribute(candidate),
+  }));
+  if (selectable.some(entry => !entry.attribute)) return null;
+
+  const keepSet = new Set(selection.keep_profile_rule_attributes);
+  const dropSet = new Set(selection.drop_profile_rule_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter(entry => entry.attribute && keepSet.has(entry.attribute));
+    if (survivors.length === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter(entry => entry.attribute && !dropSet.has(entry.attribute));
+    if (survivors.length === 0 && keepSet.size === 0) return { action: 'drop_all' };
+  }
+
+  return survivors.length === 1 ? { action: 'keep', candidate: survivors[0].candidate } : null;
+}
+
 function dropRedundantSessionNotes(
   candidates: NormalizedRecordCandidate[],
   deterministic: NormalizedRecordCandidate | null,
@@ -237,6 +450,88 @@ function preferDeterministicAtomicCandidate(
   const deterministicKey = dedupeKey(deterministic);
   const winner = candidates.find(candidate => dedupeKey(candidate) === deterministicKey) || deterministic;
   return [winner];
+}
+
+function stableContractKey(candidate: NormalizedRecordCandidate): string | null {
+  const record = candidate.candidate;
+  switch (record.kind) {
+    case 'profile_rule':
+      return `${record.kind}:${record.owner_scope}:${record.subject_key}:${record.attribute_key}`;
+    case 'fact_slot':
+      return `${record.kind}:${record.entity_key}:${record.attribute_key}`;
+    case 'task_state':
+      return `${record.kind}:${record.subject_key}:${record.state_key}`;
+    case 'session_note':
+      return null;
+  }
+}
+
+function revalidateDeepDurableCandidate(input: {
+  agent_id: string;
+  content: string;
+  source_type: SourceType;
+  session_id?: string;
+  candidate: NormalizedRecordCandidate;
+  carry_context?: ClauseCarryContext;
+}): NormalizedRecordCandidate | null {
+  if (input.candidate.written_kind === 'session_note') return input.candidate;
+
+  const record = input.candidate.candidate;
+  const revalidated = normalizeManualInput(input.agent_id, {
+    kind: input.candidate.requested_kind,
+    content: candidateText(input.candidate),
+    source_type: record.source_type,
+    tags: record.tags,
+    priority: record.priority,
+    session_id: input.session_id,
+    owner_scope: record.kind === 'profile_rule' ? record.owner_scope : undefined,
+    status: record.kind === 'task_state' ? record.status : undefined,
+    entity_key: record.kind === 'fact_slot' ? input.carry_context?.entity_key : undefined,
+  });
+  if (revalidated.written_kind === 'session_note') return null;
+  if (stableContractKey(revalidated) !== stableContractKey(input.candidate)) return null;
+
+  const baseline = normalizeManualInput(input.agent_id, {
+    content: input.content,
+    source_type: input.source_type,
+    session_id: input.session_id,
+    entity_key: input.carry_context?.entity_key,
+  });
+
+  if (baseline.written_kind !== 'session_note') {
+    return stableContractKey(revalidated) === stableContractKey(baseline) ? baseline : null;
+  }
+
+  if (isSpeculativeContent(input.content)) return null;
+  return revalidated;
+}
+
+function validateDeepCandidatesForExplicitInput(input: {
+  agent_id: string;
+  content: string;
+  source_type: SourceType;
+  session_id?: string;
+  candidates: NormalizedRecordCandidate[];
+  carry_context?: ClauseCarryContext;
+}): NormalizedRecordCandidate[] {
+  const validated = new Map<string, NormalizedRecordCandidate>();
+
+  for (const candidate of input.candidates) {
+    const vetted = candidate.written_kind === 'session_note'
+      ? candidate
+      : revalidateDeepDurableCandidate({
+          agent_id: input.agent_id,
+          content: input.content,
+          source_type: input.source_type,
+          session_id: input.session_id,
+          candidate,
+          carry_context: input.carry_context,
+        });
+    if (!vetted) continue;
+    validated.set(dedupeKey(vetted), vetted);
+  }
+
+  return Array.from(validated.values());
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -299,6 +594,30 @@ function kindWeight(kind: RecordKind): number {
     case 'session_note':
       return 0.55;
   }
+}
+
+function findPriorAssistantProposal(messages: ExchangeMessage[] | undefined, userContent: string): ExchangeMessage | null {
+  if (!messages || messages.length === 0) return null;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'user' || message.content !== userContent) continue;
+
+    for (let proposalIndex = index - 1; proposalIndex >= 0; proposalIndex -= 1) {
+      const proposal = messages[proposalIndex];
+      if (!proposal) continue;
+      if (proposal.role === 'assistant') {
+        return proposal.content ? proposal : null;
+      }
+      if (proposal.role === 'user') {
+        break;
+      }
+    }
+
+    break;
+  }
+
+  return null;
 }
 
 function sourceWeight(sourceType: SourceType): number {
@@ -504,7 +823,7 @@ export class CortexRecordsV2 {
     this.relations.createDerivedCandidates(record.id);
   }
 
-  private async collectAtomicExchangeCandidates(input: {
+  private async collectAtomicExchangeCandidateDetails(input: {
     agent_id: string;
     content: string;
     exchange: {
@@ -517,7 +836,7 @@ export class CortexRecordsV2 {
     session_id?: string;
     carry_context?: ClauseCarryContext;
   }): Promise<{
-    candidates: NormalizedRecordCandidate[];
+    candidateDetails: CollectedCandidateDetail[];
     hintedFallback: NormalizedRecordCandidate;
   }> {
     const fast = detectHighSignals(input.exchange).map(signal => signalToCandidate(signal, input.agent_id));
@@ -527,11 +846,14 @@ export class CortexRecordsV2 {
           return [] as NormalizedRecordCandidate[];
         })
       : [];
-
-    const merged = new Map<string, NormalizedRecordCandidate>();
-    for (const candidate of [...fast, ...deep]) {
-      merged.set(dedupeKey(candidate), candidate);
-    }
+    const validatedDeep = validateDeepCandidatesForExplicitInput({
+      agent_id: input.agent_id,
+      content: input.content,
+      source_type: input.source_type,
+      session_id: input.session_id,
+      candidates: deep,
+      carry_context: input.carry_context,
+    });
 
     const hintedFallback = normalizeManualInput(input.agent_id, {
       kind: input.requested_kind,
@@ -548,20 +870,31 @@ export class CortexRecordsV2 {
       input.carry_context,
     );
 
+    const merged = new Map<string, CollectedCandidateDetail>();
+    for (const candidate of fast) {
+      mergeCandidateDetails(merged, candidate, 'fast');
+    }
+    for (const candidate of validatedDeep) {
+      mergeCandidateDetails(merged, candidate, 'deep');
+    }
     if (deterministic) {
-      merged.set(dedupeKey(deterministic), deterministic);
+      mergeCandidateDetails(merged, deterministic, 'deterministic');
     }
 
+    const mergedCandidateDetails = preferDeterministicAtomicDetail(
+      filterRedundantSessionNoteDetails(Array.from(merged.values()), deterministic),
+      deterministic,
+    );
+
     return {
-      candidates: preferDeterministicAtomicCandidate(
-        dropRedundantSessionNotes(Array.from(merged.values()), deterministic),
-        deterministic,
-      ),
+      candidateDetails: mergedCandidateDetails.length === 0 && deep.length > 0 && validatedDeep.length === 0 && hintedFallback.written_kind === 'session_note'
+        ? [{ candidate: hintedFallback, origins: ['fallback'] }]
+        : mergedCandidateDetails,
       hintedFallback,
     };
   }
 
-  private async collectExchangeCandidates(input: {
+  private async collectAtomicExchangeCandidates(input: {
     agent_id: string;
     content: string;
     exchange: {
@@ -577,9 +910,32 @@ export class CortexRecordsV2 {
     candidates: NormalizedRecordCandidate[];
     hintedFallback: NormalizedRecordCandidate;
   }> {
+    const { candidateDetails, hintedFallback } = await this.collectAtomicExchangeCandidateDetails(input);
+    return {
+      candidates: candidateDetails.map((detail) => detail.candidate),
+      hintedFallback,
+    };
+  }
+
+  private async collectExchangeCandidateDetails(input: {
+    agent_id: string;
+    content: string;
+    exchange: {
+      user: string;
+      assistant: string;
+      messages?: ExchangeMessage[];
+    };
+    requested_kind?: RecordKind;
+    source_type: SourceType;
+    session_id?: string;
+    carry_context?: ClauseCarryContext;
+  }): Promise<{
+    candidateDetails: CollectedCandidateDetail[];
+    hintedFallback: NormalizedRecordCandidate;
+  }> {
     const clauses = splitCompoundClauses(input.content);
     if (clauses.length <= 1) {
-      return this.collectAtomicExchangeCandidates(input);
+      return this.collectAtomicExchangeCandidateDetails(input);
     }
 
     const hintedFallback = normalizeManualInput(input.agent_id, {
@@ -589,7 +945,7 @@ export class CortexRecordsV2 {
       session_id: input.session_id,
     });
 
-    const winners = new Map<string, { candidate: NormalizedRecordCandidate; order: number }>();
+    const winners = new Map<string, { detail: CollectedCandidateDetail; order: number }>();
     let carry: ClauseCarryContext = { ...(input.carry_context || {}) };
     let order = 0;
 
@@ -604,36 +960,59 @@ export class CortexRecordsV2 {
         carry,
       );
 
-      let clauseCandidates: NormalizedRecordCandidate[] = [];
+      let clauseCandidateDetails: CollectedCandidateDetail[] = [];
       if (deterministic) {
-        clauseCandidates = [deterministic];
+        clauseCandidateDetails = [{ candidate: deterministic, origins: ['deterministic'] }];
       } else {
         const clauseExchange = {
           user: clause,
           assistant: '',
           messages: [{ role: 'user' as const, content: clause }],
         };
-        const collected = await this.collectAtomicExchangeCandidates({
+        const collected = await this.collectAtomicExchangeCandidateDetails({
           ...input,
           content: clause,
           exchange: clauseExchange,
           requested_kind: requestedKind,
           carry_context: carry,
         });
-        clauseCandidates = collected.candidates;
+        clauseCandidateDetails = collected.candidateDetails;
       }
 
-      for (const candidate of clauseCandidates) {
-        winners.set(dedupeKey(candidate), { candidate, order });
-        carry = updateClauseCarryContext(carry, candidate);
+      for (const detail of clauseCandidateDetails) {
+        winners.set(dedupeKey(detail.candidate), { detail, order });
+        carry = updateClauseCarryContext(carry, detail.candidate);
         order += 1;
       }
     }
 
     return {
-      candidates: Array.from(winners.values())
+      candidateDetails: Array.from(winners.values())
         .sort((left, right) => left.order - right.order)
-        .map(entry => entry.candidate),
+        .map(entry => entry.detail),
+      hintedFallback,
+    };
+  }
+
+  private async collectExchangeCandidates(input: {
+    agent_id: string;
+    content: string;
+    exchange: {
+      user: string;
+      assistant: string;
+      messages?: ExchangeMessage[];
+    };
+    requested_kind?: RecordKind;
+    source_type: SourceType;
+    session_id?: string;
+    carry_context?: ClauseCarryContext;
+  }): Promise<{
+    candidates: NormalizedRecordCandidate[];
+    hintedFallback: NormalizedRecordCandidate;
+  }> {
+    const { candidateDetails, hintedFallback } = await this.collectExchangeCandidateDetails(input);
+    return {
+      candidates: candidateDetails.map((detail) => detail.candidate),
       hintedFallback,
     };
   }
@@ -710,7 +1089,7 @@ export class CortexRecordsV2 {
     exchange: {
       user: string;
       assistant: string;
-      messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      messages?: ExchangeMessage[];
     },
     agentId: string,
     sessionId?: string,
@@ -760,7 +1139,7 @@ export class CortexRecordsV2 {
   async ingest(req: {
     user_message: string;
     assistant_message: string;
-    messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    messages?: ExchangeMessage[];
     agent_id?: string;
     session_id?: string;
   }): Promise<{
@@ -775,6 +1154,7 @@ export class CortexRecordsV2 {
       content: string;
     }>;
     conversation_ref_id?: string;
+    review_record_candidates: Array<Record<string, unknown>>;
     skipped: boolean;
   }> {
     const agentId = req.agent_id || 'default';
@@ -786,7 +1166,7 @@ export class CortexRecordsV2 {
     })).filter(message => message.content.length > 0);
 
     if (user.length < 2 && assistant.length < 2) {
-      return { records: [], skipped: true };
+      return { records: [], review_record_candidates: [], skipped: true };
     }
 
     const conversationRefId = insertConversationRef({
@@ -798,17 +1178,106 @@ export class CortexRecordsV2 {
     });
 
     const exchange = { user, assistant, messages };
-    let { candidates: normalizedCandidates, hintedFallback } = await this.collectExchangeCandidates({
+    let { candidateDetails, hintedFallback } = await this.collectExchangeCandidateDetails({
       agent_id: agentId,
       content: user,
       exchange,
       source_type: 'user_explicit',
       session_id: req.session_id,
     });
+    let normalizedCandidates = candidateDetails.map((detail) => detail.candidate);
+
+    const priorAssistantProposal = findPriorAssistantProposal(messages, user);
+    const priorAssistantProposalDurables = priorAssistantProposal
+      ? collectAssistantProposalDurables(agentId, priorAssistantProposal.content, req.session_id)
+      : [];
+    let confirmationProposal: ExchangeMessage | null = null;
+    if (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) {
+      if (priorAssistantProposal && isShortUserConfirmation(user)) {
+        confirmationProposal = priorAssistantProposal;
+        if (priorAssistantProposalDurables.length === 1) {
+          normalizedCandidates = priorAssistantProposalDurables;
+          candidateDetails = priorAssistantProposalDurables.map((candidate) => ({
+            candidate,
+            origins: ['deterministic'],
+          }));
+        } else {
+          confirmationProposal = null;
+        }
+      }
+    }
+
+    let proposalEvidence: ExchangeMessage | null = confirmationProposal;
+    if ((normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) && priorAssistantProposal) {
+      const rewrite = inferShortUserProposalRewrite(user);
+      if (rewrite) {
+        const rewritten = normalizeManualInput(agentId, {
+          content: rewrite.synthesized_content,
+          source_type: 'user_explicit',
+          session_id: req.session_id,
+        });
+        if (rewritten.written_kind !== 'session_note') {
+          const rewrittenKey = stableContractKey(rewritten);
+          const compatibleDurables = priorAssistantProposalDurables.filter(candidate => (
+            candidate.written_kind !== 'session_note' &&
+            stableContractKey(candidate) === rewrittenKey
+          ));
+
+          if (rewrittenKey && compatibleDurables.length === 1) {
+            normalizedCandidates = [rewritten];
+            candidateDetails = [{
+              candidate: rewritten,
+              origins: ['deterministic'],
+            }];
+            proposalEvidence = priorAssistantProposal;
+          }
+        }
+      } else {
+        const selective = arbitrateShortUserProposalSelection(user, priorAssistantProposalDurables);
+        if (selective?.action === 'keep') {
+          normalizedCandidates = [selective.candidate];
+          candidateDetails = [{
+            candidate: selective.candidate,
+            origins: ['deterministic'],
+          }];
+          proposalEvidence = priorAssistantProposal;
+        } else if (selective?.action === 'drop_all') {
+          const downgraded = normalizeManualInput(agentId, {
+            kind: 'session_note',
+            content: user,
+            source_type: 'user_explicit',
+            session_id: req.session_id,
+          });
+          normalizedCandidates = [downgraded];
+          candidateDetails = [{
+            candidate: downgraded,
+            origins: ['deterministic'],
+          }];
+          proposalEvidence = priorAssistantProposal;
+        } else if (normalizedCandidates.length === 0 && isShortUserProposalRejection(user)) {
+          const rejected = normalizeManualInput(agentId, {
+            kind: 'session_note',
+            content: user,
+            source_type: 'user_explicit',
+            session_id: req.session_id,
+          });
+          normalizedCandidates = [rejected];
+          candidateDetails = [{
+            candidate: rejected,
+            origins: ['deterministic'],
+          }];
+          proposalEvidence = priorAssistantProposal;
+        }
+      }
+    }
 
     if (normalizedCandidates.length === 0 && !isSmallTalk(user) && hintedFallback.written_kind === 'session_note') {
       if (isSpeculativeContent(user)) {
         normalizedCandidates = [hintedFallback];
+        candidateDetails = [{
+          candidate: hintedFallback,
+          origins: ['deterministic'],
+        }];
       } else if (user.length >= 12) {
         const fallback = normalizeManualInput(agentId, {
           kind: 'session_note',
@@ -822,10 +1291,15 @@ export class CortexRecordsV2 {
           ...fallback,
           reason_code: 'fallback_summary',
         }];
+        candidateDetails = [{
+          candidate: normalizedCandidates[0]!,
+          origins: ['fallback'],
+        }];
       }
     }
 
     const evidence = [
+      ...(proposalEvidence ? [{ role: 'assistant' as const, content: proposalEvidence.content, conversation_ref_id: conversationRefId }] : []),
       ...(user ? [{ role: 'user' as const, content: user, conversation_ref_id: conversationRefId }] : []),
       ...(assistant ? [{ role: 'assistant' as const, content: assistant, conversation_ref_id: conversationRefId }] : []),
     ];
@@ -840,8 +1314,13 @@ export class CortexRecordsV2 {
       source_type: SourceType;
       content: string;
     }> = [];
+    const reviewRecordCandidates: Array<Record<string, unknown>> = [];
 
-    for (const normalized of normalizedCandidates) {
+    const autoCommitDetails = candidateDetails.filter(shouldAutoCommitIngestDetail);
+    const reviewDetails = candidateDetails.filter((detail) => !shouldAutoCommitIngestDetail(detail));
+
+    for (const detail of autoCommitDetails) {
+      const normalized = detail.candidate;
       const result = await this.commitNormalizedCandidate(normalized, evidence).catch((error: Error) => {
         const content = normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
           ? normalized.candidate.value_text
@@ -861,9 +1340,19 @@ export class CortexRecordsV2 {
       });
     }
 
+    for (const [index, detail] of reviewDetails.entries()) {
+      reviewRecordCandidates.push(buildReviewRecordCandidate(
+        detail.candidate,
+        index,
+        user,
+        evidence,
+      ));
+    }
+
     return {
       records: results,
       conversation_ref_id: conversationRefId,
+      review_record_candidates: reviewRecordCandidates,
       skipped: false,
     };
   }

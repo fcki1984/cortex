@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import {
   confirmImportV2,
+  createReviewInboxImportV2,
   exportBundleV2,
   listAgents,
   previewImportV2,
@@ -231,6 +232,7 @@ export default function ImportExport() {
   const [confirmResult, setConfirmResult] = useState<ConfirmResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [sendingToInbox, setSendingToInbox] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
   const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -441,6 +443,44 @@ export default function ImportExport() {
     }
   };
 
+  const handleSendToReviewInbox = async () => {
+    if (!importAgentId) {
+      setNotice({ message: t('importExport.agentRequired'), type: 'error' });
+      return;
+    }
+    if (!sourceContent.trim()) {
+      setNotice({ message: t('importExport.contentRequired'), type: 'error' });
+      return;
+    }
+    if (importFormat === 'json') {
+      setNotice({ message: t('importExport.reviewInboxFormatUnsupported'), type: 'error' });
+      return;
+    }
+
+    setSendingToInbox(true);
+    setNotice(null);
+    try {
+      const result: any = await createReviewInboxImportV2({
+        agent_id: importAgentId,
+        format: importFormat,
+        content: sourceContent,
+        filename: sourceFilename || undefined,
+      });
+      setPreview(null);
+      setConfirmResult(null);
+      setNotice({
+        message: t('importExport.reviewInboxCreated', {
+          count: result.summary?.pending ?? result.summary?.total ?? 0,
+        }),
+        type: 'success',
+      });
+    } catch (error: any) {
+      setNotice({ message: formatRequestError(t, error), type: 'error' });
+    } finally {
+      setSendingToInbox(false);
+    }
+  };
+
   return (
     <div>
       <h1 className="page-title">{t('nav.importExport')}</h1>
@@ -594,6 +634,11 @@ export default function ImportExport() {
                 }}>
                   {t('common.clear')}
                 </button>
+                {importFormat !== 'json' && (
+                  <button type="button" className="btn" onClick={handleSendToReviewInbox} disabled={sendingToInbox}>
+                    {sendingToInbox ? t('importExport.reviewInboxSending') : t('importExport.reviewInboxAction')}
+                  </button>
+                )}
                 <button type="button" className="btn primary" onClick={handlePreview} disabled={previewing}>
                   {previewing ? t('importExport.previewing') : t('importExport.previewAction')}
                 </button>

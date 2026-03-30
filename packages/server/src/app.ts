@@ -18,6 +18,7 @@ import { CortexRecordsV2 } from './v2/service.js';
 import { CortexRelationsV2 } from './v2/relations.js';
 import { CortexLifecycleV2 } from './v2/lifecycle.js';
 import { CortexFeedbackV2 } from './v2/feedback.js';
+import { CortexReviewInboxV2 } from './v2/review-inbox.js';
 
 const log = createLogger('app');
 
@@ -32,6 +33,7 @@ export class CortexApp {
   relationsV2: CortexRelationsV2;
   lifecycleV2: CortexLifecycleV2;
   feedbackV2: CortexFeedbackV2;
+  reviewInboxV2: CortexReviewInboxV2;
   readonly vectorBackend: VectorBackend;
   llmExtraction: LLMProvider;
   llmLifecycle: LLMProvider;
@@ -57,6 +59,7 @@ export class CortexApp {
     this.relationsV2 = new CortexRelationsV2();
     this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
     this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
+    this.reviewInboxV2 = new CortexReviewInboxV2(this.recordsV2, this.relationsV2);
 
     log.info('CortexApp initialized');
   }
@@ -88,6 +91,7 @@ export class CortexApp {
       this.relationsV2 = new CortexRelationsV2();
       this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
       this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
+      this.reviewInboxV2 = new CortexReviewInboxV2(this.recordsV2, this.relationsV2);
       log.info('Reloaded V2 record services');
     }
 

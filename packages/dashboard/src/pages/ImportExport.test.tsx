@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   previewImportV2: vi.fn(),
   confirmImportV2: vi.fn(),
   exportBundleV2: vi.fn(),
+  createReviewInboxImportV2: vi.fn(),
 }));
 
 vi.mock('../api/client.js', () => ({
@@ -16,6 +17,7 @@ vi.mock('../api/client.js', () => ({
   previewImportV2: apiMocks.previewImportV2,
   confirmImportV2: apiMocks.confirmImportV2,
   exportBundleV2: apiMocks.exportBundleV2,
+  createReviewInboxImportV2: apiMocks.createReviewInboxImportV2,
 }));
 
 function renderPage() {
@@ -85,6 +87,16 @@ describe('ImportExport page', () => {
       agents: [],
       records: {},
       confirmed_relations: [],
+    });
+    apiMocks.createReviewInboxImportV2.mockResolvedValue({
+      batch_id: 'batch_1',
+      summary: {
+        total: 1,
+        pending: 1,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
     });
 
     vi.stubGlobal('URL', {
@@ -216,5 +228,26 @@ describe('ImportExport page', () => {
 
     expect(await screen.findByText('导出结果')).toBeTruthy();
     expect(screen.getByText('本次导出覆盖 2 个智能体。')).toBeTruthy();
+  });
+
+  it('sends text import content to the review inbox from the system page', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByLabelText('目标智能体');
+    await user.selectOptions(screen.getByLabelText('来源格式'), 'text');
+    await user.type(screen.getByLabelText('来源内容'), '后续交流中文就行');
+    await user.click(screen.getByRole('button', { name: '发送到审查箱' }));
+
+    await waitFor(() => {
+      expect(apiMocks.createReviewInboxImportV2).toHaveBeenCalledWith({
+        agent_id: 'default',
+        format: 'text',
+        content: '后续交流中文就行',
+        filename: undefined,
+      });
+    });
+
+    expect(await screen.findByText('已发送到审查箱，待处理 1 条。')).toBeTruthy();
   });
 });

@@ -729,6 +729,47 @@ const migrations = [
         ON relation_candidates_v2(agent_id, object_key);
     `,
   },
+  {
+    name: '017_review_inbox_v2',
+    sql: `
+      CREATE TABLE IF NOT EXISTS review_batches_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL DEFAULT 'default',
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('live_ingest', 'import_preview')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'partially_applied', 'completed', 'dismissed')),
+        conversation_ref_id TEXT REFERENCES conversation_refs(id) ON DELETE SET NULL,
+        session_id TEXT,
+        import_format TEXT CHECK (import_format IN ('json', 'memory_md', 'text')),
+        source_label TEXT,
+        source_preview TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_review_batches_v2_agent
+        ON review_batches_v2(agent_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_review_batches_v2_source
+        ON review_batches_v2(source_kind, status, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS review_items_v2 (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL REFERENCES review_batches_v2(id) ON DELETE CASCADE,
+        item_type TEXT NOT NULL CHECK (item_type IN ('record', 'relation')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'failed')),
+        suggested_action TEXT NOT NULL CHECK (suggested_action IN ('accept', 'reject', 'edit')),
+        suggested_reason TEXT NOT NULL,
+        suggested_rewrite TEXT,
+        payload_json TEXT NOT NULL,
+        committed_record_id TEXT,
+        committed_relation_id TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_review_items_v2_batch
+        ON review_items_v2(batch_id, status, updated_at DESC);
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

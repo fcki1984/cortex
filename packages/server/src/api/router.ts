@@ -20,6 +20,7 @@ import { registerV2StatsRoutes } from './stats-v2.js';
 import { registerV2RelationsRoutes } from './relations-v2.js';
 import { registerV2LifecycleRoutes } from './lifecycle-v2.js';
 import { registerV2FeedbackRoutes } from './feedback-v2.js';
+import { registerV2ReviewInboxRoutes } from './review-inbox-v2.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('api.router');
@@ -37,6 +38,7 @@ export function registerAllRoutes(app: FastifyInstance, cortex: CortexApp): void
   registerV2RelationsRoutes(app, cortex);
   registerV2LifecycleRoutes(app, cortex);
   registerV2FeedbackRoutes(app, cortex);
+  registerV2ReviewInboxRoutes(app, cortex);
 
   if (cortex.config.runtime.legacyMode) {
     registerRecallRoutes(app, cortex);
