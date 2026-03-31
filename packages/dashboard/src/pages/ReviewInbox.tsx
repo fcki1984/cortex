@@ -149,14 +149,15 @@ export default function ReviewInbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const hydrateDrafts = (items: ReviewItem[]) => {
-    setDraftContent(() => {
+    setDraftContent((current) => {
       const next: Record<string, string> = {};
       for (const item of items) {
         if (item.item_type !== 'record') continue;
-        next[item.id] = item.suggested_rewrite ?? getPayloadContent(item);
+        next[item.id] = current[item.id] ?? item.suggested_rewrite ?? getPayloadContent(item);
       }
       return next;
     });
@@ -180,15 +181,22 @@ export default function ReviewInbox() {
     }
   };
 
-  const loadDetail = async (batchId: string) => {
+  const loadDetail = async (batchId: string, options?: { preserveCurrent?: boolean }) => {
+    const preserveCurrent = options?.preserveCurrent === true && detail?.batch.id === batchId;
     setDetailLoading(true);
+    setDetailError(null);
+    if (!preserveCurrent) {
+      setDetail(null);
+    }
     try {
       const response = await getReviewInboxBatchV2(batchId) as ReviewBatchDetail;
       setDetail(response);
       hydrateDrafts(response.items || []);
     } catch (loadError) {
-      setNotice({ message: formatRequestError(t, loadError), type: 'error' });
-      setDetail(null);
+      setDetailError(formatRequestError(t, loadError));
+      if (!preserveCurrent) {
+        setDetail(null);
+      }
     } finally {
       setDetailLoading(false);
     }
@@ -216,10 +224,11 @@ export default function ReviewInbox() {
     () => detail?.items.filter((item) => item.status === 'pending') || [],
     [detail],
   );
+  const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
 
   const refreshCurrentBatch = async (batchId: string) => {
     await loadBatches(batchId);
-    await loadDetail(batchId);
+    await loadDetail(batchId, { preserveCurrent: true });
   };
 
   const handleBatchApply = async (payload: {
@@ -327,26 +336,71 @@ export default function ReviewInbox() {
         <div className="card">
           {!selectedBatchId ? (
             <div className="empty">{t('reviewInbox.detailEmpty')}</div>
-          ) : detailLoading || !detail ? (
+          ) : detailLoading && !selectedDetail && !detailError ? (
+            <div className="empty">{t('common.loading')}</div>
+          ) : !selectedDetail && detailError ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ color: '#fca5a5', fontSize: 14 }}>{t('reviewInbox.detailLoadFailed')}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+                {t('reviewInbox.detailLoadFailedHint')}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.7 }}>
+                {detailError}
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void loadDetail(selectedBatchId)}
+                  disabled={detailLoading}
+                >
+                  {t('reviewInbox.retryDetail')}
+                </button>
+              </div>
+            </div>
+          ) : !selectedDetail ? (
             <div className="empty">{t('common.loading')}</div>
           ) : (
             <>
+              {detailError && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: '#fee2e2',
+                  background: 'rgba(239,68,68,0.15)',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                }}>
+                  <div style={{ marginBottom: 6 }}>{t('reviewInbox.detailLoadFailed')}</div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}>{t('reviewInbox.detailLoadFailedHint')}</div>
+                  <div style={{ marginBottom: 10 }}>{detailError}</div>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void loadDetail(selectedBatchId, { preserveCurrent: true })}
+                    disabled={detailLoading}
+                  >
+                    {t('reviewInbox.retryDetail')}
+                  </button>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 16 }}>
                 <div>
                   <h3 style={{ marginTop: 0, marginBottom: 8 }}>{t('reviewInbox.detailTitle')}</h3>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                     <span className="badge" style={{ background: 'rgba(59,130,246,0.18)', color: '#93c5fd' }}>
-                      {formatSourceKindLabel(t, detail.batch.source_kind)}
+                      {formatSourceKindLabel(t, selectedDetail.batch.source_kind)}
                     </span>
                     <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}>
-                      {formatBatchStatusLabel(t, detail.batch.status)}
+                      {formatBatchStatusLabel(t, selectedDetail.batch.status)}
                     </span>
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-                    {t('reviewInbox.sourcePreview')}: {detail.batch.source_preview}
+                    {t('reviewInbox.sourcePreview')}: {selectedDetail.batch.source_preview}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                    {t('reviewInbox.agentLabel')}: {formatAgentNameLabel(t, detail.batch.agent_id)}
+                    {t('reviewInbox.agentLabel')}: {formatAgentNameLabel(t, selectedDetail.batch.agent_id)}
                   </div>
                 </div>
 
@@ -374,8 +428,8 @@ export default function ReviewInbox() {
 
               <div style={{ marginBottom: 16, fontSize: 12, color: 'var(--text-muted)' }}>
                 {t('reviewInbox.pendingSummary', {
-                  pending: detail.summary.pending,
-                  total: detail.summary.total,
+                  pending: selectedDetail.summary.pending,
+                  total: selectedDetail.summary.total,
                 })}
               </div>
 

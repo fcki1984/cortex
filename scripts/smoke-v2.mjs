@@ -379,7 +379,7 @@ async function runRound(round) {
     });
     assert(conflictPreview.response.status === 200, `POST /api/v2/import/preview conflict returned ${conflictPreview.response.status}`);
     assert((conflictPreview.json?.record_candidates || []).length === 1, 'compound conflict preview should keep one winner');
-    assert(conflictPreview.json?.record_candidates?.[0]?.content === '现在住东京', 'compound conflict preview kept the wrong winner');
+    assert(conflictPreview.json?.record_candidates?.[0]?.content === '我住东京', 'compound conflict preview kept the wrong winner');
 
     const multilinePreview = await request('preview multiline text conflict', 'POST', '/api/v2/import/preview', {
       body: {
@@ -391,7 +391,7 @@ async function runRound(round) {
     });
     assert(multilinePreview.response.status === 200, `POST /api/v2/import/preview multiline returned ${multilinePreview.response.status}`);
     assert((multilinePreview.json?.record_candidates || []).length === 2, 'multiline preview should keep two winning records');
-    assert(multilinePreview.json?.record_candidates?.[1]?.content === '现在住东京', 'multiline preview kept the wrong durable winner');
+    assert(multilinePreview.json?.record_candidates?.[1]?.content === '我住东京', 'multiline preview kept the wrong durable winner');
     assert((multilinePreview.json?.relation_candidates || []).length === 1, 'multiline preview should keep one relation candidate');
     assert(multilinePreview.json?.relation_candidates?.[0]?.object_key === '东京', 'multiline preview relation winner should point at 东京');
 
@@ -414,7 +414,7 @@ async function runRound(round) {
     });
     assert(memoryPreview.response.status === 200, `POST /api/v2/import/preview memory_md returned ${memoryPreview.response.status}`);
     assert((memoryPreview.json?.record_candidates || []).length === 2, 'MEMORY.md preview should keep two winning records');
-    assert(memoryPreview.json?.record_candidates?.[0]?.content === '现在住东京', 'MEMORY.md preview kept the wrong durable winner');
+    assert(memoryPreview.json?.record_candidates?.[0]?.content === '我住东京', 'MEMORY.md preview kept the wrong durable winner');
     assert((memoryPreview.json?.relation_candidates || []).length === 1, 'MEMORY.md preview should keep one relation candidate');
     assert(memoryPreview.json?.relation_candidates?.[0]?.object_key === '东京', 'MEMORY.md preview relation winner should point at 东京');
     logStep('compound contract', 'records boundary, ingest, and preview all passed');
@@ -550,9 +550,21 @@ async function runRound(round) {
     assert(searchCompat.response.status === 200, `POST /mcp/message search returned ${searchCompat.response.status}`);
     const primaryText = searchPrimary.json?.result?.content?.[0]?.text;
     const compatText = searchCompat.json?.result?.content?.[0]?.text;
-    assert(typeof primaryText === 'string' && primaryText.includes('Smoke V2 user lives in Taipei'), 'primary MCP search did not find smoke record');
-    assert(typeof compatText === 'string' && compatText.includes('Smoke V2 user lives in Taipei'), 'compat MCP search did not find smoke record');
-    assert(primaryText === compatText, 'MCP search result differs between /mcp and /mcp/message');
+    assert(typeof primaryText === 'string', 'primary MCP search did not return text content');
+    assert(typeof compatText === 'string', 'compat MCP search did not return text content');
+    const primaryResults = JSON.parse(primaryText).results;
+    const compatResults = JSON.parse(compatText).results;
+    assert(Array.isArray(primaryResults) && primaryResults.length > 0, 'primary MCP search returned no results');
+    assert(Array.isArray(compatResults) && compatResults.length > 0, 'compat MCP search returned no results');
+    assert(primaryResults[0]?.agent_id === probeAgentId, 'primary MCP search returned the wrong agent result');
+    assert(compatResults[0]?.agent_id === probeAgentId, 'compat MCP search returned the wrong agent result');
+    assert(primaryResults[0]?.attribute_key === 'location', 'primary MCP search did not return the location fact');
+    assert(compatResults[0]?.attribute_key === 'location', 'compat MCP search did not return the location fact');
+    assert(String(primaryResults[0]?.content || '').includes('Taipei'), 'primary MCP search did not include the Taipei fact');
+    assert(String(compatResults[0]?.content || '').includes('Taipei'), 'compat MCP search did not include the Taipei fact');
+    assert(primaryResults[0]?.eligible_for_recall === true, 'primary MCP search result should stay recall-eligible');
+    assert(compatResults[0]?.eligible_for_recall === true, 'compat MCP search result should stay recall-eligible');
+    assert(JSON.stringify(primaryResults) === JSON.stringify(compatResults), 'MCP search result differs between /mcp and /mcp/message');
     logStep('MCP', 'primary and compat JSON-RPC endpoints behave identically');
   } finally {
     const cleanupWarnings = await cleanup(cleanupAgentIds, smokeRunId);
@@ -575,6 +587,18 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`Smoke test failed: ${error.message}\n`);
+  const smokeClass = error && typeof error === 'object' && 'smokeClass' in error
+    ? String(error.smokeClass)
+    : null;
+  const smokePhase = error && typeof error === 'object' && 'smokePhase' in error
+    ? String(error.smokePhase)
+    : null;
+  const attemptsUsed = error && typeof error === 'object' && 'attemptsUsed' in error
+    ? Number(error.attemptsUsed)
+    : null;
+  const prefix = smokeClass ? `Smoke test failed [${smokeClass}]` : 'Smoke test failed';
+  const phaseDetail = smokePhase ? ` during ${smokePhase}` : '';
+  const attemptDetail = Number.isFinite(attemptsUsed) ? ` after ${attemptsUsed} attempt(s)` : '';
+  process.stderr.write(`${prefix}${phaseDetail}${attemptDetail}: ${error.message}\n`);
   process.exit(1);
 });

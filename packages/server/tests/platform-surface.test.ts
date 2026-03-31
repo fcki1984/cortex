@@ -88,4 +88,26 @@ describe('Platform surface migration', () => {
     expect(releasePlan).toContain('smoke:v2');
     expect(releasePlan).toContain('3');
   });
+
+  it('keeps smoke preview winner assertions aligned with canonical durable phrasing', () => {
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+
+    expect(smoke).toContain("conflictPreview.json?.record_candidates?.[0]?.content === '我住东京'");
+    expect(smoke).toContain("multilinePreview.json?.record_candidates?.[1]?.content === '我住东京'");
+    expect(smoke).toContain("memoryPreview.json?.record_candidates?.[0]?.content === '我住东京'");
+    expect(smoke).not.toContain("conflictPreview.json?.record_candidates?.[0]?.content === '现在住东京'");
+    expect(smoke).not.toContain("multilinePreview.json?.record_candidates?.[1]?.content === '现在住东京'");
+    expect(smoke).not.toContain("memoryPreview.json?.record_candidates?.[0]?.content === '现在住东京'");
+  });
+
+  it('parses MCP search_debug payloads instead of matching stale source text', () => {
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+
+    expect(smoke).toContain('const primaryResults = JSON.parse(primaryText).results;');
+    expect(smoke).toContain('const compatResults = JSON.parse(compatText).results;');
+    expect(smoke).toContain("primaryResults[0]?.attribute_key === 'location'");
+    expect(smoke).toContain("compatResults[0]?.attribute_key === 'location'");
+    expect(smoke).not.toContain("primaryText.includes('Smoke V2 user lives in Taipei')");
+    expect(smoke).not.toContain("compatText.includes('Smoke V2 user lives in Taipei')");
+  });
 });

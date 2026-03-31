@@ -56,6 +56,31 @@ describe('smoke-v2 helper library', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('classifies exhausted retryable transport timeouts separately from assertion failures', async () => {
+    const timeoutError = new TypeError('fetch failed');
+    Object.assign(timeoutError, {
+      cause: { code: 'UND_ERR_CONNECT_TIMEOUT' },
+    });
+    const fetchMock = vi.fn().mockRejectedValue(timeoutError);
+
+    await expect(runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-timeout',
+      label: 'health',
+      method: 'GET',
+      path: '/api/v2/health',
+      retryable: true,
+    })).rejects.toMatchObject({
+      smokeClass: 'transport_timeout',
+      smokePhase: 'entry',
+      attemptsUsed: 2,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('records cleanup warnings and continues later cleanup steps', async () => {
     const events: string[] = [];
 

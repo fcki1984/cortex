@@ -1,11 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { createLogger } from '../utils/logger.js';
+import { observedRoute } from './observability.js';
 
 const log = createLogger('review-inbox-v2');
 
 export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: CortexApp): void {
-  app.get('/api/v2/review-inbox', async (req, reply) => {
+  app.get('/api/v2/review-inbox', observedRoute({
+    route: '/api/v2/review-inbox',
+    method: 'GET',
+    timeoutMs: 20000,
+    metricPrefix: 'v2_route',
+  }, async (req) => {
     const query = req.query as {
       agent_id?: string;
       status?: 'pending' | 'partially_applied' | 'completed' | 'dismissed';
@@ -21,9 +27,14 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       limit: query.limit ? Number(query.limit) : undefined,
       offset: query.offset ? Number(query.offset) : undefined,
     });
-  });
+  }));
 
-  app.get('/api/v2/review-inbox/:id', async (req, reply) => {
+  app.get('/api/v2/review-inbox/:id', observedRoute({
+    route: '/api/v2/review-inbox/:id',
+    method: 'GET',
+    timeoutMs: 20000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const params = req.params as { id: string };
     const batch = cortex.reviewInboxV2.getBatch(params.id);
     if (!batch) {
@@ -31,7 +42,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       return { error: 'review batch not found' };
     }
     return batch;
-  });
+  }));
 
   app.post('/api/v2/review-inbox/import', async (req, reply) => {
     const body = req.body as {

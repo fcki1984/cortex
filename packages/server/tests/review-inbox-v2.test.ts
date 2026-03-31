@@ -203,6 +203,47 @@ describe('V2 review inbox', () => {
     expect(detailBody.items[0].payload.content).toBe('请用中文回答');
   });
 
+  it('emits tracing headers for review inbox list and detail reads', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-observed',
+      source_preview: '把输出语言设成中文',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '请用中文回答',
+          source_excerpt: '把输出语言设成中文',
+        }),
+      ],
+    });
+
+    const smokeRunId = 'smoke-review-inbox-observed';
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-observed',
+      headers: {
+        'x-cortex-smoke-run': smokeRunId,
+      },
+    });
+
+    expect(list.statusCode).toBe(200);
+    expect(list.headers['x-cortex-request-id']).toBeTruthy();
+    expect(list.headers['x-cortex-smoke-run']).toBe(smokeRunId);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+      headers: {
+        'x-cortex-smoke-run': smokeRunId,
+      },
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(detail.headers['x-cortex-request-id']).toBeTruthy();
+    expect(detail.headers['x-cortex-smoke-run']).toBe(smokeRunId);
+  });
+
   it('persists canonical rewrites for colloquial live review items', async () => {
     const setup = await createApp();
     app = setup.app;
