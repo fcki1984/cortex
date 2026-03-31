@@ -146,6 +146,15 @@ export function observedRoute<T>(meta: ObservedRouteMeta, handler: Handler<T>) {
     const agentId = inferAgentId(req);
     const trace = applyTraceHeaders(req, reply);
 
+    log.info({
+      route: meta.route,
+      method: meta.method,
+      timeout_ms: meta.timeoutMs,
+      agent_id: agentId,
+      request_id: trace.requestId,
+      smoke_run_id: trace.smokeRunId,
+    }, 'Observed route entered');
+
     try {
       const result = await withTimeout(Promise.resolve(handler(req, reply)), meta.timeoutMs, meta.route);
       const durationMs = Date.now() - startedAt;

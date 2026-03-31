@@ -56,6 +56,33 @@ describe('smoke-v2 helper library', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('annotates write-path transport failures with smoke evidence metadata', async () => {
+    const timeoutError = new TypeError('fetch failed');
+    Object.assign(timeoutError, {
+      cause: { code: 'UND_ERR_CONNECT_TIMEOUT' },
+    });
+    const fetchMock = vi.fn().mockRejectedValue(timeoutError);
+
+    await expect(runSmokeRequest({
+      fetchImpl: fetchMock,
+      baseUrl: 'https://example.com',
+      authToken: 'secret-token',
+      smokeRunId: 'smoke-run-write-timeout',
+      label: 'create probe record',
+      method: 'POST',
+      path: '/api/v2/records',
+      body: { kind: 'fact_slot', content: '我住大阪' },
+    })).rejects.toMatchObject({
+      smokeClass: 'transport_timeout',
+      smokePhase: 'entry',
+      attemptsUsed: 1,
+      label: 'create probe record',
+      method: 'POST',
+      path: '/api/v2/records',
+      operationKind: 'write',
+    });
+  });
+
   it('classifies exhausted retryable transport timeouts separately from assertion failures', async () => {
     const timeoutError = new TypeError('fetch failed');
     Object.assign(timeoutError, {
@@ -76,6 +103,10 @@ describe('smoke-v2 helper library', () => {
       smokeClass: 'transport_timeout',
       smokePhase: 'entry',
       attemptsUsed: 2,
+      label: 'health',
+      method: 'GET',
+      path: '/api/v2/health',
+      operationKind: 'read',
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

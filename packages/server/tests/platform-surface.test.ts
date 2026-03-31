@@ -110,4 +110,15 @@ describe('Platform surface migration', () => {
     expect(smoke).not.toContain("primaryText.includes('Smoke V2 user lives in Taipei')");
     expect(smoke).not.toContain("compatText.includes('Smoke V2 user lives in Taipei')");
   });
+
+  it('prints ingress failure evidence with route, phase, attempts, and operation kind', () => {
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+
+    expect(smoke).toContain("const operationKind = error && typeof error === 'object' && 'operationKind' in error");
+    expect(smoke).toContain("const method = error && typeof error === 'object' && 'method' in error");
+    expect(smoke).toContain("const path = error && typeof error === 'object' && 'path' in error");
+    expect(smoke).toContain("const routeDetail = method && path ? ` on ${method} ${path}` : '';");
+    expect(smoke).toContain("const operationDetail = operationKind ? ` [${operationKind}]` : '';");
+    expect(smoke).toContain("process.stderr.write(`${prefix}${operationDetail}${phaseDetail}${routeDetail}${attemptDetail}: ${error.message}\\n`);");
+  });
 });

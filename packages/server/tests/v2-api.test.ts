@@ -90,6 +90,7 @@ describe('API V2 Integration', () => {
       },
     });
     expect(created.statusCode).toBe(201);
+    expect(created.headers['x-cortex-request-id']).toBeTruthy();
     const createdBody = JSON.parse(created.payload);
     expect(createdBody.requested_kind).toBe('fact_slot');
     expect(createdBody.written_kind).toBe('fact_slot');
@@ -850,11 +851,25 @@ describe('API V2 Integration', () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers['x-cortex-request-id']).toBeTruthy();
     const payload = JSON.parse(response.payload);
     expect(payload.endpoints.jsonrpc_post).toBe('/mcp');
     expect(payload.endpoints.compat_jsonrpc_post).toBe('/mcp/message');
     expect(payload.endpoints.sse).toBe('/mcp/sse');
     expect(payload.endpoints.tools).toBe('/mcp/tools');
+  });
+
+  it('exposes MCP tools metadata on GET /mcp/tools with trace headers', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/mcp/tools',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['x-cortex-request-id']).toBeTruthy();
+    const payload = JSON.parse(response.payload);
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect(payload.tools.some((tool: any) => tool.name === 'cortex_search_debug')).toBe(true);
   });
 
   it('mirrors downgrade metadata through cortex_remember', async () => {

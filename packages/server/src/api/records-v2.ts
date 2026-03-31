@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { ensureAgent } from '../db/index.js';
 import { splitCompoundClauses } from '../v2/contract.js';
+import { observedRoute } from './observability.js';
 
 export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp): void {
   app.get('/api/v2/records', async (req) => {
@@ -32,7 +33,12 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
     };
   });
 
-  app.post('/api/v2/records', async (req, reply) => {
+  app.post('/api/v2/records', observedRoute({
+    route: '/api/v2/records',
+    method: 'POST',
+    timeoutMs: cortex.config?.llm?.extraction?.timeoutMs || 15000,
+    metricPrefix: 'v2_route',
+  }, async (req, reply) => {
     const body = req.body as any;
     if (typeof body.content === 'string' && splitCompoundClauses(body.content).length > 1) {
       reply.code(400);
@@ -66,7 +72,7 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       reason_code: result.reason_code,
       previous_record_id: result.previous_record_id,
     };
-  });
+  }));
 
   app.patch('/api/v2/records/:id', async (req, reply) => {
     const { id } = req.params as { id: string };

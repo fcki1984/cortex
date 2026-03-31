@@ -20,6 +20,10 @@ function shouldRetryStatus(status) {
   return [408, 425, 429, 502, 503, 504].includes(status);
 }
 
+function inferOperationKind(method) {
+  return method === 'GET' ? 'read' : 'write';
+}
+
 function isRetryableNetworkError(error) {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -59,7 +63,7 @@ function classifyNetworkError(error) {
   return 'transport_error';
 }
 
-function formatNetworkError(label, method, path, error, attemptsUsed) {
+function formatNetworkError(label, method, path, error, attemptsUsed, { smokePhase, operationKind }) {
   const message = error instanceof Error ? error.message : String(error);
   const causeCode = typeof error === 'object' && error && 'cause' in error && error.cause && typeof error.cause === 'object' && 'code' in error.cause
     ? ` (${String(error.cause.code)})`
@@ -68,30 +72,32 @@ function formatNetworkError(label, method, path, error, attemptsUsed) {
     `${label} ${method} ${path} failed: ${message}${causeCode}`,
     {
       smokeClass: classifyNetworkError(error),
-      smokePhase: 'entry',
+      smokePhase,
       attemptsUsed,
       label,
       method,
       path,
+      operationKind,
     },
     error,
   );
 }
 
-function formatStatusError({ label, method, path, response, text, requestId, attemptsUsed }) {
+function formatStatusError({ label, method, path, response, text, requestId, attemptsUsed, smokePhase, operationKind }) {
   const detail = text ? `: ${text.slice(0, 300)}` : '';
   const requestDetail = requestId ? ` (request_id=${requestId})` : '';
   return createSmokeError(
     `${label} ${method} ${path} failed with status ${response.status}${requestDetail}${detail}`,
     {
       smokeClass: shouldRetryStatus(response.status) ? 'retryable_status' : 'unexpected_status',
-      smokePhase: 'entry',
+      smokePhase,
       attemptsUsed,
       label,
       method,
       path,
       statusCode: response.status,
       requestId,
+      operationKind,
     },
   );
 }
@@ -145,6 +151,7 @@ export async function runSmokeRequest({
   headers,
   retryable = false,
   expectedStatus,
+  smokePhase = 'entry',
   now = () => Date.now(),
   sleep = defaultSleep,
   onRateLimitWait,
@@ -152,6 +159,7 @@ export async function runSmokeRequest({
   const attempts = retryable ? 2 : 1;
   let lastError;
   const hasBody = body !== undefined && body !== null;
+  const operationKind = inferOperationKind(method);
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -173,7 +181,17 @@ export async function runSmokeRequest({
         : response.status === expectedStatus;
 
       if (!matchesExpectedStatus) {
-        const statusError = formatStatusError({ label, method, path, response, text, requestId, attemptsUsed: attempt });
+        const statusError = formatStatusError({
+          label,
+          method,
+          path,
+          response,
+          text,
+          requestId,
+          attemptsUsed: attempt,
+          smokePhase,
+          operationKind,
+        });
         if (retryable && attempt < attempts && shouldRetryStatus(response.status)) {
           if (response.status === 429) {
             await maybeWaitForRateLimitReset(response, { now, sleep, onRateLimitWait });
@@ -197,7 +215,10 @@ export async function runSmokeRequest({
       if (error instanceof Error && error.message.includes('failed with status')) {
         throw error;
       }
-      const networkError = formatNetworkError(label, method, path, error, attempt);
+      const networkError = formatNetworkError(label, method, path, error, attempt, {
+        smokePhase,
+        operationKind,
+      });
       if (retryable && attempt < attempts && isRetryableNetworkError(error)) {
         lastError = networkError;
         continue;
@@ -207,6 +228,34 @@ export async function runSmokeRequest({
   }
 
   throw lastError || new Error(`${label} ${method} ${path} failed`);
+}
+
+function formatWarning(stepLabel, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!error || typeof error !== 'object') {
+    return `${stepLabel}: ${message}`;
+  }
+
+  const smokeClass = 'smokeClass' in error ? String(error.smokeClass) : null;
+  const smokePhase = 'smokePhase' in error ? String(error.smokePhase) : null;
+  const operationKind = 'operationKind' in error ? String(error.operationKind) : null;
+  const method = 'method' in error ? String(error.method) : null;
+  const path = 'path' in error ? String(error.path) : null;
+  const attemptsUsed = 'attemptsUsed' in error ? Number(error.attemptsUsed) : null;
+
+  const meta = [
+    smokeClass,
+    smokePhase,
+    operationKind,
+    method && path ? `${method} ${path}` : null,
+    Number.isFinite(attemptsUsed) ? `attempts=${attemptsUsed}` : null,
+  ].filter(Boolean);
+
+  if (meta.length === 0) {
+    return `${stepLabel}: ${message}`;
+  }
+
+  return `${stepLabel} [${meta.join(' | ')}]: ${message}`;
 }
 
 export async function runBestEffortSteps(steps) {
@@ -219,8 +268,7 @@ export async function runBestEffortSteps(steps) {
       if (typeof step.ignoreError === 'function' && step.ignoreError(error)) {
         continue;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      warnings.push(`${step.label}: ${message}`);
+      warnings.push(formatWarning(step.label, error));
     }
   }
 

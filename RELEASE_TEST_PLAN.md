@@ -7,10 +7,22 @@
 - `SMOKE_ROUNDS=3 pnpm smoke:v2` 必须连续三轮通过，每轮使用独立 probe agent 并完成清理。
 - 浏览器侧还需完整跑一轮主链验收，不接受一次 `fetch failed` 或页面卡死就视作通过。
 
+## Ingress Timeout Triage
+
+- 若 smoke 或人工探测出现 `UND_ERR_CONNECT_TIMEOUT`、`fetch failed`、`socket hang up` 一类传输层失败，先看同一请求的 `x-cortex-request-id`、smoke 输出行、以及 Node 侧 route entry log。
+- 若失败请求**没有**对应的 Node route entry log，默认优先判定为反代 / ingress / 网络链路问题，而不是 Cortex 应用逻辑回退。
+- 若失败请求**有**route entry log，但 completion / failure log 明显延后或缺失，默认优先判定为应用侧延迟、上游依赖卡顿，或容器资源问题。
+- 发布签收时至少保留以下证据，避免把部署层抖动误归因为 prompt contract 或产品行为：
+  - 反代 / ingress 日志
+  - 应用侧按 `request_id` 检索的日志
+  - 对应失败的 smoke 输出单行
+- 这类部署层不稳定属于 release blocker；在问题分清之前，不应混入新的 prompt contract / Import-Export 功能批次一起处理。
+
 ## 0. RC 冻结规则
 
 - 当前阶段默认冻结 Cortex v2 主架构。
 - 不再新增 schema、公开 API、Dashboard 产品页、Recall 增强链或 OpenClaw bridge 功能。
+- 不扩写操作自动重试范围；尤其不为 `POST /api/v2/records`、`POST /api/v2/ingest`、`POST /api/v2/import/confirm` 这类非幂等写链添加隐式重试。
 - 允许的改动仅限：
   - Cortex 核心生产阻塞修复
   - 发布回归、验收脚本与发布文档收口
@@ -24,6 +36,7 @@
 
 - Cortex 核心通过发布门槛后即可进入 release candidate。
 - OpenClaw 若未完成宿主机签收，只标记为“未随本次生产首发签收”，不再单独阻塞 Cortex 核心发布。
+- 反代 / ingress / 网络层不稳定仍然直接阻塞 Cortex 核心 release；这属于发布面问题，不回退成 prompt contract 或 Dashboard 新功能需求。
 
 ---
 

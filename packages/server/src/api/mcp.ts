@@ -89,7 +89,12 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
     }, handleJsonRpcMessage));
   };
 
-  app.get('/mcp', async () => {
+  app.get('/mcp', observedRoute({
+    route: '/mcp',
+    method: 'GET',
+    timeoutMs: 8000,
+    metricPrefix: 'mcp_route',
+  }, async () => {
     return {
       name: 'cortex',
       protocol: 'jsonrpc',
@@ -100,7 +105,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
         tools: '/mcp/tools',
       },
     };
-  });
+  }));
 
   // SSE endpoint for MCP over HTTP
   app.get('/mcp/sse', async (req, reply) => {
@@ -129,7 +134,12 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
   registerJsonRpcEndpoint('/mcp/message');
 
   // MCP tools list
-  app.get('/mcp/tools', async () => {
+  app.get('/mcp/tools', observedRoute({
+    route: '/mcp/tools',
+    method: 'GET',
+    timeoutMs: 8000,
+    metricPrefix: 'mcp_route',
+  }, async () => {
     return { tools: mcpServer.getTools() };
-  });
+  }));
 }

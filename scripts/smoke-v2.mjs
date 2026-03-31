@@ -61,6 +61,7 @@ async function deleteById(pathPrefix, items) {
       label: `cleanup ${pathPrefix}`,
       method: 'DELETE',
       path: `${pathPrefix}/${encodeURIComponent(item.id)}`,
+      smokePhase: 'cleanup',
     });
   }
 }
@@ -78,6 +79,7 @@ async function cleanupAgent(agentId, smokeRunId) {
           method: 'GET',
           path: `/api/v2/records${query({ agent_id: agentId, limit: 200 })}`,
           retryable: true,
+          smokePhase: 'cleanup',
         });
         if (Array.isArray(records.json?.items)) {
           await deleteById('/api/v2/records', records.json.items);
@@ -95,6 +97,7 @@ async function cleanupAgent(agentId, smokeRunId) {
           method: 'GET',
           path: `/api/v2/relations${query({ agent_id: agentId, limit: 200 })}`,
           retryable: true,
+          smokePhase: 'cleanup',
         });
         if (Array.isArray(relations.json?.items)) {
           await deleteById('/api/v2/relations', relations.json.items);
@@ -112,6 +115,7 @@ async function cleanupAgent(agentId, smokeRunId) {
           method: 'GET',
           path: `/api/v2/relation-candidates${query({ agent_id: agentId, limit: 200 })}`,
           retryable: true,
+          smokePhase: 'cleanup',
         });
         if (Array.isArray(candidates.json?.items)) {
           await deleteById('/api/v2/relation-candidates', candidates.json.items);
@@ -133,6 +137,7 @@ async function cleanupAgent(agentId, smokeRunId) {
             label: `delete probe agent ${agentId}`,
             method: 'DELETE',
             path: `/api/v2/agents/${encodeURIComponent(agentId)}`,
+            smokePhase: 'cleanup',
           });
         }
       },
@@ -193,7 +198,7 @@ async function runRound(round) {
     organizationVariantAgentId,
   ];
 
-  async function request(label, method, path, { body, headers, retryable = false, expectedStatus } = {}) {
+  async function request(label, method, path, { body, headers, retryable = false, expectedStatus, smokePhase } = {}) {
     return runSmokeRequest({
       fetchImpl: fetch,
       baseUrl,
@@ -206,6 +211,7 @@ async function runRound(round) {
       headers,
       retryable,
       expectedStatus,
+      smokePhase,
     });
   }
 
@@ -593,12 +599,23 @@ main().catch((error) => {
   const smokePhase = error && typeof error === 'object' && 'smokePhase' in error
     ? String(error.smokePhase)
     : null;
+  const operationKind = error && typeof error === 'object' && 'operationKind' in error
+    ? String(error.operationKind)
+    : null;
+  const method = error && typeof error === 'object' && 'method' in error
+    ? String(error.method)
+    : null;
+  const path = error && typeof error === 'object' && 'path' in error
+    ? String(error.path)
+    : null;
   const attemptsUsed = error && typeof error === 'object' && 'attemptsUsed' in error
     ? Number(error.attemptsUsed)
     : null;
   const prefix = smokeClass ? `Smoke test failed [${smokeClass}]` : 'Smoke test failed';
   const phaseDetail = smokePhase ? ` during ${smokePhase}` : '';
+  const routeDetail = method && path ? ` on ${method} ${path}` : '';
+  const operationDetail = operationKind ? ` [${operationKind}]` : '';
   const attemptDetail = Number.isFinite(attemptsUsed) ? ` after ${attemptsUsed} attempt(s)` : '';
-  process.stderr.write(`${prefix}${phaseDetail}${attemptDetail}: ${error.message}\n`);
+  process.stderr.write(`${prefix}${operationDetail}${phaseDetail}${routeDetail}${attemptDetail}: ${error.message}\n`);
   process.exit(1);
 });
