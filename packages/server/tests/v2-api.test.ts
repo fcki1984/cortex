@@ -274,6 +274,43 @@ describe('API V2 Integration', () => {
     }
   });
 
+  it('auto-commits canonical content for stable colloquial explicit ingest input', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '后续交流中文就行',
+        assistant_message: '收到',
+        agent_id: 'api-ingest-colloquial-language',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      requested_kind: 'profile_rule',
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-ingest-colloquial-language',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]));
+  });
+
   it('filters extraction logs by v2 channel', async () => {
     await app.inject({
       method: 'POST',
@@ -641,7 +678,7 @@ describe('API V2 Integration', () => {
       'session_note',
       'fact_slot',
     ]);
-    expect(body.records[1]?.content).toBe('现在住东京');
+    expect(body.records[1]?.content).toBe('我住东京');
 
     const relationCandidates = await app.inject({
       method: 'GET',
@@ -669,7 +706,7 @@ describe('API V2 Integration', () => {
       'session_note',
       'fact_slot',
     ]);
-    expect(body.records[1]?.content).toBe('目前位于东京');
+    expect(body.records[1]?.content).toBe('我住东京');
 
     const relationCandidates = await app.inject({
       method: 'GET',
@@ -697,7 +734,7 @@ describe('API V2 Integration', () => {
       'session_note',
       'fact_slot',
     ]);
-    expect(body.records[1]?.content).toBe('目前任职于 OpenAI');
+    expect(body.records[1]?.content).toBe('我在 OpenAI 工作');
 
     const relationCandidates = await app.inject({
       method: 'GET',
@@ -722,7 +759,7 @@ describe('API V2 Integration', () => {
     const body = JSON.parse(response.payload);
     expect(body.records).toHaveLength(1);
     expect(body.records[0]?.written_kind).toBe('fact_slot');
-    expect(body.records[0]?.content).toBe('现在住东京');
+    expect(body.records[0]?.content).toBe('我住东京');
 
     const listed = await app.inject({
       method: 'GET',
@@ -730,7 +767,7 @@ describe('API V2 Integration', () => {
     });
     expect(listed.statusCode).toBe(200);
     expect(JSON.parse(listed.payload).items).toHaveLength(1);
-    expect(JSON.parse(listed.payload).items[0]?.content).toBe('现在住东京');
+    expect(JSON.parse(listed.payload).items[0]?.content).toBe('我住东京');
 
     const relationCandidates = await app.inject({
       method: 'GET',
@@ -759,7 +796,7 @@ describe('API V2 Integration', () => {
       'fact_slot',
     ]);
     expect(body.record_candidates[0]?.attribute_key).toBe('language_preference');
-    expect(body.record_candidates[1]?.content).toBe('现在住东京');
+    expect(body.record_candidates[1]?.content).toBe('我住东京');
     expect(body.relation_candidates).toHaveLength(1);
     expect(body.relation_candidates[0]?.object_key).toBe('东京');
   });
@@ -1578,7 +1615,7 @@ describe('API V2 Integration', () => {
     expect(body.records).toHaveLength(1);
     expect(body.records[0]?.written_kind).toBe('profile_rule');
     expect(body.records[0]?.source_type).toBe('user_explicit');
-    expect(body.records[0]?.content).toContain('英文回答');
+    expect(body.records[0]?.content).toBe('Please answer in English');
   });
 
   it('commits only the selected durable winner when a short follow-up keeps one part of a prior assistant proposal', async () => {

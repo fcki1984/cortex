@@ -103,6 +103,8 @@ type CollectedCandidateDetail = {
   origins: CandidateOrigin[];
 };
 
+type IngestDetailDisposition = 'auto_commit' | 'review' | 'note';
+
 type ShortUserProposalArbitration =
   | { action: 'keep'; candidate: NormalizedRecordCandidate }
   | { action: 'drop_all' };
@@ -267,9 +269,10 @@ function buildReviewRecordCandidate(
   };
 }
 
-function shouldAutoCommitIngestDetail(detail: CollectedCandidateDetail): boolean {
-  if (detail.candidate.written_kind === 'session_note') return true;
-  return detail.origins.includes('deterministic') || detail.origins.includes('fast');
+function classifyIngestDetailDisposition(detail: CollectedCandidateDetail): IngestDetailDisposition {
+  if (detail.candidate.written_kind === 'session_note') return 'note';
+  if (detail.origins.includes('deterministic') || detail.origins.includes('fast')) return 'auto_commit';
+  return 'review';
 }
 
 function isAtomicDeterministicInput(content: string): boolean {
@@ -1316,8 +1319,8 @@ export class CortexRecordsV2 {
     }> = [];
     const reviewRecordCandidates: Array<Record<string, unknown>> = [];
 
-    const autoCommitDetails = candidateDetails.filter(shouldAutoCommitIngestDetail);
-    const reviewDetails = candidateDetails.filter((detail) => !shouldAutoCommitIngestDetail(detail));
+    const autoCommitDetails = candidateDetails.filter((detail) => classifyIngestDetailDisposition(detail) !== 'review');
+    const reviewDetails = candidateDetails.filter((detail) => classifyIngestDetailDisposition(detail) === 'review');
 
     for (const detail of autoCommitDetails) {
       const normalized = detail.candidate;

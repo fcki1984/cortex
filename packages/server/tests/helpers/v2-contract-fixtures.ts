@@ -161,7 +161,7 @@ export function createReviewInboxDurableMockLLM(): LLMProvider {
   return {
     name: 'review-inbox-durable-mock',
     complete: vi.fn().mockImplementation(async (prompt: string) => {
-      if (prompt.includes('后续交流中文就行')) {
+      if (prompt.includes('把输出语言设成中文')) {
         return JSON.stringify({
           records: [{
             kind: 'profile_rule',

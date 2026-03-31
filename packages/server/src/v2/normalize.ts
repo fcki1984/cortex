@@ -2,6 +2,7 @@ import { normalizeEntity } from '../utils/helpers.js';
 import type { DetectedSignal } from '../signals/index.js';
 import type { Memory, MemoryCategory } from '../db/index.js';
 import {
+  canonicalizeDurableContent,
   inferFactSlotAttribute,
   inferProfileRuleAttribute,
   inferRequestedKindFromContent,
@@ -326,6 +327,13 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
   const subjectKey = ownerScope === 'agent'
     ? normalizeKey(input.subjectKey || 'agent', 'agent')
     : stableSubject(input.subjectKey, input.content) || 'user';
+  const valueText = canonicalizeDurableContent({
+    kind: 'profile_rule',
+    content: input.content,
+    owner_scope: ownerScope,
+    subject_key: subjectKey,
+    attribute_key: attributeKey,
+  }) || input.content;
 
   return outcome(
     {
@@ -334,7 +342,7 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
       owner_scope: ownerScope,
       subject_key: subjectKey,
       attribute_key: attributeKey,
-      value_text: input.content,
+      value_text: valueText,
       source_type: input.sourceType,
       tags: input.tags,
       priority: input.priority,
@@ -357,6 +365,12 @@ function normalizeFactSlot(input: ManualFactSlotInput, requestedKind: RecordKind
     inferFactSlotAttribute(input.content),
   );
   if (!attributeKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+  const valueText = canonicalizeDurableContent({
+    kind: 'fact_slot',
+    content: input.content,
+    entity_key: entityKey,
+    attribute_key: attributeKey,
+  }) || input.content;
 
   return outcome(
     {
@@ -364,7 +378,7 @@ function normalizeFactSlot(input: ManualFactSlotInput, requestedKind: RecordKind
       agent_id: input.agentId,
       entity_key: entityKey,
       attribute_key: attributeKey,
-      value_text: input.content,
+      value_text: valueText,
       source_type: input.sourceType,
       tags: input.tags,
       priority: input.priority,
@@ -387,6 +401,12 @@ function normalizeTaskState(input: ManualTaskStateInput, requestedKind: RecordKi
     inferTaskStateKey(input.content),
   );
   if (!stateKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+  const summary = canonicalizeDurableContent({
+    kind: 'task_state',
+    content: input.content,
+    subject_key: subjectKey,
+    state_key: stateKey,
+  }) || input.content;
 
   return outcome(
     {
@@ -395,7 +415,7 @@ function normalizeTaskState(input: ManualTaskStateInput, requestedKind: RecordKi
       subject_key: subjectKey,
       state_key: stateKey,
       status: inferTaskStatus(input.content, input.status),
-      summary: input.content,
+      summary,
       source_type: input.sourceType,
       tags: input.tags,
       priority: input.priority,

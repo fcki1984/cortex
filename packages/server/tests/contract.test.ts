@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   V2_CONTRACT_CANONICAL_CASES,
+  extractFactRelationObjectValue,
+  relationPredicateForFactAttribute,
   shouldApplyRequestedKindHint,
   splitCompoundClauses,
 } from '../src/v2/contract.js';
@@ -79,5 +81,60 @@ describe('V2 shared atomic contract', () => {
     expect(splitCompoundClauses('我住大阪，然后请用中文回答')).toEqual([
       '我住大阪，然后请用中文回答',
     ]);
+  });
+
+  it('canonicalizes stable colloquial explicit inputs into durable shared-contract truth', () => {
+    const samples = [
+      {
+        input: '后续交流中文就行',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '三句话内就行',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
+        input: '方案简单点',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+    ] as const;
+
+    for (const sample of samples) {
+      const normalized = normalizeManualInput(`contract-colloquial-${sample.attribute_key}`, {
+        content: sample.input,
+      });
+
+      expect(normalized.written_kind).toBe(sample.written_kind);
+      expect(normalized.candidate.kind).toBe(sample.written_kind);
+      expect(
+        normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
+          ? normalized.candidate.attribute_key
+          : null,
+      ).toBe(sample.attribute_key);
+      expect(
+        normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
+          ? normalized.candidate.value_text
+          : normalized.candidate.summary
+      ).toBe(sample.content);
+    }
+  });
+
+  it('keeps colloquial explicit fact follow-ups relation-safe after canonicalization', () => {
+    const normalized = normalizeManualInput('contract-colloquial-fact', {
+      content: '目前任职于 OpenAI',
+    });
+
+    expect(normalized.written_kind).toBe('fact_slot');
+    expect(normalized.candidate.kind).toBe('fact_slot');
+    expect(normalized.candidate.attribute_key).toBe('organization');
+    expect(normalized.candidate.value_text).toBe('我在 OpenAI 工作');
+    expect(relationPredicateForFactAttribute(normalized.candidate.attribute_key)).toBe('works_at');
+    expect(extractFactRelationObjectValue(normalized.candidate.attribute_key, normalized.candidate.value_text)).toBe('OpenAI');
   });
 });

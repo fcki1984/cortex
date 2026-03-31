@@ -360,7 +360,7 @@ describe('V2 Import / Export', () => {
     ]);
     expect(preview.record_candidates[1]?.attribute_key).toBe('location');
     expect(preview.record_candidates[1]?.entity_key).toBe('user');
-    expect(preview.record_candidates[1]?.content).toBe('现在住东京');
+    expect(preview.record_candidates[1]?.content).toBe('我住东京');
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('lives_in');
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
@@ -382,7 +382,7 @@ describe('V2 Import / Export', () => {
     ]);
     expect(preview.record_candidates[1]?.attribute_key).toBe('location');
     expect(preview.record_candidates[1]?.entity_key).toBe('user');
-    expect(preview.record_candidates[1]?.content).toBe('目前位于东京');
+    expect(preview.record_candidates[1]?.content).toBe('我住东京');
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('lives_in');
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
@@ -404,7 +404,7 @@ describe('V2 Import / Export', () => {
     ]);
     expect(preview.record_candidates[1]?.attribute_key).toBe('organization');
     expect(preview.record_candidates[1]?.entity_key).toBe('user');
-    expect(preview.record_candidates[1]?.content).toBe('目前任职于 OpenAI');
+    expect(preview.record_candidates[1]?.content).toBe('我在 OpenAI 工作');
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('works_at');
     expect(preview.relation_candidates[0]?.object_key).toBe('openai');
@@ -422,7 +422,7 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates).toHaveLength(1);
     expect(preview.record_candidates[0]?.normalized_kind).toBe('fact_slot');
     expect(preview.record_candidates[0]?.attribute_key).toBe('location');
-    expect(preview.record_candidates[0]?.content).toBe('现在住东京');
+    expect(preview.record_candidates[0]?.content).toBe('我住东京');
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.predicate).toBe('lives_in');
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
@@ -443,7 +443,7 @@ describe('V2 Import / Export', () => {
       'fact_slot',
     ]);
     expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
-    expect(preview.record_candidates[1]?.content).toBe('现在住东京');
+    expect(preview.record_candidates[1]?.content).toBe('我住东京');
     expect(preview.relation_candidates).toHaveLength(1);
     expect(preview.relation_candidates[0]?.object_key).toBe('东京');
   });
@@ -471,7 +471,7 @@ describe('V2 Import / Export', () => {
       'fact_slot',
       'profile_rule',
     ]);
-    expect(preview.record_candidates[0]?.content).toBe('现在住东京');
+    expect(preview.record_candidates[0]?.content).toBe('我住东京');
     expect(preview.record_candidates[0]?.attribute_key).toBe('location');
     expect(preview.record_candidates[1]?.attribute_key).toBe('language_preference');
     expect(preview.relation_candidates).toHaveLength(1);
@@ -529,6 +529,65 @@ describe('V2 Import / Export', () => {
         sample.relation_predicate ? [sample.relation_predicate] : [],
       );
     }
+  });
+
+  it('canonicalizes colloquial stable preview and ingest inputs even without deep extraction help', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'contract-colloquial-preview',
+      format: 'text',
+      content: '后续交流中文就行',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(preview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(preview.relation_candidates).toHaveLength(0);
+
+    const ingested = await records.ingest({
+      agent_id: 'contract-colloquial-ingest',
+      user_message: '后续交流中文就行',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.content).toBe('请用中文回答');
+    expect(relations.listCandidates({ agent_id: 'contract-colloquial-ingest' }).items).toHaveLength(0);
+  });
+
+  it('keeps compound preview and ingest winners aligned when a speculative clause coexists with a stable colloquial preference', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'contract-colloquial-compound-preview',
+      format: 'text',
+      content: '最近也许会考虑换方案。后续交流中文就行',
+    });
+
+    expect(preview.record_candidates.map((candidate) => candidate.normalized_kind)).toEqual([
+      'session_note',
+      'profile_rule',
+    ]);
+    expect(preview.record_candidates[0]?.content).toBe('最近也许会考虑换方案');
+    expect(preview.record_candidates[1]?.content).toBe('请用中文回答');
+    expect(preview.record_candidates[1]?.attribute_key).toBe('language_preference');
+
+    const ingested = await records.ingest({
+      agent_id: 'contract-colloquial-compound-ingest',
+      user_message: '最近也许会考虑换方案。后续交流中文就行',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(2);
+    expect(ingested.records.map((record) => record.written_kind)).toEqual([
+      'session_note',
+      'profile_rule',
+    ]);
+    expect(ingested.records[1]?.content).toBe('请用中文回答');
+    expect(relations.listCandidates({ agent_id: 'contract-colloquial-compound-ingest' }).items).toHaveLength(0);
   });
 
   it('prefers deterministic durable ingest candidates over conflicting deep durable output for atomic user input', async () => {
@@ -622,7 +681,7 @@ describe('V2 Import / Export', () => {
     expect(ingested.records).toHaveLength(1);
     expect(ingested.records[0]?.written_kind).toBe('profile_rule');
     expect(ingested.records[0]?.source_type).toBe('user_explicit');
-    expect(ingested.records[0]?.content).toContain('英文回答');
+    expect(ingested.records[0]?.content).toBe('Please answer in English');
     expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal' }).items).toHaveLength(0);
   });
 
@@ -742,11 +801,11 @@ describe('V2 Import / Export', () => {
 
     expect(ingested.records).toHaveLength(1);
     expect(ingested.records[0]?.written_kind).toBe('fact_slot');
-    expect(ingested.records[0]?.content).toBe('现在住东京');
+    expect(ingested.records[0]?.content).toBe('我住东京');
 
     const stored = records.listRecords({ agent_id: 'ingest-compound-conflict' }).items;
     expect(stored).toHaveLength(1);
-    expect(stored[0]?.content).toBe('现在住东京');
+    expect(stored[0]?.content).toBe('我住东京');
     expect(relations.listCandidates({ agent_id: 'ingest-compound-conflict' }).items.map((item) => item.object_key)).toEqual([
       '东京',
     ]);

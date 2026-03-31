@@ -125,6 +125,45 @@ describe('V2 review inbox', () => {
     expect(JSON.parse(list.payload).items).toHaveLength(0);
   });
 
+  it('auto-commits stable colloquial ingest preferences without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial',
+        user_message: '后续交流中文就行',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-auto-colloquial',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]));
+  });
+
   it('routes deep-only durable live ingest candidates into the review inbox', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
@@ -134,7 +173,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live',
-        user_message: '后续交流中文就行',
+        user_message: '把输出语言设成中文',
         assistant_message: '收到',
       },
     });
