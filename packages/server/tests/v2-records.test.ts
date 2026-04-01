@@ -200,6 +200,50 @@ describe('CortexRecordsV2', () => {
     expect(records.items[0]?.content).toContain('简洁回答');
   });
 
+  it('stores colloquial stable profile-rule writes using canonical durable content', async () => {
+    const language = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '之后都用中文',
+    });
+
+    const length = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '三句话内就行',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '方案简单点',
+    });
+
+    expect(language.record.kind).toBe('profile_rule');
+    expect(language.record.attribute_key).toBe('language_preference');
+    expect(language.record.content).toBe('请用中文回答');
+
+    expect(length.record.kind).toBe('profile_rule');
+    expect(length.record.attribute_key).toBe('response_length');
+    expect(length.record.content).toBe('请把回答控制在三句话内');
+
+    expect(complexity.record.kind).toBe('profile_rule');
+    expect(complexity.record.attribute_key).toBe('solution_complexity');
+    expect(complexity.record.content).toBe('不要复杂方案');
+  });
+
+  it('downgrades weak colloquial profile-rule writes instead of committing durable truth', async () => {
+    const result = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '中文就行吧',
+    });
+
+    expect(result.requested_kind).toBe('profile_rule');
+    expect(result.written_kind).toBe('session_note');
+    expect(result.record.kind).toBe('session_note');
+  });
+
   it('downgrades assistant-only durable writes to session_note', async () => {
     const result = await service.remember({
       agent_id: 'assistant-only-agent',

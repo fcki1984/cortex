@@ -155,6 +155,16 @@ describe('review assist', () => {
     expect(result.suggested_rewrite ?? null).toBe(null);
   });
 
+  it('does not emit auto-accept rewrites for weak colloquial preference language', () => {
+    const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
+      content: '中文就行吧',
+      source_excerpt: '中文就行吧',
+    }));
+
+    expect(result.suggested_action).toBe('edit');
+    expect(result.suggested_rewrite ?? null).toBe(null);
+  });
+
   it('falls back to reason-only guidance for unsupported stable values', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
       attribute_key: 'response_length',

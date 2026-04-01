@@ -269,7 +269,7 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   return null;
 }
 
-function isWeakConversationalProfileRule(content: string): boolean {
+export function isWeakConversationalProfileRule(content: string): boolean {
   return isSpeculativeContent(content) || CONVERSATIONAL_PROFILE_RULE_HEDGE_RE.test(content);
 }
 

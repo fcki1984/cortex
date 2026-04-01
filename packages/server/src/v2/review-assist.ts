@@ -1,6 +1,8 @@
 import {
   canonicalizeDurableContent,
   isSpeculativeContent,
+  isWeakConversationalProfileRule,
+  matchConversationalProfileRule,
 } from './contract.js';
 
 export type ReviewSuggestedAction = 'accept' | 'reject' | 'edit';
@@ -39,6 +41,15 @@ function buildSuggestedRewrite(payload: ReviewRecordPayload): string | null {
   const entityKey = asString(payload.entity_key);
 
   if (normalizedKind === 'profile_rule' && asString(payload.subject_key) === 'user') {
+    if (isWeakConversationalProfileRule(sourceText)) {
+      return null;
+    }
+
+    const conversationalMatch = matchConversationalProfileRule(sourceText);
+    if (conversationalMatch && conversationalMatch.attribute_key === attributeKey) {
+      return conversationalMatch.canonical_content;
+    }
+
     return attributeKey
       ? canonicalizeDurableContent({
           kind: 'profile_rule',
