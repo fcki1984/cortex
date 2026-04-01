@@ -182,6 +182,47 @@ export function createReviewInboxDurableMockLLM(): LLMProvider {
   };
 }
 
+export function createWeakColloquialProfileRuleDriftMockLLM(): LLMProvider {
+  return {
+    name: 'weak-colloquial-profile-rule-drift-mock',
+    complete: vi.fn().mockImplementation(async (prompt: string) => {
+      if (prompt.includes('中文就行吧')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'profile_rule',
+            source_type: 'user_explicit',
+            owner_scope: 'user',
+            subject_key: 'user',
+            attribute_key: 'language_preference',
+            value_text: '请用中文回答',
+            priority: 0.74,
+            confidence: 0.82,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      if (prompt.includes('可能简单点更好')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'profile_rule',
+            source_type: 'user_explicit',
+            owner_scope: 'user',
+            subject_key: 'user',
+            attribute_key: 'solution_complexity',
+            value_text: '不要复杂方案',
+            priority: 0.7,
+            confidence: 0.8,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      return '{"records":[],"nothing_extracted":true}';
+    }),
+  };
+}
+
 export function createReviewInboxColloquialMockLLM(): LLMProvider {
   return {
     name: 'review-inbox-colloquial-mock',

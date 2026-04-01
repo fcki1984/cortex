@@ -12,6 +12,7 @@ import {
   isShortUserProposalRejection,
   isShortUserConfirmation,
   isSpeculativeContent,
+  isWeakConversationalProfileRule,
   resolveAtomicContractDecision,
   shouldApplyRequestedKindHint,
   splitAssistantProposalClauses,
@@ -108,6 +109,12 @@ type IngestDetailDisposition = 'auto_commit' | 'review' | 'note';
 type ShortUserProposalArbitration =
   | { action: 'keep'; candidate: NormalizedRecordCandidate }
   | { action: 'drop_all' };
+
+const COLLOQUIAL_PROFILE_RULE_KEYS = new Set([
+  'language_preference',
+  'response_length',
+  'solution_complexity',
+]);
 
 const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'user', patterns: [/\buser\b/i, /\bi\b/i, /\bme\b/i, /\bmy\b/i, /用户/i, /我/i, /我的/i] },
@@ -469,6 +476,20 @@ function stableContractKey(candidate: NormalizedRecordCandidate): string | null 
   }
 }
 
+function shouldRejectWeakColloquialProfileRuleCandidate(
+  content: string,
+  candidate: NormalizedRecordCandidate,
+): boolean {
+  const record = candidate.candidate;
+  return (
+    record.kind === 'profile_rule' &&
+    record.owner_scope === 'user' &&
+    record.subject_key === 'user' &&
+    COLLOQUIAL_PROFILE_RULE_KEYS.has(record.attribute_key) &&
+    isWeakConversationalProfileRule(content)
+  );
+}
+
 function revalidateDeepDurableCandidate(input: {
   agent_id: string;
   content: string;
@@ -478,6 +499,7 @@ function revalidateDeepDurableCandidate(input: {
   carry_context?: ClauseCarryContext;
 }): NormalizedRecordCandidate | null {
   if (input.candidate.written_kind === 'session_note') return input.candidate;
+  if (shouldRejectWeakColloquialProfileRuleCandidate(input.content, input.candidate)) return null;
 
   const record = input.candidate.candidate;
   const revalidated = normalizeManualInput(input.agent_id, {

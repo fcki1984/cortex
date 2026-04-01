@@ -14,6 +14,7 @@ import {
   createNoOpLLM,
   createReviewAssistRecordPayload,
   createReviewInboxDurableMockLLM,
+  createWeakColloquialProfileRuleDriftMockLLM,
 } from './helpers/v2-contract-fixtures.js';
 
 function createMockEmbedding(): EmbeddingProvider {
@@ -25,7 +26,7 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
-async function createApp(options: { reviewOnly?: boolean } = {}): Promise<{
+async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boolean } = {}): Promise<{
   app: FastifyInstance;
   records: CortexRecordsV2;
   relations: CortexRelationsV2;
@@ -33,7 +34,11 @@ async function createApp(options: { reviewOnly?: boolean } = {}): Promise<{
 }> {
   initDatabase(':memory:');
   const records = new CortexRecordsV2(
-    options.reviewOnly ? createReviewInboxDurableMockLLM() : createNoOpLLM(),
+    options.weakColloquial
+      ? createWeakColloquialProfileRuleDriftMockLLM()
+      : options.reviewOnly
+        ? createReviewInboxDurableMockLLM()
+        : createNoOpLLM(),
     createMockEmbedding(),
   );
   await records.initialize();
@@ -201,6 +206,39 @@ describe('V2 review inbox', () => {
       suggested_rewrite: '请用中文回答',
     }));
     expect(detailBody.items[0].payload.content).toBe('请用中文回答');
+  });
+
+  it('keeps weak colloquial ingest preferences as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial',
+        user_message: '中文就行吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '中文就行吧',
+    }));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-weak-colloquial',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
   it('emits tracing headers for review inbox list and detail reads', async () => {

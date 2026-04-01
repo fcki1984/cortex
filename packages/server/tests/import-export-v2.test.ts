@@ -13,6 +13,7 @@ import {
   createContractDriftMockLLM,
   createNoOpLLM,
   createPrecisionFirstDriftMockLLM,
+  createWeakColloquialProfileRuleDriftMockLLM,
 } from './helpers/v2-contract-fixtures.js';
 
 function createMockEmbedding(): EmbeddingProvider {
@@ -187,6 +188,21 @@ describe('V2 Import / Export', () => {
 
     expect(preview.record_candidates).toHaveLength(1);
     expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('keeps weak colloquial preference preview content as session_note even when deep extraction proposes a durable rule', async () => {
+    const { records } = await createServices(createWeakColloquialProfileRuleDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-language',
+      format: 'text',
+      content: '中文就行吧',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.record_candidates[0]?.content).toBe('中文就行吧');
     expect(preview.relation_candidates).toHaveLength(0);
   });
 
