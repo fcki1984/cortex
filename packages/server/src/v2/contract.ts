@@ -38,6 +38,12 @@ export type ShortUserProposalSelection = {
   drop_all: boolean;
 };
 
+export type ConversationalProfileRuleMatch = {
+  attribute_key: 'language_preference' | 'response_length' | 'solution_complexity';
+  canonical_content: string;
+  disposition: 'auto_commit';
+};
+
 export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   {
     input: '我住大阪',
@@ -161,6 +167,7 @@ const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
 const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese)/i;
 const ZH_SENTENCE_RE = /((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?)(?:内|以内)?/i;
 const EN_SENTENCE_RE = /(?:within|in|under|limit(?:ed)? to|keep(?: answers?)?(?: within)?|answer in)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
+const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|更好|最好)/i;
 const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
 const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
@@ -256,6 +263,67 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   if (attributeKey === 'solution_complexity') {
     if (/(?:不要复杂方案|别太复杂|别搞太复杂|方案简单点|简单点|轻量点|simple solution|keep it simple|lightweight solution|avoid complex)/i.test(content)) {
       return /[A-Za-z]/.test(content) ? 'Please avoid complex solutions' : '不要复杂方案';
+    }
+  }
+
+  return null;
+}
+
+function isWeakConversationalProfileRule(content: string): boolean {
+  return isSpeculativeContent(content) || CONVERSATIONAL_PROFILE_RULE_HEDGE_RE.test(content);
+}
+
+export function matchConversationalProfileRule(content: string): ConversationalProfileRuleMatch | null {
+  if (isWeakConversationalProfileRule(content)) return null;
+
+  const normalized = content.trim();
+  if (!normalized) return null;
+
+  const languageLabel = canonicalLanguageLabel(normalized);
+  if (
+    languageLabel &&
+    (
+      /(?:后续|之后|后面|接下来|以后).{0,8}(?:交流|沟通|聊|都用|用)/i.test(normalized) ||
+      /(?:都用|改用|换用|用).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(normalized) ||
+      /(?:中文|英文|日文|english|chinese|japanese).{0,8}(?:就行|即可|就好)/i.test(normalized)
+    )
+  ) {
+    const canonicalContent = canonicalProfileRuleContent('language_preference', normalized);
+    if (canonicalContent) {
+      return {
+        attribute_key: 'language_preference',
+        canonical_content: canonicalContent,
+        disposition: 'auto_commit',
+      };
+    }
+  }
+
+  if (
+    extractSentenceCountConstraint(normalized) &&
+    (
+      /(?:就行|即可|就好|够了|别太长|不要太长)/i.test(normalized) ||
+      /(?:控制|限制).{0,12}(?:句|sentences?)/i.test(normalized) ||
+      /(?:回答|回复|answer|response).{0,12}(?:句|sentences?)/i.test(normalized)
+    )
+  ) {
+    const canonicalContent = canonicalProfileRuleContent('response_length', normalized);
+    if (canonicalContent) {
+      return {
+        attribute_key: 'response_length',
+        canonical_content: canonicalContent,
+        disposition: 'auto_commit',
+      };
+    }
+  }
+
+  if (/(?:方案简单点|简单点|轻量点|别搞太复杂|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(normalized)) {
+    const canonicalContent = canonicalProfileRuleContent('solution_complexity', normalized);
+    if (canonicalContent) {
+      return {
+        attribute_key: 'solution_complexity',
+        canonical_content: canonicalContent,
+        disposition: 'auto_commit',
+      };
     }
   }
 
@@ -441,6 +509,10 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
     }
     return 'persona_rule';
   }
+
+  const conversationalMatch = matchConversationalProfileRule(content);
+  if (conversationalMatch) return conversationalMatch.attribute_key;
+  if (isWeakConversationalProfileRule(content)) return null;
 
   if (/我叫|我的名字|my name is|call me/i.test(content)) return 'display_name';
   if (

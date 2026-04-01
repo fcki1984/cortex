@@ -125,6 +125,42 @@ describe('V2 shared atomic contract', () => {
     }
   });
 
+  it('exposes a shared colloquial profile-rule helper with weak-language gating', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const matchConversationalProfileRule = (contractModule as Record<string, unknown>).matchConversationalProfileRule as
+      | ((input: string) => Record<string, unknown> | null)
+      | undefined;
+
+    expect(typeof matchConversationalProfileRule).toBe('function');
+
+    expect(matchConversationalProfileRule!('后续交流中文就行')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('之后都用中文')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('三句话内就行')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案简单点')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('中文就行吧')).toBe(null);
+    expect(matchConversationalProfileRule!('可能简单点更好')).toBe(null);
+  });
+
   it('keeps colloquial explicit fact follow-ups relation-safe after canonicalization', () => {
     const normalized = normalizeManualInput('contract-colloquial-fact', {
       content: '目前任职于 OpenAI',
