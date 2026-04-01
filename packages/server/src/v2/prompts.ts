@@ -4,6 +4,11 @@ const REFERENCE_EXAMPLES = V2_CONTRACT_REFERENCE_EXAMPLES
   .map((example) => `- "${example.input}" -> ${example.output}`)
   .join('\n');
 
+const NEGATIVE_EXAMPLES = [
+  '- "中文就行吧" -> session_note',
+  '- "可能简单点更好" -> session_note',
+].join('\n');
+
 export const V2_EXTRACTION_SYSTEM_PROMPT = `You are the extraction stage of a structured memory system.
 
 Your job is to convert a conversation into 4 stable record kinds:
@@ -36,6 +41,8 @@ Rules:
 
 Reference examples:
 ${REFERENCE_EXAMPLES}
+- Weak / tentative examples that must stay session_note:
+${NEGATIVE_EXAMPLES}
 - Do not convert vague implementation chatter or tentative plans into durable records.
 
 Output JSON only:

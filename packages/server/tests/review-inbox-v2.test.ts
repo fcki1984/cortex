@@ -241,6 +241,39 @@ describe('V2 review inbox', () => {
     expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
+  it('keeps weak colloquial complexity ingest content as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-complexity',
+        user_message: '可能简单点更好',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '可能简单点更好',
+    }));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-weak-colloquial-complexity',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
   it('emits tracing headers for review inbox list and detail reads', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
