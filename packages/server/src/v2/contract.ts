@@ -86,7 +86,23 @@ export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'profile_rule(subject_key=user, attribute_key=response_length)',
   },
   {
+    input: '三句就够',
+    requested_kind: 'profile_rule',
+    written_kind: 'profile_rule',
+    attribute_key: 'response_length',
+    relation_predicate: null,
+    output: 'profile_rule(subject_key=user, attribute_key=response_length)',
+  },
+  {
     input: '不要复杂方案',
+    requested_kind: 'profile_rule',
+    written_kind: 'profile_rule',
+    attribute_key: 'solution_complexity',
+    relation_predicate: null,
+    output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)',
+  },
+  {
+    input: '别整复杂方案',
     requested_kind: 'profile_rule',
     written_kind: 'profile_rule',
     attribute_key: 'solution_complexity',
@@ -167,7 +183,7 @@ const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
 const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese)/i;
 const ZH_SENTENCE_RE = /((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?)(?:内|以内)?/i;
 const EN_SENTENCE_RE = /(?:within|in|under|limit(?:ed)? to|keep(?: answers?)?(?: within)?|answer in)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
-const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|更好|最好)/i;
+const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|够(?:了)?吧|更好|最好)/i;
 const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
 const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
@@ -211,7 +227,8 @@ export function canonicalLanguageLabel(raw: string | null | undefined): '中文'
 }
 
 function canonicalSentenceCount(raw: string): string {
-  return raw.replace(/\s+/g, '');
+  const compact = raw.replace(/\s+/g, '');
+  return compact.replace(/句$/, '句话');
 }
 
 function detectContentLocale(content: string): 'zh' | 'en' | 'ja' | null {
@@ -261,7 +278,7 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   }
 
   if (attributeKey === 'solution_complexity') {
-    if (/(?:不要复杂方案|别太复杂|别搞太复杂|方案简单点|简单点|轻量点|simple solution|keep it simple|lightweight solution|avoid complex)/i.test(content)) {
+    if (/(?:不要复杂方案|别太复杂|别搞太复杂|别整复杂方案|方案简单点|简单点|轻量点|simple solution|keep it simple|lightweight solution|avoid complex)/i.test(content)) {
       return /[A-Za-z]/.test(content) ? 'Please avoid complex solutions' : '不要复杂方案';
     }
   }
@@ -301,7 +318,7 @@ export function matchConversationalProfileRule(content: string): ConversationalP
   if (
     extractSentenceCountConstraint(normalized) &&
     (
-      /(?:就行|即可|就好|够了|别太长|不要太长)/i.test(normalized) ||
+      /(?:就行|即可|就好|够(?:了)?|别太长|不要太长)/i.test(normalized) ||
       /(?:控制|限制).{0,12}(?:句|sentences?)/i.test(normalized) ||
       /(?:回答|回复|answer|response).{0,12}(?:句|sentences?)/i.test(normalized)
     )
@@ -316,7 +333,7 @@ export function matchConversationalProfileRule(content: string): ConversationalP
     }
   }
 
-  if (/(?:方案简单点|简单点|轻量点|别搞太复杂|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(normalized)) {
+  if (/(?:方案简单点|简单点|轻量点|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(normalized)) {
     const canonicalContent = canonicalProfileRuleContent('solution_complexity', normalized);
     if (canonicalContent) {
       return {
@@ -539,7 +556,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
     /(?:详细|长篇|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
     (
       ZH_SENTENCE_RE.test(content) &&
-      /(?:就行|即可|就好|够了|别太长|不要太长|回答|回复|answer|response)/i.test(content)
+      /(?:就行|即可|就好|够(?:了)?|别太长|不要太长|回答|回复|answer|response)/i.test(content)
     )
   ) {
     return 'response_length';
@@ -548,7 +565,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
     /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
     /(?:复杂|complex).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
     /(?:方案|实现|solution|setup).*(?:简单|轻量|simple|lightweight)/i.test(content) ||
-    /(?:别搞太复杂|别太复杂|keep it simple|avoid complex)/i.test(content)
+    /(?:别搞太复杂|别整复杂方案|别太复杂|keep it simple|avoid complex)/i.test(content)
   ) {
     return 'solution_complexity';
   }

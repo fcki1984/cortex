@@ -280,9 +280,9 @@ describe('API V2 Integration', () => {
       method: 'POST',
       url: '/api/v2/ingest',
       payload: {
-        user_message: '后续交流中文就行',
+        user_message: '三句就够',
         assistant_message: '收到',
-        agent_id: 'api-ingest-colloquial-language',
+        agent_id: 'api-ingest-colloquial-length',
       },
     });
 
@@ -295,19 +295,19 @@ describe('API V2 Integration', () => {
     expect(body.records[0]).toEqual(expect.objectContaining({
       requested_kind: 'profile_rule',
       written_kind: 'profile_rule',
-      content: '请用中文回答',
+      content: '请把回答控制在三句话内',
     }));
 
     const stored = await app.inject({
       method: 'GET',
-      url: '/api/v2/records?agent_id=api-ingest-colloquial-language',
+      url: '/api/v2/records?agent_id=api-ingest-colloquial-length',
     });
     expect(stored.statusCode).toBe(200);
     expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'profile_rule',
-        attribute_key: 'language_preference',
-        content: '请用中文回答',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
       }),
     ]));
   });

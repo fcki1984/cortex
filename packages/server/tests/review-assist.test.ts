@@ -42,8 +42,8 @@ describe('review assist', () => {
 
   it('creates a safe rewrite for explicit response length constraints', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
-      content: '回答控制在三句话内',
-      source_excerpt: '回答控制在三句话内',
+      content: '三句就够',
+      source_excerpt: '三句就够',
       attribute_key: 'response_length',
     }));
 
@@ -53,8 +53,8 @@ describe('review assist', () => {
 
   it('creates a safe rewrite for simple solution constraints', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
-      content: '方案别太复杂',
-      source_excerpt: '方案别太复杂',
+      content: '别整复杂方案',
+      source_excerpt: '别整复杂方案',
       attribute_key: 'solution_complexity',
     }));
 
@@ -157,8 +157,9 @@ describe('review assist', () => {
 
   it('does not emit auto-accept rewrites for weak colloquial preference language', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
-      content: '中文就行吧',
-      source_excerpt: '中文就行吧',
+      content: '三句就够了吧',
+      source_excerpt: '三句就够了吧',
+      attribute_key: 'response_length',
     }));
 
     expect(result.suggested_action).toBe('edit');

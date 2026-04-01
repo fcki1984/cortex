@@ -66,7 +66,10 @@ describe('V2 Import / Export', () => {
   it('documents the v2 extraction contract with stable and tentative examples', () => {
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('请用中文回答');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('请把回答控制在三句话内');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句就够');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('别整复杂方案');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就行吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句就够了吧');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('可能简单点更好');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('我在 OpenAI 工作');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('当前任务是重构 Cortex recall');
@@ -220,6 +223,37 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates).toHaveLength(1);
     expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
     expect(preview.record_candidates[0]?.content).toBe('可能简单点更好');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('keeps weak colloquial response-length preview content as session_note even when deep extraction proposes a durable rule', async () => {
+    const { records } = await createServices(createWeakColloquialProfileRuleDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-length',
+      format: 'text',
+      content: '三句就够了吧',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.record_candidates[0]?.content).toBe('三句就够了吧');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('canonicalizes colloquial response-length preview content into a durable profile rule', async () => {
+    const { records } = await createServices();
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-length',
+      format: 'text',
+      content: '三句就够',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('response_length');
+    expect(preview.record_candidates[0]?.content).toBe('请把回答控制在三句话内');
     expect(preview.relation_candidates).toHaveLength(0);
   });
 

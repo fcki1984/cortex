@@ -98,7 +98,19 @@ describe('V2 shared atomic contract', () => {
         content: '请把回答控制在三句话内',
       },
       {
+        input: '三句就够',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
         input: '方案简单点',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '别整复杂方案',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
         content: '不要复杂方案',
@@ -151,13 +163,26 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('三句就够')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('方案简单点')).toEqual(expect.objectContaining({
       attribute_key: 'solution_complexity',
       canonical_content: '不要复杂方案',
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('别整复杂方案')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('中文就行吧')).toBe(null);
+    expect(matchConversationalProfileRule!('三句就够了吧')).toBe(null);
     expect(matchConversationalProfileRule!('可能简单点更好')).toBe(null);
   });
 

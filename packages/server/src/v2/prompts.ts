@@ -6,6 +6,7 @@ const REFERENCE_EXAMPLES = V2_CONTRACT_REFERENCE_EXAMPLES
 
 const NEGATIVE_EXAMPLES = [
   '- "中文就行吧" -> session_note',
+  '- "三句就够了吧" -> session_note',
   '- "可能简单点更好" -> session_note',
 ].join('\n');
 

@@ -210,13 +210,13 @@ describe('CortexRecordsV2', () => {
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '三句话内就行',
+      content: '三句就够',
     });
 
     const complexity = await service.remember({
       agent_id: 'colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '方案简单点',
+      content: '别整复杂方案',
     });
 
     expect(language.record.kind).toBe('profile_rule');
@@ -236,7 +236,7 @@ describe('CortexRecordsV2', () => {
     const result = await service.remember({
       agent_id: 'weak-colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '中文就行吧',
+      content: '三句就够了吧',
     });
 
     expect(result.requested_kind).toBe('profile_rule');

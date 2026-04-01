@@ -218,6 +218,22 @@ export function createWeakColloquialProfileRuleDriftMockLLM(): LLMProvider {
         });
       }
 
+      if (prompt.includes('三句就够了吧')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'profile_rule',
+            source_type: 'user_explicit',
+            owner_scope: 'user',
+            subject_key: 'user',
+            attribute_key: 'response_length',
+            value_text: '请把回答控制在三句话内',
+            priority: 0.72,
+            confidence: 0.81,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
       return '{"records":[],"nothing_extracted":true}';
     }),
   };
