@@ -120,6 +120,15 @@ function buildSuggestedAcceptActions(
     .map((item) => buildAcceptAction(item, draftContent));
 }
 
+function buildSuggestedRejectActions(items: ReviewItem[]) {
+  return items
+    .filter((item) => item.suggested_action === 'reject')
+    .map((item) => ({
+      item_id: item.id,
+      action: 'reject' as const,
+    }));
+}
+
 function getItemCandidateId(item: ReviewItem): string | null {
   return typeof item.payload.candidate_id === 'string' ? item.payload.candidate_id : null;
 }
@@ -532,6 +541,10 @@ export default function ReviewInbox() {
     () => buildSuggestedAcceptActions(actionableItems, draftContent),
     [actionableItems, draftContent],
   );
+  const suggestedRejectActions = useMemo(
+    () => buildSuggestedRejectActions(actionableItems),
+    [actionableItems],
+  );
   const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
 
   useEffect(() => {
@@ -828,6 +841,16 @@ export default function ReviewInbox() {
                     })}
                   >
                     {t('reviewInbox.actionAcceptSuggestedOnly')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={applying || suggestedRejectActions.length === 0}
+                    onClick={() => void handleBatchApply({
+                      item_actions: suggestedRejectActions,
+                    })}
+                  >
+                    {t('reviewInbox.actionRejectSuggestedOnly')}
                   </button>
                   <button
                     type="button"

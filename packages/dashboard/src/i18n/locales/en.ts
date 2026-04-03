@@ -292,6 +292,7 @@ export default {
     actionReject: 'Reject',
     actionEditThenAccept: 'Edit Then Accept',
     actionAcceptSuggestedOnly: 'Accept Suggested',
+    actionRejectSuggestedOnly: 'Reject Suggested',
     actionAcceptAll: 'Accept All',
     actionRejectAll: 'Reject All',
     actionAcceptSuggested: 'Suggested: Accept',

@@ -558,6 +558,115 @@ describe('ReviewInbox page', () => {
     expect(screen.getByDisplayValue('最近也许会考虑换方案')).toBeTruthy();
   });
 
+  it('rejects only suggested-reject items in a mixed batch while leaving edit items pending', async () => {
+    const user = userEvent.setup();
+    const mixedBatchSummary = {
+      ...batchSummary,
+      id: 'batch_reject_mixed',
+      source_preview: '这应该是助手推断。最近也许会考虑换方案',
+      summary: {
+        total: 2,
+        pending: 2,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    };
+    const mixedBatchDetail = {
+      batch: mixedBatchSummary,
+      summary: mixedBatchSummary.summary,
+      items: [
+        {
+          id: 'item_assistant',
+          batch_id: 'batch_reject_mixed',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'reject',
+          suggested_reason: '这条候选主要来自助手推断，建议直接拒绝。',
+          suggested_rewrite: null,
+          payload: {
+            candidate_id: 'candidate_assistant',
+            content: '这应该是助手推断',
+            requested_kind: 'profile_rule',
+            normalized_kind: 'profile_rule',
+            attribute_key: 'language_preference',
+            source_type: 'assistant_inferred',
+            source_excerpt: '这应该是助手推断',
+            warnings: [],
+            confidence: 0.59,
+          },
+        },
+        {
+          id: 'item_note_edit',
+          batch_id: 'batch_reject_mixed',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'edit',
+          suggested_reason: '这条内容还带不确定性，需要人工判断。',
+          suggested_rewrite: null,
+          payload: {
+            candidate_id: 'candidate_note_edit',
+            content: '最近也许会考虑换方案',
+            requested_kind: 'session_note',
+            normalized_kind: 'session_note',
+            source_excerpt: '最近也许会考虑换方案',
+            warnings: [],
+            confidence: 0.61,
+          },
+        },
+      ],
+    };
+
+    apiMocks.listReviewInboxBatchesV2.mockResolvedValueOnce({
+      items: [mixedBatchSummary],
+      total: 1,
+    });
+    apiMocks.getReviewInboxBatchV2.mockResolvedValueOnce(mixedBatchDetail);
+    apiMocks.applyReviewInboxBatchV2.mockResolvedValueOnce({
+      summary: {
+        committed: 0,
+        rejected: 1,
+        failed: 0,
+      },
+      batch_summary: {
+        total: 2,
+        pending: 1,
+        accepted: 0,
+        rejected: 1,
+        failed: 0,
+      },
+      committed: [],
+      rejected: [{ candidate_id: 'candidate_assistant' }],
+      failed: [],
+      remaining_pending: 1,
+      batch: {
+        ...mixedBatchSummary,
+        status: 'partially_applied',
+        source_preview: '最近也许会考虑换方案',
+      },
+    });
+
+    renderPage();
+
+    await screen.findByDisplayValue('最近也许会考虑换方案');
+    await user.click(screen.getByRole('button', { name: '拒绝建议项' }));
+
+    await waitFor(() => {
+      expect(apiMocks.applyReviewInboxBatchV2).toHaveBeenCalledWith('batch_reject_mixed', {
+        item_actions: [{
+          item_id: 'item_assistant',
+          action: 'reject',
+        }],
+      });
+    });
+
+    expect(await screen.findByText('来源预览: 最近也许会考虑换方案')).toBeTruthy();
+    expect(screen.getAllByText('部分已处理')).toHaveLength(2);
+    expect(screen.getAllByText('待处理 1 / 共 2')).toHaveLength(2);
+    expect(screen.queryByText('这条候选主要来自助手推断，建议直接拒绝。')).toBeNull();
+    expect(screen.getByDisplayValue('最近也许会考虑换方案')).toBeTruthy();
+  });
+
   it('advances to the next actionable batch after finishing the current batch', async () => {
     const user = userEvent.setup();
     const nextBatchSummary = {
