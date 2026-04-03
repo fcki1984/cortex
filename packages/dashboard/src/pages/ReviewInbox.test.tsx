@@ -445,6 +445,119 @@ describe('ReviewInbox page', () => {
     expect(apiMocks.getReviewInboxBatchV2).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts only suggested-safe items in a mixed batch while leaving the rest pending', async () => {
+    const user = userEvent.setup();
+    const mixedBatchSummary = {
+      ...batchSummary,
+      id: 'batch_mixed',
+      source_preview: '后续交流中文就行。最近也许会考虑换方案',
+      summary: {
+        total: 2,
+        pending: 2,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    };
+    const mixedBatchDetail = {
+      batch: mixedBatchSummary,
+      summary: mixedBatchSummary.summary,
+      items: [
+        {
+          id: 'item_language',
+          batch_id: 'batch_mixed',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'accept',
+          suggested_reason: '语言偏好已经稳定，可直接接受。',
+          suggested_rewrite: '请用中文回答',
+          payload: {
+            candidate_id: 'candidate_language',
+            content: '后续交流中文就行',
+            requested_kind: 'profile_rule',
+            normalized_kind: 'profile_rule',
+            attribute_key: 'language_preference',
+            source_excerpt: '后续交流中文就行',
+            warnings: [],
+            confidence: 0.83,
+          },
+        },
+        {
+          id: 'item_note',
+          batch_id: 'batch_mixed',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'edit',
+          suggested_reason: '这条内容还带不确定性，需要人工判断。',
+          suggested_rewrite: null,
+          payload: {
+            candidate_id: 'candidate_note',
+            content: '最近也许会考虑换方案',
+            requested_kind: 'session_note',
+            normalized_kind: 'session_note',
+            source_excerpt: '最近也许会考虑换方案',
+            warnings: [],
+            confidence: 0.61,
+          },
+        },
+      ],
+    };
+
+    apiMocks.listReviewInboxBatchesV2.mockResolvedValueOnce({
+      items: [mixedBatchSummary],
+      total: 1,
+    });
+    apiMocks.getReviewInboxBatchV2.mockResolvedValueOnce(mixedBatchDetail);
+    apiMocks.applyReviewInboxBatchV2.mockResolvedValueOnce({
+      summary: {
+        committed: 1,
+        rejected: 0,
+        failed: 0,
+      },
+      batch_summary: {
+        total: 2,
+        pending: 1,
+        accepted: 1,
+        rejected: 0,
+        failed: 0,
+      },
+      committed: [{ candidate_id: 'candidate_language' }],
+      rejected: [],
+      failed: [],
+      remaining_pending: 1,
+      batch: {
+        ...mixedBatchSummary,
+        status: 'partially_applied',
+        source_preview: '最近也许会考虑换方案',
+      },
+    });
+
+    renderPage();
+
+    const languageDraft = await screen.findByDisplayValue('请用中文回答');
+    await user.clear(languageDraft);
+    await user.type(languageDraft, '请始终用中文回答');
+    await user.click(screen.getByRole('button', { name: '接受建议项' }));
+
+    await waitFor(() => {
+      expect(apiMocks.applyReviewInboxBatchV2).toHaveBeenCalledWith('batch_mixed', {
+        item_actions: [{
+          item_id: 'item_language',
+          action: 'edit_then_accept',
+          payload_override: {
+            content: '请始终用中文回答',
+          },
+        }],
+      });
+    });
+
+    expect(await screen.findByText('来源预览: 最近也许会考虑换方案')).toBeTruthy();
+    expect(screen.getAllByText('部分已处理')).toHaveLength(2);
+    expect(screen.getAllByText('待处理 1 / 共 2')).toHaveLength(2);
+    expect(screen.queryByDisplayValue('请始终用中文回答')).toBeNull();
+    expect(screen.getByDisplayValue('最近也许会考虑换方案')).toBeTruthy();
+  });
+
   it('advances to the next actionable batch after finishing the current batch', async () => {
     const user = userEvent.setup();
     const nextBatchSummary = {

@@ -291,6 +291,7 @@ export default {
     actionRetry: '重新提交',
     actionReject: '拒绝',
     actionEditThenAccept: '编辑后接受',
+    actionAcceptSuggestedOnly: '接受建议项',
     actionAcceptAll: '全部接受',
     actionRejectAll: '全部拒绝',
     actionAcceptSuggested: '建议接受',

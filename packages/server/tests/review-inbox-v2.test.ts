@@ -208,14 +208,83 @@ describe('V2 review inbox', () => {
     expect(detailBody.batch.source_preview).toBe('回答简洁直接');
     expect(detailBody.items).toEqual([
       expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '请简洁直接回答',
         payload: expect.objectContaining({
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
-          content: '回答简洁直接',
+          content: '请简洁直接回答',
           source_excerpt: '回答简洁直接',
         }),
       }),
     ]);
+  });
+
+  it('accepts response-style review batches through the canonical suggested rewrite', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-response-style-apply',
+        user_message: '回答简洁直接',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(typeof ingestBody.review_batch_id).toBe('string');
+    expect(ingestBody.auto_committed_count).toBe(0);
+    expect(ingestBody.review_pending_count).toBe(1);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${ingestBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '请简洁直接回答',
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+        }),
+      }),
+    ]);
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${ingestBody.review_batch_id}/apply`,
+      payload: {
+        accept_all: true,
+      },
+    });
+
+    expect(applied.statusCode).toBe(200);
+    const appliedBody = JSON.parse(applied.payload);
+    expect(appliedBody.summary.committed).toBe(1);
+    expect(appliedBody.remaining_pending).toBe(0);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-response-style-apply',
+    });
+
+    expect(records.statusCode).toBe(200);
+    const recordsBody = JSON.parse(records.payload);
+    expect(recordsBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]));
   });
 
   it('auto-commits newly supported colloquial complexity preferences without creating a review batch', async () => {
@@ -1486,7 +1555,7 @@ describe('V2 review inbox', () => {
         payload: expect.objectContaining({
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
-          content: '回答尽量简洁直接',
+          content: '请简洁直接回答',
           source_excerpt: '说话干脆一点',
           evidence: expect.arrayContaining([
             expect.objectContaining({
@@ -1651,6 +1720,72 @@ describe('V2 review inbox', () => {
       suggested_action: 'accept',
       suggested_rewrite: '请把回答控制在三句话内',
     }));
+  });
+
+  it('keeps response-style import review batches aligned with the same canonical rewrite and apply path', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-response-style',
+        format: 'text',
+        content: '说话干脆一点',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(createdBody.summary.pending).toBe(1);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual([
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '请简洁直接回答',
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+        }),
+      }),
+    ]);
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      payload: {
+        accept_all: true,
+      },
+    });
+
+    expect(applied.statusCode).toBe(200);
+    const appliedBody = JSON.parse(applied.payload);
+    expect(appliedBody.summary.committed).toBe(1);
+    expect(appliedBody.remaining_pending).toBe(0);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-response-style',
+    });
+
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]));
   });
 
   it('keeps clause-level source excerpts for deep-only compound import review items', async () => {

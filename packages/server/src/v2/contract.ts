@@ -407,6 +407,26 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
     }
   }
 
+  if (attributeKey === 'response_style') {
+    if (
+      (
+        /(?:直接|干脆)/i.test(content) &&
+        /(?:回答|回复|说话|表达|风格)/i.test(content)
+      ) ||
+      /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|说话|表达|风格)?/i.test(content) ||
+      /(?:回答|回复|说话|表达|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
+      (
+        /(?:answer|reply|response|style)/i.test(content) &&
+        /(?:concise|brief)/i.test(content) &&
+        /direct/i.test(content)
+      )
+    ) {
+      return /[A-Za-z]/.test(content)
+        ? 'Please keep responses concise and direct'
+        : '请简洁直接回答';
+    }
+  }
+
   return null;
 }
 

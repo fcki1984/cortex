@@ -51,6 +51,17 @@ describe('review assist', () => {
     expect(result.suggested_rewrite).toBe('请把回答控制在三句话内');
   });
 
+  it('creates a safe rewrite for stable response-style review items', () => {
+    const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
+      content: '回答简洁直接',
+      source_excerpt: '回答简洁直接',
+      attribute_key: 'response_style',
+    }));
+
+    expect(result.suggested_action).toBe('accept');
+    expect(result.suggested_rewrite).toBe('请简洁直接回答');
+  });
+
   it('creates a safe rewrite for simple solution constraints', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
       content: '简单方案就行',
