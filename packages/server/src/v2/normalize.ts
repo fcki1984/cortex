@@ -7,6 +7,7 @@ import {
   inferProfileRuleAttribute,
   inferRequestedKindFromContent,
   inferTaskStateKey,
+  isWeakConversationalProfileRule,
   isSpeculativeContent,
 } from './contract.js';
 import type {
@@ -323,6 +324,13 @@ function normalizeProfileRule(input: ManualProfileRuleInput, requestedKind: Reco
     inferProfileRuleAttribute(input.content, ownerScope),
   );
   if (!attributeKey) return buildSessionNote(input, requestedKind, reasonForMissingStructure(input.content, 'attribute'));
+  if (
+    ownerScope === 'user' &&
+    (attributeKey === 'language_preference' || attributeKey === 'response_length' || attributeKey === 'solution_complexity') &&
+    isWeakConversationalProfileRule(input.content)
+  ) {
+    return buildSessionNote(input, requestedKind, 'insufficient_structure');
+  }
 
   const subjectKey = ownerScope === 'agent'
     ? normalizeKey(input.subjectKey || 'agent', 'agent')

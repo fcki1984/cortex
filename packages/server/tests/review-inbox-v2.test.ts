@@ -5,6 +5,7 @@ import { getDb } from '../src/db/connection.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
+import { registerAgentRoutes } from '../src/api/agents.js';
 import { registerImportExportRoutes } from '../src/api/import-export.js';
 import { registerV2IngestRoutes } from '../src/api/ingest-v2.js';
 import { registerV2RecordRoutes } from '../src/api/records-v2.js';
@@ -13,7 +14,9 @@ import { CortexReviewInboxV2 } from '../src/v2/review-inbox.js';
 import {
   createNoOpLLM,
   createReviewAssistRecordPayload,
+  createReviewInboxCompoundDurableMockLLM,
   createReviewInboxDurableMockLLM,
+  createReviewInboxResponseStyleMockLLM,
   createWeakColloquialProfileRuleDriftMockLLM,
 } from './helpers/v2-contract-fixtures.js';
 
@@ -26,7 +29,7 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
-async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boolean } = {}): Promise<{
+async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boolean; compoundReview?: boolean; responseStyleReview?: boolean } = {}): Promise<{
   app: FastifyInstance;
   records: CortexRecordsV2;
   relations: CortexRelationsV2;
@@ -34,8 +37,12 @@ async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boole
 }> {
   initDatabase(':memory:');
   const records = new CortexRecordsV2(
-    options.weakColloquial
+    options.compoundReview
+      ? createReviewInboxCompoundDurableMockLLM()
+      : options.weakColloquial
       ? createWeakColloquialProfileRuleDriftMockLLM()
+      : options.responseStyleReview
+        ? createReviewInboxResponseStyleMockLLM()
       : options.reviewOnly
         ? createReviewInboxDurableMockLLM()
         : createNoOpLLM(),
@@ -61,6 +68,7 @@ async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boole
   registerV2IngestRoutes(app, cortex);
   registerImportExportRoutes(app, cortex);
   registerV2ReviewInboxRoutes(app, cortex);
+  registerAgentRoutes(app);
   await app.ready();
 
   return { app, records, relations, reviewInbox };
@@ -169,7 +177,404 @@ describe('V2 review inbox', () => {
     ]));
   });
 
-  it('routes deep-only durable live ingest candidates into the review inbox', async () => {
+  it('auto-commits newly supported colloquial complexity preferences without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-complexity',
+        user_message: '简单方案就行',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits additional constraint-style colloquial preferences without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-lightweight',
+        user_message: '轻量方案就行',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits newly supported softer-worded explicit complexity preferences without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-soft-complexity',
+        user_message: '方案简单一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits additional explicit complexity phrasings without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-soft-complexity-2',
+        user_message: '方案简单一些',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits additional explicit short language and complexity phrasings without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-language-can',
+        user_message: '后面中文就可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(language.statusCode).toBe(201);
+    const languageBody = JSON.parse(language.payload);
+    expect(languageBody.auto_committed_count).toBe(1);
+    expect(languageBody.review_pending_count).toBe(0);
+    expect(languageBody.review_batch_id || null).toBe(null);
+    expect(languageBody.records).toHaveLength(1);
+    expect(languageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const complexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-simple-short',
+        user_message: '方案简单些',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(complexity.statusCode).toBe(201);
+    const complexityBody = JSON.parse(complexity.payload);
+    expect(complexityBody.auto_committed_count).toBe(1);
+    expect(complexityBody.review_pending_count).toBe(0);
+    expect(complexityBody.review_batch_id || null).toBe(null);
+    expect(complexityBody.records).toHaveLength(1);
+    expect(complexityBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits structural colloquial "就可以" profile-rule phrasings without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const directLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-direct-language-can',
+        user_message: '中文就可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(directLanguage.statusCode).toBe(201);
+    const directLanguageBody = JSON.parse(directLanguage.payload);
+    expect(directLanguageBody.auto_committed_count).toBe(1);
+    expect(directLanguageBody.review_pending_count).toBe(0);
+    expect(directLanguageBody.review_batch_id || null).toBe(null);
+    expect(directLanguageBody.records).toHaveLength(1);
+    expect(directLanguageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const responseLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-length-can',
+        user_message: '三句话内就可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLength.statusCode).toBe(201);
+    const responseLengthBody = JSON.parse(responseLength.payload);
+    expect(responseLengthBody.auto_committed_count).toBe(1);
+    expect(responseLengthBody.review_pending_count).toBe(0);
+    expect(responseLengthBody.review_batch_id || null).toBe(null);
+    expect(responseLengthBody.records).toHaveLength(1);
+    expect(responseLengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    }));
+
+    const simpleOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-simple-okay',
+        user_message: '简单方案就可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(simpleOkay.statusCode).toBe(201);
+    const simpleOkayBody = JSON.parse(simpleOkay.payload);
+    expect(simpleOkayBody.auto_committed_count).toBe(1);
+    expect(simpleOkayBody.review_pending_count).toBe(0);
+    expect(simpleOkayBody.review_batch_id || null).toBe(null);
+    expect(simpleOkayBody.records).toHaveLength(1);
+    expect(simpleOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+
+    const lightweightOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-lightweight-okay',
+        user_message: '轻量方案就可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(lightweightOkay.statusCode).toBe(201);
+    const lightweightOkayBody = JSON.parse(lightweightOkay.payload);
+    expect(lightweightOkayBody.auto_committed_count).toBe(1);
+    expect(lightweightOkayBody.review_pending_count).toBe(0);
+    expect(lightweightOkayBody.review_batch_id || null).toBe(null);
+    expect(lightweightOkayBody.records).toHaveLength(1);
+    expect(lightweightOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits structural colloquial "就好" profile-rule phrasings without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const directLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-direct-language-good',
+        user_message: '中文就好',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(directLanguage.statusCode).toBe(201);
+    const directLanguageBody = JSON.parse(directLanguage.payload);
+    expect(directLanguageBody.auto_committed_count).toBe(1);
+    expect(directLanguageBody.review_pending_count).toBe(0);
+    expect(directLanguageBody.review_batch_id || null).toBe(null);
+    expect(directLanguageBody.records).toHaveLength(1);
+    expect(directLanguageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const responseLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-length-good',
+        user_message: '三句话内就好',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLength.statusCode).toBe(201);
+    const responseLengthBody = JSON.parse(responseLength.payload);
+    expect(responseLengthBody.auto_committed_count).toBe(1);
+    expect(responseLengthBody.review_pending_count).toBe(0);
+    expect(responseLengthBody.review_batch_id || null).toBe(null);
+    expect(responseLengthBody.records).toHaveLength(1);
+    expect(responseLengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    }));
+
+    const simpleOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-simple-good',
+        user_message: '简单方案就好',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(simpleOkay.statusCode).toBe(201);
+    const simpleOkayBody = JSON.parse(simpleOkay.payload);
+    expect(simpleOkayBody.auto_committed_count).toBe(1);
+    expect(simpleOkayBody.review_pending_count).toBe(0);
+    expect(simpleOkayBody.review_batch_id || null).toBe(null);
+    expect(simpleOkayBody.records).toHaveLength(1);
+    expect(simpleOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+
+    const lightweightOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-lightweight-good',
+        user_message: '轻量方案就好',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(lightweightOkay.statusCode).toBe(201);
+    const lightweightOkayBody = JSON.parse(lightweightOkay.payload);
+    expect(lightweightOkayBody.auto_committed_count).toBe(1);
+    expect(lightweightOkayBody.review_pending_count).toBe(0);
+    expect(lightweightOkayBody.review_batch_id || null).toBe(null);
+    expect(lightweightOkayBody.records).toHaveLength(1);
+    expect(lightweightOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '不要复杂方案',
+    }));
+  });
+
+  it('auto-commits direct structural "就行 / 即可" language and length phrasings without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const languageOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-direct-language-okay',
+        user_message: '中文就行',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(languageOkay.statusCode).toBe(201);
+    const languageOkayBody = JSON.parse(languageOkay.payload);
+    expect(languageOkayBody.auto_committed_count).toBe(1);
+    expect(languageOkayBody.review_pending_count).toBe(0);
+    expect(languageOkayBody.review_batch_id || null).toBe(null);
+    expect(languageOkayBody.records).toHaveLength(1);
+    expect(languageOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const languageCan = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-direct-language-can-2',
+        user_message: '中文即可',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(languageCan.statusCode).toBe(201);
+    const languageCanBody = JSON.parse(languageCan.payload);
+    expect(languageCanBody.auto_committed_count).toBe(1);
+    expect(languageCanBody.review_pending_count).toBe(0);
+    expect(languageCanBody.review_batch_id || null).toBe(null);
+    expect(languageCanBody.records).toHaveLength(1);
+    expect(languageCanBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+
+    const responseLengthCan = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-length-can-2',
+        user_message: '三句话内即可',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLengthCan.statusCode).toBe(201);
+    const responseLengthCanBody = JSON.parse(responseLengthCan.payload);
+    expect(responseLengthCanBody.auto_committed_count).toBe(1);
+    expect(responseLengthCanBody.review_pending_count).toBe(0);
+    expect(responseLengthCanBody.review_batch_id || null).toBe(null);
+    expect(responseLengthCanBody.records).toHaveLength(1);
+    expect(responseLengthCanBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    }));
+  });
+
+  it('auto-commits shared-contract-safe live ingest durables even when they originate from deep extraction', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
 
@@ -185,27 +590,34 @@ describe('V2 review inbox', () => {
 
     expect(response.statusCode).toBe(201);
     const body = JSON.parse(response.payload);
-    expect(body.auto_committed_count).toBe(0);
-    expect(body.review_pending_count).toBe(1);
-    expect(typeof body.review_batch_id).toBe('string');
-    expect(body.records).toHaveLength(0);
-
-    const detail = await app.inject({
-      method: 'GET',
-      url: `/api/v2/review-inbox/${body.review_batch_id}`,
-    });
-    expect(detail.statusCode).toBe(200);
-    const detailBody = JSON.parse(detail.payload);
-    expect(detailBody.batch.source_kind).toBe('live_ingest');
-    expect(detailBody.summary.pending).toBe(1);
-    expect(detailBody.items).toHaveLength(1);
-    expect(detailBody.items[0]).toEqual(expect.objectContaining({
-      item_type: 'record',
-      status: 'pending',
-      suggested_action: expect.any(String),
-      suggested_rewrite: '请用中文回答',
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
     }));
-    expect(detailBody.items[0].payload.content).toBe('请用中文回答');
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-live',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
   it('keeps weak colloquial ingest preferences as session_note instead of creating review work', async () => {
@@ -307,6 +719,379 @@ describe('V2 review inbox', () => {
     expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
+  it('keeps newly hedged constraint-style colloquial inputs as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-lightweight',
+        user_message: '轻量方案就行吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '轻量方案就行吧',
+    }));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-weak-colloquial-lightweight',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
+  it('keeps soft-priority colloquial inputs as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-soft-language',
+        user_message: '尽量用中文',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(language.statusCode).toBe(201);
+    const languageBody = JSON.parse(language.payload);
+    expect(languageBody.auto_committed_count).toBe(1);
+    expect(languageBody.review_pending_count).toBe(0);
+    expect(languageBody.review_batch_id || null).toBe(null);
+    expect(languageBody.records).toHaveLength(1);
+    expect(languageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '尽量用中文',
+    }));
+
+    const length = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-soft-length',
+        user_message: '尽量别超过三句话',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(length.statusCode).toBe(201);
+    const lengthBody = JSON.parse(length.payload);
+    expect(lengthBody.auto_committed_count).toBe(1);
+    expect(lengthBody.review_pending_count).toBe(0);
+    expect(lengthBody.review_batch_id || null).toBe(null);
+    expect(lengthBody.records).toHaveLength(1);
+    expect(lengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '尽量别超过三句话',
+    }));
+
+    const complexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-soft-complexity',
+        user_message: '尽量简单点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(complexity.statusCode).toBe(201);
+    const complexityBody = JSON.parse(complexity.payload);
+    expect(complexityBody.auto_committed_count).toBe(1);
+    expect(complexityBody.review_pending_count).toBe(0);
+    expect(complexityBody.review_batch_id || null).toBe(null);
+    expect(complexityBody.records).toHaveLength(1);
+    expect(complexityBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '尽量简单点',
+    }));
+  });
+
+  it('keeps newly hedged short colloquial variants as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-language-can',
+        user_message: '后面中文就可以吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(language.statusCode).toBe(201);
+    const languageBody = JSON.parse(language.payload);
+    expect(languageBody.auto_committed_count).toBe(1);
+    expect(languageBody.review_pending_count).toBe(0);
+    expect(languageBody.review_batch_id || null).toBe(null);
+    expect(languageBody.records).toHaveLength(1);
+    expect(languageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '后面中文就可以吧',
+    }));
+
+    const complexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-simple-short',
+        user_message: '方案简单些吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(complexity.statusCode).toBe(201);
+    const complexityBody = JSON.parse(complexity.payload);
+    expect(complexityBody.auto_committed_count).toBe(1);
+    expect(complexityBody.review_pending_count).toBe(0);
+    expect(complexityBody.review_batch_id || null).toBe(null);
+    expect(complexityBody.records).toHaveLength(1);
+    expect(complexityBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '方案简单些吧',
+    }));
+  });
+
+  it('keeps structural colloquial "就可以吧" variants as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const directLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-direct-language-can',
+        user_message: '中文就可以吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(directLanguage.statusCode).toBe(201);
+    const directLanguageBody = JSON.parse(directLanguage.payload);
+    expect(directLanguageBody.auto_committed_count).toBe(1);
+    expect(directLanguageBody.review_pending_count).toBe(0);
+    expect(directLanguageBody.review_batch_id || null).toBe(null);
+    expect(directLanguageBody.records).toHaveLength(1);
+    expect(directLanguageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '中文就可以吧',
+    }));
+
+    const responseLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-length-can',
+        user_message: '三句话内就可以吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLength.statusCode).toBe(201);
+    const responseLengthBody = JSON.parse(responseLength.payload);
+    expect(responseLengthBody.auto_committed_count).toBe(1);
+    expect(responseLengthBody.review_pending_count).toBe(0);
+    expect(responseLengthBody.review_batch_id || null).toBe(null);
+    expect(responseLengthBody.records).toHaveLength(1);
+    expect(responseLengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '三句话内就可以吧',
+    }));
+
+    const simpleOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-simple-okay',
+        user_message: '简单方案就可以吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(simpleOkay.statusCode).toBe(201);
+    const simpleOkayBody = JSON.parse(simpleOkay.payload);
+    expect(simpleOkayBody.auto_committed_count).toBe(1);
+    expect(simpleOkayBody.review_pending_count).toBe(0);
+    expect(simpleOkayBody.review_batch_id || null).toBe(null);
+    expect(simpleOkayBody.records).toHaveLength(1);
+    expect(simpleOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '简单方案就可以吧',
+    }));
+
+    const lightweightOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-lightweight-okay',
+        user_message: '轻量方案就可以吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(lightweightOkay.statusCode).toBe(201);
+    const lightweightOkayBody = JSON.parse(lightweightOkay.payload);
+    expect(lightweightOkayBody.auto_committed_count).toBe(1);
+    expect(lightweightOkayBody.review_pending_count).toBe(0);
+    expect(lightweightOkayBody.review_batch_id || null).toBe(null);
+    expect(lightweightOkayBody.records).toHaveLength(1);
+    expect(lightweightOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '轻量方案就可以吧',
+    }));
+  });
+
+  it('keeps structural colloquial "就好吧" variants as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const directLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-direct-language-good',
+        user_message: '中文就好吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(directLanguage.statusCode).toBe(201);
+    const directLanguageBody = JSON.parse(directLanguage.payload);
+    expect(directLanguageBody.auto_committed_count).toBe(1);
+    expect(directLanguageBody.review_pending_count).toBe(0);
+    expect(directLanguageBody.review_batch_id || null).toBe(null);
+    expect(directLanguageBody.records).toHaveLength(1);
+    expect(directLanguageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '中文就好吧',
+    }));
+
+    const responseLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-length-good',
+        user_message: '三句话内就好吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLength.statusCode).toBe(201);
+    const responseLengthBody = JSON.parse(responseLength.payload);
+    expect(responseLengthBody.auto_committed_count).toBe(1);
+    expect(responseLengthBody.review_pending_count).toBe(0);
+    expect(responseLengthBody.review_batch_id || null).toBe(null);
+    expect(responseLengthBody.records).toHaveLength(1);
+    expect(responseLengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '三句话内就好吧',
+    }));
+
+    const simpleOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-simple-good',
+        user_message: '简单方案就好吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(simpleOkay.statusCode).toBe(201);
+    const simpleOkayBody = JSON.parse(simpleOkay.payload);
+    expect(simpleOkayBody.auto_committed_count).toBe(1);
+    expect(simpleOkayBody.review_pending_count).toBe(0);
+    expect(simpleOkayBody.review_batch_id || null).toBe(null);
+    expect(simpleOkayBody.records).toHaveLength(1);
+    expect(simpleOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '简单方案就好吧',
+    }));
+
+    const lightweightOkay = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-lightweight-good',
+        user_message: '轻量方案就好吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(lightweightOkay.statusCode).toBe(201);
+    const lightweightOkayBody = JSON.parse(lightweightOkay.payload);
+    expect(lightweightOkayBody.auto_committed_count).toBe(1);
+    expect(lightweightOkayBody.review_pending_count).toBe(0);
+    expect(lightweightOkayBody.review_batch_id || null).toBe(null);
+    expect(lightweightOkayBody.records).toHaveLength(1);
+    expect(lightweightOkayBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '轻量方案就好吧',
+    }));
+  });
+
+  it('keeps direct structural "即可吧" language and length variants as session_note instead of creating review work', async () => {
+    const setup = await createApp({ weakColloquial: true });
+    app = setup.app;
+
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-direct-language-can-2',
+        user_message: '中文即可吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(language.statusCode).toBe(201);
+    const languageBody = JSON.parse(language.payload);
+    expect(languageBody.auto_committed_count).toBe(1);
+    expect(languageBody.review_pending_count).toBe(0);
+    expect(languageBody.review_batch_id || null).toBe(null);
+    expect(languageBody.records).toHaveLength(1);
+    expect(languageBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '中文即可吧',
+    }));
+
+    const responseLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-weak-colloquial-length-can-2',
+        user_message: '三句话内即可吧',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(responseLength.statusCode).toBe(201);
+    const responseLengthBody = JSON.parse(responseLength.payload);
+    expect(responseLengthBody.auto_committed_count).toBe(1);
+    expect(responseLengthBody.review_pending_count).toBe(0);
+    expect(responseLengthBody.review_batch_id || null).toBe(null);
+    expect(responseLengthBody.records).toHaveLength(1);
+    expect(responseLengthBody.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'session_note',
+      content: '三句话内即可吧',
+    }));
+  });
+
   it('emits tracing headers for review inbox list and detail reads', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
@@ -346,6 +1131,235 @@ describe('V2 review inbox', () => {
     expect(detail.statusCode).toBe(200);
     expect(detail.headers['x-cortex-request-id']).toBeTruthy();
     expect(detail.headers['x-cortex-smoke-run']).toBe(smokeRunId);
+  });
+
+  it('returns sync metadata on full review inbox list responses', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-sync-full',
+      source_preview: '把输出语言设成中文',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '请用中文回答',
+          source_excerpt: '把输出语言设成中文',
+        }),
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-sync-full',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        id: created.batch.id,
+      }),
+    ]);
+    expect(body.sync).toEqual(expect.objectContaining({
+      mode: 'full',
+      cursor: expect.any(String),
+    }));
+  });
+
+  it('returns only newly changed batches when listing review inbox with a cursor', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-sync-delta-new',
+      source_preview: '把输出语言设成中文',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '请用中文回答',
+          source_excerpt: '把输出语言设成中文',
+        }),
+      ],
+    });
+
+    const full = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-sync-delta-new',
+    });
+    expect(full.statusCode).toBe(200);
+    const fullBody = JSON.parse(full.payload);
+    expect(fullBody.items).toHaveLength(1);
+    expect(fullBody.sync?.cursor).toEqual(expect.any(String));
+
+    const nextCreated = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-sync-delta-new',
+      source_preview: '先收一下 recall 那块',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '当前任务是重构 Cortex recall',
+          requested_kind: 'task_state',
+          normalized_kind: 'task_state',
+          state_key: 'refactor_status',
+          source_excerpt: '先收一下 recall 那块',
+        }),
+      ],
+    });
+
+    const delta = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox?agent_id=review-sync-delta-new&cursor=${encodeURIComponent(fullBody.sync.cursor)}`,
+    });
+
+    expect(delta.statusCode).toBe(200);
+    const deltaBody = JSON.parse(delta.payload);
+    expect(deltaBody.sync).toEqual(expect.objectContaining({
+      mode: 'delta',
+      cursor: expect.any(String),
+    }));
+    expect(deltaBody.items).toEqual([
+      expect.objectContaining({
+        id: nextCreated.batch.id,
+        source_preview: '先收一下 recall 那块',
+      }),
+    ]);
+    expect(deltaBody.total).toBe(2);
+    expect(deltaBody.items[0].id).not.toBe(created.batch.id);
+  });
+
+  it('returns updated existing batches when listing review inbox with a cursor', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-sync-delta-updated',
+        format: 'text',
+        content: '回答控制在三句话内',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const full = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-sync-delta-updated',
+    });
+    expect(full.statusCode).toBe(200);
+    const fullBody = JSON.parse(full.payload);
+    expect(fullBody.sync?.cursor).toEqual(expect.any(String));
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      payload: {
+        accept_all: true,
+      },
+    });
+    expect(applied.statusCode).toBe(200);
+
+    const delta = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox?agent_id=review-sync-delta-updated&cursor=${encodeURIComponent(fullBody.sync.cursor)}`,
+    });
+
+    expect(delta.statusCode).toBe(200);
+    const deltaBody = JSON.parse(delta.payload);
+    expect(deltaBody.sync).toEqual(expect.objectContaining({
+      mode: 'delta',
+      cursor: expect.any(String),
+    }));
+    expect(deltaBody.items).toEqual([
+      expect.objectContaining({
+        id: createdBody.batch_id,
+        status: 'completed',
+        summary: expect.objectContaining({
+          pending: 0,
+          accepted: 1,
+        }),
+      }),
+    ]);
+    expect(deltaBody.total).toBe(1);
+  });
+
+  it('deletes review batches and items when the owning agent is deleted', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-deleted-agent',
+      source_preview: '把输出语言设成中文',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '请用中文回答',
+          source_excerpt: '把输出语言设成中文',
+        }),
+      ],
+    });
+
+    const before = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-deleted-agent',
+    });
+    expect(before.statusCode).toBe(200);
+    expect(JSON.parse(before.payload).items).toHaveLength(1);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/api/v2/agents/review-deleted-agent',
+    });
+    expect(deleted.statusCode).toBe(200);
+
+    const db = getDb();
+    expect((db.prepare('SELECT COUNT(*) as cnt FROM review_batches_v2 WHERE agent_id = ?').get('review-deleted-agent') as { cnt: number }).cnt).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) as cnt FROM review_items_v2 WHERE batch_id = ?').get(created.batch.id) as { cnt: number }).cnt).toBe(0);
+
+    const listAfter = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-deleted-agent',
+    });
+    expect(listAfter.statusCode).toBe(200);
+    expect(JSON.parse(listAfter.payload).items).toHaveLength(0);
+
+    const detailAfter = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+    });
+    expect(detailAfter.statusCode).toBe(404);
+  });
+
+  it('ignores orphaned review batches whose agents no longer exist', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-orphaned-agent',
+      source_preview: '把输出语言设成中文',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '请用中文回答',
+          source_excerpt: '把输出语言设成中文',
+        }),
+      ],
+    });
+
+    const db = getDb();
+    db.prepare('DELETE FROM agents WHERE id = ?').run('review-orphaned-agent');
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-orphaned-agent',
+    });
+    expect(list.statusCode).toBe(200);
+    const listBody = JSON.parse(list.payload);
+    expect(listBody.items).toHaveLength(0);
+    expect(listBody.total).toBe(0);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+    });
+    expect(detail.statusCode).toBe(404);
   });
 
   it('persists canonical rewrites for colloquial live review items', async () => {
@@ -392,6 +1406,119 @@ describe('V2 review inbox', () => {
     }));
   });
 
+  it('scopes mixed live ingest review batches to the pending clause context', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-mixed-clause-context',
+        user_message: '后续交流中文就行。说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(1);
+    expect(ingestBody.review_pending_count).toBe(1);
+    expect(ingestBody.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '请用中文回答',
+      }),
+    ]));
+    expect(typeof ingestBody.review_batch_id).toBe('string');
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${ingestBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.source_preview).toBe('说话干脆一点');
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '回答尽量简洁直接',
+          source_excerpt: '说话干脆一点',
+          evidence: expect.arrayContaining([
+            expect.objectContaining({
+              role: 'user',
+              content: '说话干脆一点',
+            }),
+          ]),
+        }),
+      }),
+    ]);
+    expect(
+      detailBody.items[0].payload.evidence.some((entry: { role: string; content: string }) => (
+        entry.role === 'user' && entry.content.includes('后续交流中文就行')
+      )),
+    ).toBe(false);
+  });
+
+  it('auto-commits shared-contract-safe compound deep-only durables without creating review work', async () => {
+    const setup = await createApp({ compoundReview: true });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-compound-auto',
+        user_message: '人在东京这边。先收一下 recall 那块',
+        assistant_message: '记住了',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: '我住东京',
+      }),
+      expect.objectContaining({
+        written_kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]));
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-compound-auto',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: '我住东京',
+      }),
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-live-compound-auto',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
   it('creates an import review batch for text input and applies accept_all through the existing write path', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
@@ -409,6 +1536,7 @@ describe('V2 review inbox', () => {
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
     expect(typeof createdBody.batch_id).toBe('string');
+    expect(createdBody.source_preview).toBe('后续交流中文就行');
     expect(createdBody.summary.pending).toBe(1);
 
     const applied = await app.inject({
@@ -423,6 +1551,13 @@ describe('V2 review inbox', () => {
     const appliedBody = JSON.parse(applied.payload);
     expect(appliedBody.summary.committed).toBe(1);
     expect(appliedBody.remaining_pending).toBe(0);
+    expect(appliedBody.batch_summary).toEqual({
+      total: 1,
+      pending: 0,
+      accepted: 1,
+      rejected: 0,
+      failed: 0,
+    });
 
     const detail = await app.inject({
       method: 'GET',
@@ -463,6 +1598,7 @@ describe('V2 review inbox', () => {
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
+    expect(createdBody.source_preview).toBe('回答控制在三句话内');
 
     const detail = await app.inject({
       method: 'GET',
@@ -474,6 +1610,86 @@ describe('V2 review inbox', () => {
       suggested_action: 'accept',
       suggested_rewrite: '请把回答控制在三句话内',
     }));
+  });
+
+  it('keeps clause-level source excerpts for deep-only compound import review items', async () => {
+    const setup = await createApp({ compoundReview: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-compound-preview',
+        format: 'text',
+        content: '人在东京这边。先收一下 recall 那块',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          normalized_kind: 'fact_slot',
+          content: '我住东京',
+          source_excerpt: '人在东京这边',
+        }),
+      }),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          normalized_kind: 'task_state',
+          content: '当前任务是重构 Cortex recall',
+          source_excerpt: '先收一下 recall 那块',
+        }),
+      }),
+    ]));
+  });
+
+  it('uses clause excerpts as import review batch source previews instead of raw markdown scaffolding', async () => {
+    const setup = await createApp({ compoundReview: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-memory-md-source-preview',
+        format: 'memory_md',
+        content: [
+          '# MEMORY.md',
+          '',
+          '## Task States',
+          '- 先收一下 recall 那块',
+        ].join('\n'),
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.source_preview).toBe('先收一下 recall 那块');
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          source_excerpt: '先收一下 recall 那块',
+        }),
+      }),
+    ]);
   });
 
   it('commits explicit payload overrides through review batch apply', async () => {
@@ -533,6 +1749,202 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('narrows batch source preview to remaining pending items after partial apply', async () => {
+    const setup = await createApp({ compoundReview: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-partial-preview',
+        format: 'text',
+        content: '人在东京这边。先收一下 recall 那块',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const detailBefore = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+    const beforeBody = JSON.parse(detailBefore.payload);
+    expect(beforeBody.batch.source_preview).toBe('人在东京这边\n先收一下 recall 那块');
+    expect(beforeBody.items).toHaveLength(3);
+
+    const acceptedItems = beforeBody.items.filter((item: any) => item.payload?.source_excerpt === '人在东京这边');
+    expect(acceptedItems).toHaveLength(2);
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      payload: {
+        item_actions: acceptedItems.map((item: any) => ({
+          item_id: item.id,
+          action: 'accept',
+        })),
+      },
+    });
+
+    expect(applied.statusCode).toBe(200);
+    const appliedBody = JSON.parse(applied.payload);
+    expect(appliedBody.remaining_pending).toBe(1);
+    expect(appliedBody.batch.status).toBe('partially_applied');
+    expect(appliedBody.batch.source_preview).toBe('先收一下 recall 那块');
+    expect(appliedBody.batch_summary).toEqual({
+      total: 3,
+      pending: 1,
+      accepted: 2,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const detailAfter = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+    const afterBody = JSON.parse(detailAfter.payload);
+    expect(afterBody.batch.status).toBe('partially_applied');
+    expect(afterBody.summary.pending).toBe(1);
+    expect(afterBody.batch.source_preview).toBe('先收一下 recall 那块');
+  });
+
+  it('keeps failed review items actionable and allows retrying them in the same batch', async () => {
+    const setup = await createApp({ reviewOnly: true });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-retryable-failure',
+        format: 'text',
+        content: '我住大阪',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+
+    const detailBefore = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+    const beforeBody = JSON.parse(detailBefore.payload);
+    const recordItem = beforeBody.items.find((item: any) => item.item_type === 'record');
+    const relationItem = beforeBody.items.find((item: any) => item.item_type === 'relation');
+    expect(recordItem?.id).toBeTruthy();
+    expect(relationItem?.id).toBeTruthy();
+
+    const failedApply = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      payload: {
+        item_actions: [{
+          item_id: relationItem.id,
+          action: 'accept',
+        }],
+      },
+    });
+
+    expect(failedApply.statusCode).toBe(200);
+    const failedBody = JSON.parse(failedApply.payload);
+    expect(failedBody.summary).toEqual({
+      committed: 0,
+      rejected: 0,
+      failed: 1,
+    });
+    expect(failedBody.batch.status).toBe('partially_applied');
+    expect(failedBody.batch_summary).toEqual({
+      total: 2,
+      pending: 1,
+      accepted: 0,
+      rejected: 0,
+      failed: 1,
+    });
+    expect(failedBody.failed).toEqual([
+      expect.objectContaining({
+        candidate_id: relationItem.payload.candidate_id,
+        type: 'relation',
+        reason: 'missing_source_record',
+      }),
+    ]);
+
+    const detailAfterFailure = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+    const failureDetailBody = JSON.parse(detailAfterFailure.payload);
+    expect(failureDetailBody.batch.status).toBe('partially_applied');
+    expect(failureDetailBody.batch.source_preview).toBe('我住大阪');
+    expect(failureDetailBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: recordItem.id,
+        status: 'pending',
+      }),
+      expect.objectContaining({
+        id: relationItem.id,
+        status: 'failed',
+        error_message: 'missing_source_record',
+      }),
+    ]));
+
+    const retried = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      payload: {
+        accept_all: true,
+      },
+    });
+
+    expect(retried.statusCode).toBe(200);
+    const retriedBody = JSON.parse(retried.payload);
+    expect(retriedBody.summary).toEqual({
+      committed: 2,
+      rejected: 0,
+      failed: 0,
+    });
+    expect(retriedBody.batch.status).toBe('completed');
+    expect(retriedBody.batch_summary).toEqual({
+      total: 2,
+      pending: 0,
+      accepted: 2,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const detailAfterRetry = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+    const retryDetailBody = JSON.parse(detailAfterRetry.payload);
+    expect(retryDetailBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: recordItem.id,
+        status: 'accepted',
+        error_message: null,
+      }),
+      expect.objectContaining({
+        id: relationItem.id,
+        status: 'accepted',
+        error_message: null,
+      }),
+    ]));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-retryable-failure',
+    });
+    const recordsBody = JSON.parse(records.payload);
+    expect(recordsBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: '我住大阪',
+      }),
+    ]));
+  });
+
   it('dismisses a review batch with reject_all without writing records', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
@@ -560,6 +1972,13 @@ describe('V2 review inbox', () => {
     const rejectedBody = JSON.parse(rejected.payload);
     expect(rejectedBody.summary.rejected).toBe(1);
     expect(rejectedBody.remaining_pending).toBe(0);
+    expect(rejectedBody.batch_summary).toEqual({
+      total: 1,
+      pending: 0,
+      accepted: 0,
+      rejected: 1,
+      failed: 0,
+    });
 
     const detail = await app.inject({
       method: 'GET',

@@ -11,7 +11,13 @@ import { V2_CONTRACT_CANONICAL_CASES } from '../src/v2/contract.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import { startLifecycleScheduler, stopLifecycleScheduler } from '../src/core/scheduler.js';
-import { createPrecisionFirstDriftMockLLM } from './helpers/v2-contract-fixtures.js';
+import {
+  createPrecisionFirstDriftMockLLM,
+  createReviewInboxCompoundDurableMockLLM,
+  createReviewInboxDurableMockLLM,
+  createReviewInboxResponseStyleMockLLM,
+  createWeakColloquialProfileRuleDriftMockLLM,
+} from './helpers/v2-contract-fixtures.js';
 
 function createVectorOnlyEmbedding(): EmbeddingProvider {
   const vector = [1, 0, 0, 0];
@@ -280,7 +286,7 @@ describe('API V2 Integration', () => {
       method: 'POST',
       url: '/api/v2/ingest',
       payload: {
-        user_message: '三句就够',
+        user_message: '最多三句话',
         assistant_message: '收到',
         agent_id: 'api-ingest-colloquial-length',
       },
@@ -310,6 +316,54 @@ describe('API V2 Integration', () => {
         content: '请把回答控制在三句话内',
       }),
     ]));
+  });
+
+  it('auto-commits newly supported colloquial language preferences instead of dropping them to notes', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '以后都中文回答',
+        assistant_message: '收到',
+        agent_id: 'api-ingest-colloquial-language-followup',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      requested_kind: 'profile_rule',
+      written_kind: 'profile_rule',
+      content: '请用中文回答',
+    }));
+  });
+
+  it('auto-commits additional constraint-style colloquial inputs with canonical truth content', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '别超过三句话',
+        assistant_message: '收到',
+        agent_id: 'api-ingest-colloquial-length-cap',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id).toBe(null);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      requested_kind: 'profile_rule',
+      written_kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    }));
   });
 
   it('filters extraction logs by v2 channel', async () => {
@@ -453,6 +507,27 @@ describe('API V2 Integration', () => {
     expect(body.normalization).toBe('downgraded_to_session_note');
     expect(body.reason_code).toBe('insufficient_structure');
     expect(body.record.kind).toBe('session_note');
+  });
+
+  it('keeps soft-priority colloquial profile-rule writes downgraded even when the public API supplies explicit hints', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '尽量用中文',
+        attribute_key: 'language_preference',
+        agent_id: 'api-soft-colloquial-record',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const body = JSON.parse(created.payload);
+    expect(body.requested_kind).toBe('profile_rule');
+    expect(body.written_kind).toBe('session_note');
+    expect(body.normalization).toBe('downgraded_to_session_note');
+    expect(body.record.kind).toBe('session_note');
+    expect(body.record.content).toBe('尽量用中文');
   });
 
   it('admits plain location statements as durable facts through the public write API', async () => {
@@ -1580,6 +1655,523 @@ describe('API V2 Integration', () => {
       expect(ingestBody.records).toHaveLength(1);
       expect(ingestBody.records[0]?.written_kind).toBe('session_note');
       expect(ingestBody.records[0]?.content).toBe('这个方向先别定');
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('auto-commits shared-contract-safe deep durable ingest results through the public API', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createReviewInboxDurableMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '把输出语言设成中文',
+          assistant_message: '记住了',
+          agent_id: 'api-review-routing-auto-commit',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.auto_committed_count).toBe(1);
+      expect(ingestBody.review_pending_count).toBe(0);
+      expect(ingestBody.review_batch_id).toBe(null);
+      expect(ingestBody.records).toHaveLength(1);
+      expect(ingestBody.records[0]).toEqual(expect.objectContaining({
+        requested_kind: 'profile_rule',
+        written_kind: 'profile_rule',
+        content: '请用中文回答',
+      }));
+
+      const stored = await app.inject({
+        method: 'GET',
+        url: '/api/v2/records?agent_id=api-review-routing-auto-commit',
+      });
+      expect(stored.statusCode).toBe(200);
+      expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'profile_rule',
+          attribute_key: 'language_preference',
+          content: '请用中文回答',
+        }),
+      ]));
+
+      const inbox = await app.inject({
+        method: 'GET',
+        url: '/api/v2/review-inbox?agent_id=api-review-routing-auto-commit',
+      });
+      expect(inbox.statusCode).toBe(200);
+      expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('keeps reviewable deep-only durable ingest candidates in review instead of auto-committing them', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createReviewInboxResponseStyleMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '说话干脆一点',
+          assistant_message: '记住了',
+          agent_id: 'api-review-routing-review-only',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.auto_committed_count).toBe(0);
+      expect(ingestBody.review_pending_count).toBe(1);
+      expect(ingestBody.review_batch_id).toBeTruthy();
+      expect(ingestBody.review_source_preview).toBe('说话干脆一点');
+      expect(ingestBody.review_summary).toEqual({
+        total: 1,
+        pending: 1,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      });
+      expect(ingestBody.records).toHaveLength(0);
+
+      const stored = await app.inject({
+        method: 'GET',
+        url: '/api/v2/records?agent_id=api-review-routing-review-only',
+      });
+      expect(stored.statusCode).toBe(200);
+      expect(JSON.parse(stored.payload).items).toHaveLength(0);
+
+      const inbox = await app.inject({
+        method: 'GET',
+        url: '/api/v2/review-inbox?agent_id=api-review-routing-review-only',
+      });
+      expect(inbox.statusCode).toBe(200);
+      expect(JSON.parse(inbox.payload).items).toEqual([
+        expect.objectContaining({
+          id: ingestBody.review_batch_id,
+          source_kind: 'live_ingest',
+          status: 'pending',
+          agent_id: 'api-review-routing-review-only',
+          summary: expect.objectContaining({ pending: 1 }),
+        }),
+      ]);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('returns narrowed review metadata for mixed auto-commit plus review ingest results', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createReviewInboxResponseStyleMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '后续交流中文就行。说话干脆一点',
+          assistant_message: '收到',
+          agent_id: 'api-review-routing-mixed',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.auto_committed_count).toBe(1);
+      expect(ingestBody.review_pending_count).toBe(1);
+      expect(ingestBody.review_batch_id).toBeTruthy();
+      expect(ingestBody.review_source_preview).toBe('说话干脆一点');
+      expect(ingestBody.review_summary).toEqual({
+        total: 1,
+        pending: 1,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      });
+      expect(ingestBody.records).toEqual([
+        expect.objectContaining({
+          written_kind: 'profile_rule',
+          content: '请用中文回答',
+        }),
+      ]);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('auto-commits canonicalized deep-only compound durable ingest results without creating review work', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createReviewInboxCompoundDurableMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '人在东京这边。先收一下 recall 那块',
+          assistant_message: '记住了',
+          agent_id: 'api-review-routing-compound-review',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.auto_committed_count).toBe(2);
+      expect(ingestBody.review_pending_count).toBe(0);
+      expect(ingestBody.review_batch_id).toBe(null);
+      expect(ingestBody.records).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          written_kind: 'fact_slot',
+          content: '我住东京',
+        }),
+        expect.objectContaining({
+          written_kind: 'task_state',
+          content: '当前任务是重构 Cortex recall',
+        }),
+      ]));
+
+      const stored = await app.inject({
+        method: 'GET',
+        url: '/api/v2/records?agent_id=api-review-routing-compound-review',
+      });
+      expect(stored.statusCode).toBe(200);
+      expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'fact_slot',
+          attribute_key: 'location',
+          content: '我住东京',
+        }),
+        expect.objectContaining({
+          kind: 'task_state',
+          state_key: 'refactor_status',
+          content: '当前任务是重构 Cortex recall',
+        }),
+      ]));
+
+      const inbox = await app.inject({
+        method: 'GET',
+        url: '/api/v2/review-inbox?agent_id=api-review-routing-compound-review',
+      });
+      expect(inbox.statusCode).toBe(200);
+      expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('keeps soft-priority colloquial profile-rule input as session_note on preview and ingest when deep extraction overreaches', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createWeakColloquialProfileRuleDriftMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: 'api-soft-colloquial-preview',
+          format: 'text',
+          content: '尽量用中文',
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(1);
+      expect(previewBody.record_candidates[0]?.normalized_kind).toBe('session_note');
+      expect(previewBody.record_candidates[0]?.content).toBe('尽量用中文');
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '尽量简单点',
+          assistant_message: '记住了',
+          agent_id: 'api-soft-colloquial-ingest',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.records).toHaveLength(1);
+      expect(ingestBody.records[0]?.written_kind).toBe('session_note');
+      expect(ingestBody.records[0]?.content).toBe('尽量简单点');
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('keeps structural colloquial "就可以" profile rules aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-structural-colloquial-preview',
+        format: 'text',
+        content: [
+          '中文就可以',
+          '三句话内就可以',
+          '简单方案就可以',
+        ].join('\n'),
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toHaveLength(3);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请用中文回答')).toBe(true);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '不要复杂方案')).toBe(true);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '中文就可以。三句话内就可以。简单方案就可以',
+        assistant_message: '记住了',
+        agent_id: 'api-structural-colloquial-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.records).toHaveLength(3);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '请用中文回答')).toBe(true);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '不要复杂方案')).toBe(true);
+  });
+
+  it('keeps structural colloquial "就好" profile rules aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-structural-colloquial-good-preview',
+        format: 'text',
+        content: [
+          '中文就好',
+          '三句话内就好',
+          '简单方案就好',
+        ].join('\n'),
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toHaveLength(3);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请用中文回答')).toBe(true);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '不要复杂方案')).toBe(true);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '中文就好。三句话内就好。简单方案就好',
+        assistant_message: '记住了',
+        agent_id: 'api-structural-colloquial-good-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.records).toHaveLength(3);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '请用中文回答')).toBe(true);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '不要复杂方案')).toBe(true);
+  });
+
+  it('keeps direct structural "就行 / 即可" language and length rules aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-direct-structural-preview',
+        format: 'text',
+        content: [
+          '中文就行',
+          '中文即可',
+          '三句话内即可',
+        ].join('\n'),
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toHaveLength(2);
+    expect(previewBody.record_candidates.filter((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请用中文回答')).toHaveLength(1);
+    expect(previewBody.record_candidates.some((item: any) => item.normalized_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '中文就行。中文即可。三句话内即可',
+        assistant_message: '记住了',
+        agent_id: 'api-direct-structural-ingest',
+      },
+      });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.records).toHaveLength(2);
+    expect(ingestBody.records.filter((item: any) => item.written_kind === 'profile_rule' && item.content === '请用中文回答')).toHaveLength(1);
+    expect(ingestBody.records.some((item: any) => item.written_kind === 'profile_rule' && item.content === '请把回答控制在三句话内')).toBe(true);
+  });
+
+  it('keeps structural colloquial "就可以吧" variants as session_note on preview and ingest when deep extraction overreaches', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createWeakColloquialProfileRuleDriftMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: 'api-structural-weak-colloquial-preview',
+          format: 'text',
+          content: [
+            '中文就可以吧',
+            '三句话内就可以吧',
+            '简单方案就可以吧',
+          ].join('\n'),
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(3);
+      expect(previewBody.record_candidates.every((item: any) => item.normalized_kind === 'session_note')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '中文就可以吧')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '三句话内就可以吧')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '简单方案就可以吧')).toBe(true);
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '中文就可以吧。三句话内就可以吧。简单方案就可以吧',
+          assistant_message: '记住了',
+          agent_id: 'api-structural-weak-colloquial-ingest',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.records).toHaveLength(3);
+      expect(ingestBody.records.every((item: any) => item.written_kind === 'session_note')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '中文就可以吧')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '三句话内就可以吧')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '简单方案就可以吧')).toBe(true);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('keeps structural colloquial "就好吧" variants as session_note on preview and ingest when deep extraction overreaches', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createWeakColloquialProfileRuleDriftMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: 'api-structural-weak-colloquial-good-preview',
+          format: 'text',
+          content: [
+            '中文就好吧',
+            '三句话内就好吧',
+            '简单方案就好吧',
+          ].join('\n'),
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(3);
+      expect(previewBody.record_candidates.every((item: any) => item.normalized_kind === 'session_note')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '中文就好吧')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '三句话内就好吧')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '简单方案就好吧')).toBe(true);
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '中文就好吧。三句话内就好吧。简单方案就好吧',
+          assistant_message: '记住了',
+          agent_id: 'api-structural-weak-colloquial-good-ingest',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.records).toHaveLength(3);
+      expect(ingestBody.records.every((item: any) => item.written_kind === 'session_note')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '中文就好吧')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '三句话内就好吧')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '简单方案就好吧')).toBe(true);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('keeps direct structural "即可吧" language and length variants as session_note on preview and ingest when deep extraction overreaches', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createWeakColloquialProfileRuleDriftMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/v2/import/preview',
+        payload: {
+          agent_id: 'api-direct-structural-weak-preview',
+          format: 'text',
+          content: [
+            '中文即可吧',
+            '三句话内即可吧',
+          ].join('\n'),
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      const previewBody = JSON.parse(preview.payload);
+      expect(previewBody.record_candidates).toHaveLength(2);
+      expect(previewBody.record_candidates.every((item: any) => item.normalized_kind === 'session_note')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '中文即可吧')).toBe(true);
+      expect(previewBody.record_candidates.some((item: any) => item.content === '三句话内即可吧')).toBe(true);
+
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: '中文即可吧。三句话内即可吧',
+          assistant_message: '记住了',
+          agent_id: 'api-direct-structural-weak-ingest',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.records).toHaveLength(2);
+      expect(ingestBody.records.every((item: any) => item.written_kind === 'session_note')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '中文即可吧')).toBe(true);
+      expect(ingestBody.records.some((item: any) => item.content === '三句话内即可吧')).toBe(true);
     } finally {
       cortex.recordsV2 = originalRecordsV2;
     }

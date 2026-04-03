@@ -100,6 +100,20 @@ describe('Platform surface migration', () => {
     expect(smoke).not.toContain("memoryPreview.json?.record_candidates?.[0]?.content === '现在住东京'");
   });
 
+  it('covers the review inbox import and delta-sync mainline in the smoke gate', () => {
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+
+    expect(smoke).toContain('/api/v2/review-inbox/import');
+    expect(smoke).toContain('/api/v2/review-inbox?agent_id=');
+    expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}');
+    expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}/apply');
+    expect(smoke).toContain("reviewInboxListFull.json?.sync?.mode === 'full'");
+    expect(smoke).toContain("reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请把回答控制在三句话内'");
+    expect(smoke).toContain('cursor: reviewInboxDeltaBase.json?.sync?.cursor');
+    expect(smoke).toContain("reviewInboxApply.json?.summary?.committed === 1");
+    expect(smoke).toContain("reviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内')");
+  });
+
   it('parses MCP search_debug payloads instead of matching stale source text', () => {
     const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
 

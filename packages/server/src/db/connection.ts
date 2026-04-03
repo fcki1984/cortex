@@ -770,6 +770,28 @@ const migrations = [
         ON review_items_v2(batch_id, status, updated_at DESC);
     `,
   },
+  {
+    name: '018_review_inbox_sync_cursor',
+    sql: `
+      ALTER TABLE review_batches_v2
+        ADD COLUMN sync_cursor INTEGER NOT NULL DEFAULT 0;
+
+      CREATE INDEX IF NOT EXISTS idx_review_batches_v2_sync_cursor
+        ON review_batches_v2(sync_cursor DESC);
+
+      CREATE TABLE IF NOT EXISTS review_batch_sync_seq_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
+  {
+    name: '019_review_inbox_orphan_cleanup',
+    sql: `
+      DELETE FROM review_batches_v2
+      WHERE agent_id NOT IN (SELECT id FROM agents);
+    `,
+  },
 ];
 
 export function closeDatabase(): void {

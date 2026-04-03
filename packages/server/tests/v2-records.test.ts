@@ -204,19 +204,19 @@ describe('CortexRecordsV2', () => {
     const language = await service.remember({
       agent_id: 'colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '之后都用中文',
+      content: '以后都中文回答',
     });
 
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '三句就够',
+      content: '最多三句话',
     });
 
     const complexity = await service.remember({
       agent_id: 'colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '别整复杂方案',
+      content: '简单方案就行',
     });
 
     expect(language.record.kind).toBe('profile_rule');
@@ -232,11 +232,412 @@ describe('CortexRecordsV2', () => {
     expect(complexity.record.content).toBe('不要复杂方案');
   });
 
+  it('stores additional constraint-style colloquial profile-rule writes using canonical durable content', async () => {
+    const length = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '别超过三句话',
+    });
+
+    const simple = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '简单方案即可',
+    });
+
+    const lightweight = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '轻量方案就行',
+    });
+
+    expect(length.record.kind).toBe('profile_rule');
+    expect(length.record.attribute_key).toBe('response_length');
+    expect(length.record.content).toBe('请把回答控制在三句话内');
+
+    expect(simple.record.kind).toBe('profile_rule');
+    expect(simple.record.attribute_key).toBe('solution_complexity');
+    expect(simple.record.content).toBe('不要复杂方案');
+
+    expect(lightweight.record.kind).toBe('profile_rule');
+    expect(lightweight.record.attribute_key).toBe('solution_complexity');
+    expect(lightweight.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores newly supported softer-worded but still explicit complexity constraints using canonical durable content', async () => {
+    const simpler = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '方案简单一点',
+    });
+
+    const lightweight = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '轻量方案即可',
+    });
+
+    expect(simpler.record.kind).toBe('profile_rule');
+    expect(simpler.record.attribute_key).toBe('solution_complexity');
+    expect(simpler.record.content).toBe('不要复杂方案');
+
+    expect(lightweight.record.kind).toBe('profile_rule');
+    expect(lightweight.record.attribute_key).toBe('solution_complexity');
+    expect(lightweight.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores additional explicit complexity phrasings using canonical durable content', async () => {
+    const simpler = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '方案简单一些',
+    });
+
+    const lighter = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '方案轻量一点',
+    });
+
+    expect(simpler.record.kind).toBe('profile_rule');
+    expect(simpler.record.attribute_key).toBe('solution_complexity');
+    expect(simpler.record.content).toBe('不要复杂方案');
+
+    expect(lighter.record.kind).toBe('profile_rule');
+    expect(lighter.record.attribute_key).toBe('solution_complexity');
+    expect(lighter.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores additional explicit language and complexity phrasings using canonical durable content', async () => {
+    const language = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-5',
+      kind: 'profile_rule',
+      content: '后面中文就可以',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-5',
+      kind: 'profile_rule',
+      content: '方案简单些',
+    });
+
+    expect(language.record.kind).toBe('profile_rule');
+    expect(language.record.attribute_key).toBe('language_preference');
+    expect(language.record.content).toBe('请用中文回答');
+
+    expect(complexity.record.kind).toBe('profile_rule');
+    expect(complexity.record.attribute_key).toBe('solution_complexity');
+    expect(complexity.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores structural colloquial "就可以" profile-rule phrasings using canonical durable content', async () => {
+    const directLanguage = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-6',
+      kind: 'profile_rule',
+      content: '中文就可以',
+    });
+
+    const responseLength = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-6',
+      kind: 'profile_rule',
+      content: '三句话内就可以',
+    });
+
+    const simpleOkay = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-6',
+      kind: 'profile_rule',
+      content: '简单方案就可以',
+    });
+
+    const lightweightOkay = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-6',
+      kind: 'profile_rule',
+      content: '轻量方案就可以',
+    });
+
+    expect(directLanguage.record.kind).toBe('profile_rule');
+    expect(directLanguage.record.attribute_key).toBe('language_preference');
+    expect(directLanguage.record.content).toBe('请用中文回答');
+
+    expect(responseLength.record.kind).toBe('profile_rule');
+    expect(responseLength.record.attribute_key).toBe('response_length');
+    expect(responseLength.record.content).toBe('请把回答控制在三句话内');
+
+    expect(simpleOkay.record.kind).toBe('profile_rule');
+    expect(simpleOkay.record.attribute_key).toBe('solution_complexity');
+    expect(simpleOkay.record.content).toBe('不要复杂方案');
+
+    expect(lightweightOkay.record.kind).toBe('profile_rule');
+    expect(lightweightOkay.record.attribute_key).toBe('solution_complexity');
+    expect(lightweightOkay.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores structural colloquial "就好" profile-rule phrasings using canonical durable content', async () => {
+    const directLanguage = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-7',
+      kind: 'profile_rule',
+      content: '中文就好',
+    });
+
+    const responseLength = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-7',
+      kind: 'profile_rule',
+      content: '三句话内就好',
+    });
+
+    const simpleOkay = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-7',
+      kind: 'profile_rule',
+      content: '简单方案就好',
+    });
+
+    const lightweightOkay = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-7',
+      kind: 'profile_rule',
+      content: '轻量方案就好',
+    });
+
+    expect(directLanguage.record.kind).toBe('profile_rule');
+    expect(directLanguage.record.attribute_key).toBe('language_preference');
+    expect(directLanguage.record.content).toBe('请用中文回答');
+
+    expect(responseLength.record.kind).toBe('profile_rule');
+    expect(responseLength.record.attribute_key).toBe('response_length');
+    expect(responseLength.record.content).toBe('请把回答控制在三句话内');
+
+    expect(simpleOkay.record.kind).toBe('profile_rule');
+    expect(simpleOkay.record.attribute_key).toBe('solution_complexity');
+    expect(simpleOkay.record.content).toBe('不要复杂方案');
+
+    expect(lightweightOkay.record.kind).toBe('profile_rule');
+    expect(lightweightOkay.record.attribute_key).toBe('solution_complexity');
+    expect(lightweightOkay.record.content).toBe('不要复杂方案');
+  });
+
+  it('stores direct structural "就行 / 即可" language and length phrasings using canonical durable content', async () => {
+    const languageOkay = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-8',
+      kind: 'profile_rule',
+      content: '中文就行',
+    });
+
+    const languageCan = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-8',
+      kind: 'profile_rule',
+      content: '中文即可',
+    });
+
+    const responseLengthCan = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-8',
+      kind: 'profile_rule',
+      content: '三句话内即可',
+    });
+
+    expect(languageOkay.record.kind).toBe('profile_rule');
+    expect(languageOkay.record.attribute_key).toBe('language_preference');
+    expect(languageOkay.record.content).toBe('请用中文回答');
+
+    expect(languageCan.record.kind).toBe('profile_rule');
+    expect(languageCan.record.attribute_key).toBe('language_preference');
+    expect(languageCan.record.content).toBe('请用中文回答');
+
+    expect(responseLengthCan.record.kind).toBe('profile_rule');
+    expect(responseLengthCan.record.attribute_key).toBe('response_length');
+    expect(responseLengthCan.record.content).toBe('请把回答控制在三句话内');
+  });
+
+  it('keeps weak colloquial profile-rule hints out of durable truth even with explicit profile_rule requests', async () => {
+    const language = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '尽量用中文',
+      attribute_key: 'language_preference',
+    });
+
+    const length = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '尽量别超过三句话',
+      attribute_key: 'response_length',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent',
+      kind: 'profile_rule',
+      content: '尽量简单点',
+      attribute_key: 'solution_complexity',
+    });
+
+    expect(language.written_kind).toBe('session_note');
+    expect(language.record.kind).toBe('session_note');
+    expect(language.record.content).toBe('尽量用中文');
+
+    expect(length.written_kind).toBe('session_note');
+    expect(length.record.kind).toBe('session_note');
+    expect(length.record.content).toBe('尽量别超过三句话');
+
+    expect(complexity.written_kind).toBe('session_note');
+    expect(complexity.record.kind).toBe('session_note');
+    expect(complexity.record.content).toBe('尽量简单点');
+  });
+
+  it('keeps newly hedged short colloquial profile-rule variants out of durable truth', async () => {
+    const language = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '后面中文就可以吧',
+      attribute_key: 'language_preference',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '方案简单些吧',
+      attribute_key: 'solution_complexity',
+    });
+
+    expect(language.written_kind).toBe('session_note');
+    expect(language.record.kind).toBe('session_note');
+    expect(language.record.content).toBe('后面中文就可以吧');
+
+    expect(complexity.written_kind).toBe('session_note');
+    expect(complexity.record.kind).toBe('session_note');
+    expect(complexity.record.content).toBe('方案简单些吧');
+  });
+
+  it('keeps structural colloquial "就可以吧" variants out of durable truth', async () => {
+    const directLanguage = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '中文就可以吧',
+      attribute_key: 'language_preference',
+    });
+
+    const responseLength = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '三句话内就可以吧',
+      attribute_key: 'response_length',
+    });
+
+    const simpleOkay = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '简单方案就可以吧',
+      attribute_key: 'solution_complexity',
+    });
+
+    const lightweightOkay = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-3',
+      kind: 'profile_rule',
+      content: '轻量方案就可以吧',
+      attribute_key: 'solution_complexity',
+    });
+
+    expect(directLanguage.written_kind).toBe('session_note');
+    expect(directLanguage.record.kind).toBe('session_note');
+    expect(directLanguage.record.content).toBe('中文就可以吧');
+
+    expect(responseLength.written_kind).toBe('session_note');
+    expect(responseLength.record.kind).toBe('session_note');
+    expect(responseLength.record.content).toBe('三句话内就可以吧');
+
+    expect(simpleOkay.written_kind).toBe('session_note');
+    expect(simpleOkay.record.kind).toBe('session_note');
+    expect(simpleOkay.record.content).toBe('简单方案就可以吧');
+
+    expect(lightweightOkay.written_kind).toBe('session_note');
+    expect(lightweightOkay.record.kind).toBe('session_note');
+    expect(lightweightOkay.record.content).toBe('轻量方案就可以吧');
+  });
+
+  it('keeps structural colloquial "就好吧" variants out of durable truth', async () => {
+    const directLanguage = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '中文就好吧',
+      attribute_key: 'language_preference',
+    });
+
+    const responseLength = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '三句话内就好吧',
+      attribute_key: 'response_length',
+    });
+
+    const simpleOkay = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '简单方案就好吧',
+      attribute_key: 'solution_complexity',
+    });
+
+    const lightweightOkay = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-4',
+      kind: 'profile_rule',
+      content: '轻量方案就好吧',
+      attribute_key: 'solution_complexity',
+    });
+
+    expect(directLanguage.written_kind).toBe('session_note');
+    expect(directLanguage.record.kind).toBe('session_note');
+    expect(directLanguage.record.content).toBe('中文就好吧');
+
+    expect(responseLength.written_kind).toBe('session_note');
+    expect(responseLength.record.kind).toBe('session_note');
+    expect(responseLength.record.content).toBe('三句话内就好吧');
+
+    expect(simpleOkay.written_kind).toBe('session_note');
+    expect(simpleOkay.record.kind).toBe('session_note');
+    expect(simpleOkay.record.content).toBe('简单方案就好吧');
+
+    expect(lightweightOkay.written_kind).toBe('session_note');
+    expect(lightweightOkay.record.kind).toBe('session_note');
+    expect(lightweightOkay.record.content).toBe('轻量方案就好吧');
+  });
+
+  it('keeps direct structural "即可吧" language and length variants out of durable truth', async () => {
+    const language = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-5',
+      kind: 'profile_rule',
+      content: '中文即可吧',
+      attribute_key: 'language_preference',
+    });
+
+    const responseLength = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-5',
+      kind: 'profile_rule',
+      content: '三句话内即可吧',
+      attribute_key: 'response_length',
+    });
+
+    expect(language.written_kind).toBe('session_note');
+    expect(language.record.kind).toBe('session_note');
+    expect(language.record.content).toBe('中文即可吧');
+
+    expect(responseLength.written_kind).toBe('session_note');
+    expect(responseLength.record.kind).toBe('session_note');
+    expect(responseLength.record.content).toBe('三句话内即可吧');
+  });
+
+  it('downgrades newly hedged constraint-style profile-rule writes instead of committing durable truth', async () => {
+    const result = await service.remember({
+      agent_id: 'weak-colloquial-profile-rule-agent-2',
+      kind: 'profile_rule',
+      content: '简单方案即可吧',
+    });
+
+    expect(result.requested_kind).toBe('profile_rule');
+    expect(result.written_kind).toBe('session_note');
+    expect(result.record.kind).toBe('session_note');
+  });
+
   it('downgrades weak colloquial profile-rule writes instead of committing durable truth', async () => {
     const result = await service.remember({
       agent_id: 'weak-colloquial-profile-rule-agent',
       kind: 'profile_rule',
-      content: '三句就够了吧',
+      content: '简单方案就行吧',
     });
 
     expect(result.requested_kind).toBe('profile_rule');

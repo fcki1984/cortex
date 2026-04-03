@@ -90,6 +90,7 @@ describe('ImportExport page', () => {
     });
     apiMocks.createReviewInboxImportV2.mockResolvedValue({
       batch_id: 'batch_1',
+      source_preview: '后续交流中文就行',
       summary: {
         total: 1,
         pending: 1,
@@ -248,6 +249,7 @@ describe('ImportExport page', () => {
       });
     });
 
-    expect(await screen.findByText('已发送到审查箱，待处理 1 条。')).toBeTruthy();
+    expect(await screen.findByText('已发送到审查箱，待处理 1 条。当前待审：后续交流中文就行')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '打开对应审查批次' }).getAttribute('href')).toBe('/review-inbox?batch=batch_1');
   });
 });

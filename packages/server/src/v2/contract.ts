@@ -44,7 +44,170 @@ export type ConversationalProfileRuleMatch = {
   disposition: 'auto_commit';
 };
 
-export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
+export type V2ContractProfileRuleAliasSet = {
+  attribute_key: ConversationalProfileRuleMatch['attribute_key'];
+  canonical_content: string;
+  strong_inputs: string[];
+  weak_inputs: string[];
+};
+
+type InternalProfileRuleAliasSpec = V2ContractProfileRuleAliasSet & {
+  matches_conversational: (content: string) => boolean;
+  matches_attribute: (content: string) => boolean;
+};
+
+const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
+  {
+    attribute_key: 'language_preference',
+    canonical_content: '请用中文回答',
+    strong_inputs: [
+      '请用中文回答',
+      '后续交流中文就行',
+      '以后都中文回答',
+      '后面中文就可以',
+      '中文就可以',
+      '中文就行',
+      '中文即可',
+      '中文就好',
+    ],
+    weak_inputs: [
+      '中文就行吧',
+      '以后都中文回答就行吧',
+      '尽量用中文',
+      '优先用中文回答',
+      '中文就可以吧',
+      '中文即可吧',
+      '中文就好吧',
+      '后面中文就可以吧',
+    ],
+    matches_conversational: (content: string) => {
+      const languageLabel = canonicalLanguageLabel(content);
+      if (!languageLabel) return false;
+      return (
+        /(?:后续|之后|后面|接下来|以后).{0,8}(?:交流|沟通|聊|都用|用|回答|回复)/i.test(content) ||
+        /(?:都用|改用|换用|用).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content) ||
+        /(?:中文|英文|日文|english|chinese|japanese).{0,8}(?:就行|即可|就好|就可以)/i.test(content)
+      );
+    },
+    matches_attribute: (content: string) => (
+      /(?:请|用|prefer|preferably|answer|respond|reply|回答|回复).*(中文|英文|日文|english|chinese|japanese)/i.test(content) ||
+      /(中文|英文|日文|english|chinese|japanese).*(回答|回复|answer|respond)/i.test(content) ||
+      (
+        LANGUAGE_LABEL_RE.test(content) &&
+        /(?:交流|沟通|聊|后续|之后|后面|接下来|以后|都用|就行|即可|就好)/i.test(content)
+      )
+    ),
+  },
+  {
+    attribute_key: 'response_length',
+    canonical_content: '请把回答控制在三句话内',
+    strong_inputs: [
+      '请把回答控制在三句话内',
+      '三句话内就行',
+      '三句就够',
+      '最多三句话',
+      '别超过三句话',
+      '三句话内就可以',
+      '三句话内即可',
+      '三句话内就好',
+    ],
+    weak_inputs: [
+      '三句就够了吧',
+      '最多三句话更好',
+      '别超过三句话更好',
+      '尽量别超过三句话',
+      '三句话内就可以吧',
+      '三句话内即可吧',
+      '三句话内就好吧',
+    ],
+    matches_conversational: (content: string) => (
+      !!extractSentenceCountConstraint(content) &&
+      (
+        /(?:最多|至多|不超过).{0,12}(?:句|sentences?)/i.test(content) ||
+        /(?:别超过|别超出|不要超过).{0,12}(?:句|sentences?)/i.test(content) ||
+        /(?:就行|即可|就好|就可以|够(?:了)?|别太长|不要太长)/i.test(content) ||
+        /(?:控制|限制).{0,12}(?:句|sentences?)/i.test(content) ||
+        /(?:回答|回复|answer|response).{0,12}(?:句|sentences?)/i.test(content)
+      )
+    ),
+    matches_attribute: (content: string) => (
+      /(?:控制|限制|保持|压缩).{0,12}(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?/i.test(content) ||
+      /(?:within|in)\s+(?:one|two|three|four|five|\d+)\s+sentences?/i.test(content) ||
+      /(?:一句话|两句话|三句话|四句话|\d+句(?:话)?).*(?:回答|回复|answer|response)/i.test(content) ||
+      /(?:不要|别|avoid|no|not).*(长篇|冗长|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
+      /(?:详细|长篇|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
+      (
+        ZH_SENTENCE_RE.test(content) &&
+        /(?:就行|即可|就好|就可以|够(?:了)?|别太长|不要太长|回答|回复|answer|response)/i.test(content)
+      )
+    ),
+  },
+  {
+    attribute_key: 'solution_complexity',
+    canonical_content: '不要复杂方案',
+    strong_inputs: [
+      '不要复杂方案',
+      '别整复杂方案',
+      '方案简单点',
+      '简单方案就行',
+      '简单方案即可',
+      '轻量方案就行',
+      '方案简单一点',
+      '轻量方案即可',
+      '方案简单一些',
+      '方案轻量一点',
+      '方案简单些',
+      '简单方案就可以',
+      '简单方案就好',
+      '轻量方案就可以',
+      '轻量方案就好',
+    ],
+    weak_inputs: [
+      '尽量简单点',
+      '优先简单点',
+      '可能简单点更好',
+      '方案简单些吧',
+      '简单方案就行吧',
+      '简单方案即可吧',
+      '简单方案就可以吧',
+      '简单方案就好吧',
+      '轻量方案就行吧',
+      '轻量方案就可以吧',
+      '轻量方案就好吧',
+    ],
+    matches_conversational: (content: string) => (
+      /(?:方案简单点|方案简单一点|方案简单一些|方案简单些|方案轻量一点|简单点|轻量点|简单方案就行|简单方案即可|简单方案就好|简单方案就可以|轻量方案就行|轻量方案即可|轻量方案就好|轻量方案就可以|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(content)
+    ),
+    matches_attribute: (content: string) => (
+      /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
+      /(?:复杂|complex).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
+      /(?:方案|实现|solution|setup).*(?:简单|轻量|simple|lightweight)/i.test(content) ||
+      /(?:别搞太复杂|别整复杂方案|别太复杂|简单方案就好|轻量方案就好|keep it simple|avoid complex)/i.test(content)
+    ),
+  },
+];
+
+export const V2_CONTRACT_PROFILE_RULE_ALIAS_SETS: V2ContractProfileRuleAliasSet[] = PROFILE_RULE_ALIAS_SPECS.map(
+  ({ attribute_key, canonical_content, strong_inputs, weak_inputs }) => ({
+    attribute_key,
+    canonical_content,
+    strong_inputs: [...strong_inputs],
+    weak_inputs: [...weak_inputs],
+  }),
+);
+
+const PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = V2_CONTRACT_PROFILE_RULE_ALIAS_SETS.flatMap(
+  ({ attribute_key, strong_inputs }) => strong_inputs.map(input => ({
+    input,
+    requested_kind: 'profile_rule' as const,
+    written_kind: 'profile_rule' as const,
+    attribute_key,
+    relation_predicate: null,
+    output: `profile_rule(subject_key=user, attribute_key=${attribute_key})`,
+  })),
+);
+
+const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   {
     input: '我住大阪',
     requested_kind: 'fact_slot',
@@ -52,70 +215,6 @@ export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     attribute_key: 'location',
     relation_predicate: 'lives_in',
     output: 'fact_slot(entity_key=user, attribute_key=location)',
-  },
-  {
-    input: '请用中文回答',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'language_preference',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=language_preference)',
-  },
-  {
-    input: '后续交流中文就行',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'language_preference',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=language_preference)',
-  },
-  {
-    input: '请把回答控制在三句话内',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'response_length',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=response_length)',
-  },
-  {
-    input: '三句话内就行',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'response_length',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=response_length)',
-  },
-  {
-    input: '三句就够',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'response_length',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=response_length)',
-  },
-  {
-    input: '不要复杂方案',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'solution_complexity',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)',
-  },
-  {
-    input: '别整复杂方案',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'solution_complexity',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)',
-  },
-  {
-    input: '方案简单点',
-    requested_kind: 'profile_rule',
-    written_kind: 'profile_rule',
-    attribute_key: 'solution_complexity',
-    relation_predicate: null,
-    output: 'profile_rule(subject_key=user, attribute_key=solution_complexity)',
   },
   {
     input: '我在 OpenAI 工作',
@@ -174,6 +273,12 @@ export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
 ];
 
+export const V2_CONTRACT_CANONICAL_CASES: V2ContractCanonicalCase[] = [
+  NON_PROFILE_RULE_CANONICAL_CASES[0],
+  ...PROFILE_RULE_CANONICAL_CASES,
+  ...NON_PROFILE_RULE_CANONICAL_CASES.slice(1),
+];
+
 export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: string }> = V2_CONTRACT_CANONICAL_CASES.map(
   ({ input, output }) => ({ input, output }),
 );
@@ -183,7 +288,7 @@ const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
 const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese)/i;
 const ZH_SENTENCE_RE = /((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?)(?:内|以内)?/i;
 const EN_SENTENCE_RE = /(?:within|in|under|limit(?:ed)? to|keep(?: answers?)?(?: within)?|answer in)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
-const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|够(?:了)?吧|更好|最好)/i;
+const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|就可以吧|够(?:了)?吧|更好|最好|尽量|优先|简单(?:一点|一些|些)?吧|轻量(?:一点)?吧)/i;
 const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
 const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
@@ -258,6 +363,25 @@ function languageTemplate(label: '中文' | '英文' | '日文'): string {
   }
 }
 
+function findProfileRuleAliasSpec(attributeKey: ConversationalProfileRuleMatch['attribute_key']): InternalProfileRuleAliasSpec | null {
+  return PROFILE_RULE_ALIAS_SPECS.find(spec => spec.attribute_key === attributeKey) ?? null;
+}
+
+function matchProfileRuleAliasSpec(content: string): InternalProfileRuleAliasSpec | null {
+  if (isWeakConversationalProfileRule(content)) return null;
+
+  const normalized = content.trim();
+  if (!normalized) return null;
+
+  for (const spec of PROFILE_RULE_ALIAS_SPECS) {
+    if (spec.matches_conversational(normalized)) {
+      return spec;
+    }
+  }
+
+  return null;
+}
+
 function canonicalProfileRuleContent(attributeKey: string, content: string, ownerScope: 'user' | 'agent' = 'user'): string | null {
   if (ownerScope !== 'user') return null;
 
@@ -278,7 +402,7 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   }
 
   if (attributeKey === 'solution_complexity') {
-    if (/(?:不要复杂方案|别太复杂|别搞太复杂|别整复杂方案|方案简单点|简单点|轻量点|simple solution|keep it simple|lightweight solution|avoid complex)/i.test(content)) {
+    if (findProfileRuleAliasSpec('solution_complexity')?.matches_attribute(content)) {
       return /[A-Za-z]/.test(content) ? 'Please avoid complex solutions' : '不要复杂方案';
     }
   }
@@ -291,57 +415,16 @@ export function isWeakConversationalProfileRule(content: string): boolean {
 }
 
 export function matchConversationalProfileRule(content: string): ConversationalProfileRuleMatch | null {
-  if (isWeakConversationalProfileRule(content)) return null;
+  const spec = matchProfileRuleAliasSpec(content);
+  if (!spec) return null;
 
-  const normalized = content.trim();
-  if (!normalized) return null;
-
-  const languageLabel = canonicalLanguageLabel(normalized);
-  if (
-    languageLabel &&
-    (
-      /(?:后续|之后|后面|接下来|以后).{0,8}(?:交流|沟通|聊|都用|用)/i.test(normalized) ||
-      /(?:都用|改用|换用|用).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(normalized) ||
-      /(?:中文|英文|日文|english|chinese|japanese).{0,8}(?:就行|即可|就好)/i.test(normalized)
-    )
-  ) {
-    const canonicalContent = canonicalProfileRuleContent('language_preference', normalized);
-    if (canonicalContent) {
-      return {
-        attribute_key: 'language_preference',
-        canonical_content: canonicalContent,
-        disposition: 'auto_commit',
-      };
-    }
-  }
-
-  if (
-    extractSentenceCountConstraint(normalized) &&
-    (
-      /(?:就行|即可|就好|够(?:了)?|别太长|不要太长)/i.test(normalized) ||
-      /(?:控制|限制).{0,12}(?:句|sentences?)/i.test(normalized) ||
-      /(?:回答|回复|answer|response).{0,12}(?:句|sentences?)/i.test(normalized)
-    )
-  ) {
-    const canonicalContent = canonicalProfileRuleContent('response_length', normalized);
-    if (canonicalContent) {
-      return {
-        attribute_key: 'response_length',
-        canonical_content: canonicalContent,
-        disposition: 'auto_commit',
-      };
-    }
-  }
-
-  if (/(?:方案简单点|简单点|轻量点|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(normalized)) {
-    const canonicalContent = canonicalProfileRuleContent('solution_complexity', normalized);
-    if (canonicalContent) {
-      return {
-        attribute_key: 'solution_complexity',
-        canonical_content: canonicalContent,
-        disposition: 'auto_commit',
-      };
-    }
+  const canonicalContent = canonicalProfileRuleContent(spec.attribute_key, content.trim());
+  if (canonicalContent) {
+    return {
+      attribute_key: spec.attribute_key,
+      canonical_content: canonicalContent,
+      disposition: 'auto_commit',
+    };
   }
 
   return null;
@@ -532,14 +615,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
   if (isWeakConversationalProfileRule(content)) return null;
 
   if (/我叫|我的名字|my name is|call me/i.test(content)) return 'display_name';
-  if (
-    /(?:请|用|prefer|preferably|answer|respond|reply|回答|回复).*(中文|英文|日文|english|chinese|japanese)/i.test(content) ||
-    /(中文|英文|日文|english|chinese|japanese).*(回答|回复|answer|respond)/i.test(content) ||
-    (
-      LANGUAGE_LABEL_RE.test(content) &&
-      /(?:交流|沟通|聊|后续|之后|后面|接下来|以后|都用|就行|即可|就好)/i.test(content)
-    )
-  ) {
+  if (findProfileRuleAliasSpec('language_preference')?.matches_attribute(content)) {
     return 'language_preference';
   }
   if (
@@ -548,25 +624,10 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
   ) {
     return 'response_style';
   }
-  if (
-    /(?:控制|限制|保持|压缩).{0,12}(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?/i.test(content) ||
-    /(?:within|in)\s+(?:one|two|three|four|five|\d+)\s+sentences?/i.test(content) ||
-    /(?:一句话|两句话|三句话|四句话|\d+句(?:话)?).*(?:回答|回复|answer|response)/i.test(content) ||
-    /(?:不要|别|avoid|no|not).*(长篇|冗长|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
-    /(?:详细|长篇|verbose|long).*(解释|说明|answer|response)/i.test(content) ||
-    (
-      ZH_SENTENCE_RE.test(content) &&
-      /(?:就行|即可|就好|够(?:了)?|别太长|不要太长|回答|回复|answer|response)/i.test(content)
-    )
-  ) {
+  if (findProfileRuleAliasSpec('response_length')?.matches_attribute(content)) {
     return 'response_length';
   }
-  if (
-    /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
-    /(?:复杂|complex).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
-    /(?:方案|实现|solution|setup).*(?:简单|轻量|simple|lightweight)/i.test(content) ||
-    /(?:别搞太复杂|别整复杂方案|别太复杂|keep it simple|avoid complex)/i.test(content)
-  ) {
+  if (findProfileRuleAliasSpec('solution_complexity')?.matches_attribute(content)) {
     return 'solution_complexity';
   }
   if (/(低风险|高风险|risk tolerance|risk profile)/i.test(content)) return 'risk_tolerance';

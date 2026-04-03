@@ -18,6 +18,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       source_kind?: 'live_ingest' | 'import_preview';
       limit?: string;
       offset?: string;
+      cursor?: string;
     };
 
     return cortex.reviewInboxV2.listBatches({
@@ -26,6 +27,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       source_kind: query.source_kind,
       limit: query.limit ? Number(query.limit) : undefined,
       offset: query.offset ? Number(query.offset) : undefined,
+      cursor: query.cursor,
     });
   }));
 
@@ -75,6 +77,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       reply.code(201);
       return {
         batch_id: result.batch.id,
+        source_preview: result.batch.source_preview,
         summary: result.summary,
       };
     } catch (error: any) {

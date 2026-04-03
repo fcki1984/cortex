@@ -86,6 +86,12 @@ describe('V2 shared atomic contract', () => {
   it('canonicalizes stable colloquial explicit inputs into durable shared-contract truth', () => {
     const samples = [
       {
+        input: '以后都中文回答',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
         input: '后续交流中文就行',
         written_kind: 'profile_rule',
         attribute_key: 'language_preference',
@@ -104,6 +110,18 @@ describe('V2 shared atomic contract', () => {
         content: '请把回答控制在三句话内',
       },
       {
+        input: '最多三句话',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
+        input: '别超过三句话',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
         input: '方案简单点',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
@@ -111,6 +129,126 @@ describe('V2 shared atomic contract', () => {
       },
       {
         input: '别整复杂方案',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '简单方案就行',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '简单方案即可',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '轻量方案就行',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '方案简单一点',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '轻量方案即可',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '方案简单一些',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '方案轻量一点',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '后面中文就可以',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '中文就可以',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '中文就行',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '中文即可',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '中文就好',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      },
+      {
+        input: '三句话内就可以',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
+        input: '三句话内即可',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
+        input: '三句话内就好',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: '请把回答控制在三句话内',
+      },
+      {
+        input: '方案简单些',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '简单方案就可以',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '简单方案就好',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '轻量方案就可以',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: '不要复杂方案',
+      },
+      {
+        input: '轻量方案就好',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
         content: '不要复杂方案',
@@ -151,6 +289,12 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('以后都中文回答')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('之后都用中文')).toEqual(expect.objectContaining({
       attribute_key: 'language_preference',
       canonical_content: '请用中文回答',
@@ -169,6 +313,18 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('最多三句话')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('别超过三句话')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('方案简单点')).toEqual(expect.objectContaining({
       attribute_key: 'solution_complexity',
       canonical_content: '不要复杂方案',
@@ -181,9 +337,203 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('简单方案就行')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('简单方案即可')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('轻量方案就行')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案简单一点')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('轻量方案即可')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案简单一些')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案轻量一点')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('后面中文就可以')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('中文就可以')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('中文就行')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('中文即可')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('中文就好')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('三句话内就可以')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('三句话内即可')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('三句话内就好')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案简单些')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('简单方案就可以')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('简单方案就好')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('轻量方案就可以')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('轻量方案就好')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('中文就行吧')).toBe(null);
+    expect(matchConversationalProfileRule!('以后都中文回答就行吧')).toBe(null);
     expect(matchConversationalProfileRule!('三句就够了吧')).toBe(null);
+    expect(matchConversationalProfileRule!('最多三句话更好')).toBe(null);
+    expect(matchConversationalProfileRule!('别超过三句话更好')).toBe(null);
+    expect(matchConversationalProfileRule!('尽量用中文')).toBe(null);
+    expect(matchConversationalProfileRule!('优先用中文回答')).toBe(null);
+    expect(matchConversationalProfileRule!('尽量别超过三句话')).toBe(null);
+    expect(matchConversationalProfileRule!('尽量简单点')).toBe(null);
+    expect(matchConversationalProfileRule!('优先简单点')).toBe(null);
+    expect(matchConversationalProfileRule!('中文就可以吧')).toBe(null);
+    expect(matchConversationalProfileRule!('中文即可吧')).toBe(null);
+    expect(matchConversationalProfileRule!('中文就好吧')).toBe(null);
+    expect(matchConversationalProfileRule!('后面中文就可以吧')).toBe(null);
+    expect(matchConversationalProfileRule!('三句话内就可以吧')).toBe(null);
+    expect(matchConversationalProfileRule!('三句话内即可吧')).toBe(null);
+    expect(matchConversationalProfileRule!('三句话内就好吧')).toBe(null);
+    expect(matchConversationalProfileRule!('方案简单些吧')).toBe(null);
+    expect(matchConversationalProfileRule!('简单方案就可以吧')).toBe(null);
+    expect(matchConversationalProfileRule!('简单方案就好吧')).toBe(null);
+    expect(matchConversationalProfileRule!('轻量方案就可以吧')).toBe(null);
+    expect(matchConversationalProfileRule!('轻量方案就好吧')).toBe(null);
     expect(matchConversationalProfileRule!('可能简单点更好')).toBe(null);
+    expect(matchConversationalProfileRule!('简单方案就行吧')).toBe(null);
+    expect(matchConversationalProfileRule!('简单方案即可吧')).toBe(null);
+    expect(matchConversationalProfileRule!('轻量方案就行吧')).toBe(null);
+  });
+
+  it('drives strong and weak profile-rule aliases from a shared alias set', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const aliasSets = (contractModule as Record<string, unknown>).V2_CONTRACT_PROFILE_RULE_ALIAS_SETS as
+      | Array<Record<string, unknown>>
+      | undefined;
+
+    expect(Array.isArray(aliasSets)).toBe(true);
+    expect(aliasSets).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute_key: 'language_preference',
+        canonical_content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        attribute_key: 'response_length',
+        canonical_content: '请把回答控制在三句话内',
+      }),
+      expect.objectContaining({
+        attribute_key: 'solution_complexity',
+        canonical_content: '不要复杂方案',
+      }),
+    ]));
+
+    for (const aliasSet of aliasSets ?? []) {
+      const strongInputs = Array.isArray(aliasSet.strong_inputs) ? aliasSet.strong_inputs as string[] : [];
+      const weakInputs = Array.isArray(aliasSet.weak_inputs) ? aliasSet.weak_inputs as string[] : [];
+      const attributeKey = aliasSet.attribute_key;
+      const canonicalContent = aliasSet.canonical_content;
+
+      expect(strongInputs.length).toBeGreaterThan(0);
+
+      for (const input of strongInputs) {
+        const normalized = normalizeManualInput(`contract-alias-strong-${String(attributeKey)}-${input}`, {
+          content: input,
+        });
+
+        expect(normalized.written_kind).toBe('profile_rule');
+        expect(normalized.candidate.kind).toBe('profile_rule');
+        expect(normalized.candidate.attribute_key).toBe(attributeKey);
+        expect(normalized.candidate.value_text).toBe(canonicalContent);
+      }
+
+      for (const input of weakInputs) {
+        const normalized = normalizeManualInput(`contract-alias-weak-${String(attributeKey)}-${input}`, {
+          content: input,
+        });
+
+        expect(normalized.written_kind).toBe('session_note');
+      }
+    }
   });
 
   it('keeps colloquial explicit fact follow-ups relation-safe after canonicalization', () => {

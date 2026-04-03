@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyReviewInboxBatchV2,
   getReviewInboxBatchV2,
@@ -36,6 +36,7 @@ type ReviewItem = {
   suggested_reason: string;
   suggested_rewrite?: string | null;
   payload: Record<string, unknown>;
+  error_message?: string | null;
 };
 
 type ReviewBatchDetail = {
@@ -43,6 +44,47 @@ type ReviewBatchDetail = {
   summary: ReviewBatchSummary;
   items: ReviewItem[];
 };
+
+type ReviewBatchApplyPayload = {
+  accept_all?: boolean;
+  reject_all?: boolean;
+  item_actions?: Array<{
+    item_id: string;
+    action: 'accept' | 'reject' | 'edit_then_accept';
+    payload_override?: Record<string, unknown>;
+  }>;
+};
+
+type ReviewBatchApplyResult = {
+  summary?: {
+    committed?: number;
+    rejected?: number;
+    failed?: number;
+  };
+  batch_summary?: ReviewBatchSummary;
+  committed?: Array<Record<string, unknown>>;
+  rejected?: Array<Record<string, unknown>>;
+  failed?: Array<Record<string, unknown>>;
+  remaining_pending?: number;
+  batch?: Omit<ReviewBatch, 'summary'>;
+};
+
+type ReviewBatchListResponse = {
+  items?: ReviewBatch[];
+  total?: number;
+  sync?: {
+    cursor?: string | null;
+    mode?: 'full' | 'delta';
+  };
+};
+
+type LoadBatchesResult = {
+  items: ReviewBatch[];
+  nextSelected: string | null;
+  selectionPreserved: boolean;
+};
+
+const REVIEW_INBOX_AUTO_REFRESH_MS = 15000;
 
 function getPayloadContent(item: ReviewItem): string {
   return typeof item.payload.content === 'string' ? item.payload.content : '';
@@ -67,6 +109,96 @@ function buildAcceptAction(item: ReviewItem, draftContent: Record<string, string
       content: getVisibleDraft(item, draftContent),
     },
   };
+}
+
+function getItemCandidateId(item: ReviewItem): string | null {
+  return typeof item.payload.candidate_id === 'string' ? item.payload.candidate_id : null;
+}
+
+function updateItemsFromApplyResult(
+  items: ReviewItem[],
+  payload: ReviewBatchApplyPayload,
+  result: ReviewBatchApplyResult,
+): ReviewItem[] {
+  const actionMap = new Map((payload.item_actions || []).map((action) => [action.item_id, action]));
+  const candidateIdByItemId = new Map<string, string>();
+  const itemIdByCandidateId = new Map<string, string>();
+
+  for (const item of items) {
+    const candidateId = getItemCandidateId(item);
+    if (!candidateId) continue;
+    candidateIdByItemId.set(item.id, candidateId);
+    itemIdByCandidateId.set(candidateId, item.id);
+  }
+
+  const acceptedIds = new Set<string>();
+  for (const entry of result.committed || []) {
+    if (typeof entry.item_id === 'string') acceptedIds.add(entry.item_id);
+    if (typeof entry.candidate_id === 'string') {
+      const itemId = itemIdByCandidateId.get(entry.candidate_id);
+      if (itemId) acceptedIds.add(itemId);
+    }
+  }
+
+  const rejectedIds = new Set<string>();
+  for (const entry of result.rejected || []) {
+    if (typeof entry.item_id === 'string') rejectedIds.add(entry.item_id);
+    if (typeof entry.candidate_id === 'string') {
+      const itemId = itemIdByCandidateId.get(entry.candidate_id);
+      if (itemId) rejectedIds.add(itemId);
+    }
+  }
+
+  const failedIds = new Set<string>();
+  const failureMessageByItemId = new Map<string, string>();
+  for (const entry of result.failed || []) {
+    const message = typeof entry.error === 'string'
+      ? entry.error
+      : typeof entry.reason === 'string'
+        ? entry.reason
+        : 'commit_failed';
+    if (typeof entry.item_id === 'string') {
+      failedIds.add(entry.item_id);
+      failureMessageByItemId.set(entry.item_id, message);
+    }
+    if (typeof entry.candidate_id === 'string') {
+      const itemId = itemIdByCandidateId.get(entry.candidate_id);
+      if (itemId) {
+        failedIds.add(itemId);
+        failureMessageByItemId.set(itemId, message);
+      }
+    }
+  }
+
+  return items.map((item) => {
+    if (item.status === 'accepted' || item.status === 'rejected') return item;
+    const action = payload.reject_all ? { action: 'reject' as const } : actionMap.get(item.id);
+    if (!action) return item;
+    if (failedIds.has(item.id)) {
+      return {
+        ...item,
+        status: 'failed',
+        error_message: failureMessageByItemId.get(item.id) || item.error_message || 'commit_failed',
+      };
+    }
+    if (rejectedIds.has(item.id) || (payload.reject_all && !failedIds.has(item.id))) {
+      return { ...item, status: 'rejected', error_message: null };
+    }
+    if (acceptedIds.has(item.id)) return { ...item, status: 'accepted', error_message: null };
+
+    const candidateId = candidateIdByItemId.get(item.id);
+    if (candidateId && failedIds.has(item.id)) {
+      return {
+        ...item,
+        status: 'failed',
+        error_message: failureMessageByItemId.get(item.id) || item.error_message || 'commit_failed',
+      };
+    }
+    if (action.action === 'accept' || action.action === 'edit_then_accept') {
+      return { ...item, status: 'accepted', error_message: null };
+    }
+    return item;
+  });
 }
 
 function Notice({
@@ -139,18 +271,94 @@ function formatSuggestedActionLabel(
   }
 }
 
+function formatActionableSummary(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  summary: ReviewBatchSummary,
+): string {
+  if (summary.failed > 0) {
+    return t('reviewInbox.actionableSummary', {
+      pending: summary.pending,
+      total: summary.total,
+      failed: summary.failed,
+    });
+  }
+  return t('reviewInbox.pendingSummary', {
+    pending: summary.pending,
+    total: summary.total,
+  });
+}
+
+function isActionableSummary(summary: ReviewBatchSummary): boolean {
+  return (summary.pending + summary.failed) > 0;
+}
+
+function getNextActionableBatchId(
+  batches: ReviewBatch[],
+  currentBatchId: string,
+): string | null {
+  for (const batch of batches) {
+    if (batch.id === currentBatchId) continue;
+    if (isActionableSummary(batch.summary)) return batch.id;
+  }
+  return null;
+}
+
+function sortReviewBatches(batches: ReviewBatch[]): ReviewBatch[] {
+  return [...batches].sort((left, right) => {
+    const actionableDelta = Number(isActionableSummary(right.summary)) - Number(isActionableSummary(left.summary));
+    if (actionableDelta !== 0) return actionableDelta;
+
+    const rightUpdated = Date.parse(right.updated_at || '');
+    const leftUpdated = Date.parse(left.updated_at || '');
+    if (Number.isFinite(rightUpdated) && Number.isFinite(leftUpdated) && rightUpdated !== leftUpdated) {
+      return rightUpdated - leftUpdated;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function mergeReviewBatches(current: ReviewBatch[], incoming: ReviewBatch[]): ReviewBatch[] {
+  const merged = new Map(current.map((batch) => [batch.id, batch]));
+  for (const batch of incoming) {
+    merged.set(batch.id, batch);
+  }
+  return sortReviewBatches([...merged.values()]);
+}
+
+function readRequestedBatchId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const batchId = new URLSearchParams(window.location.search).get('batch');
+  return batchId && batchId.trim() ? batchId : null;
+}
+
+function syncRequestedBatchId(batchId: string | null): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (batchId) {
+    url.searchParams.set('batch', batchId);
+  } else {
+    url.searchParams.delete('batch');
+  }
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export default function ReviewInbox() {
   const { t } = useI18n();
   const [batches, setBatches] = useState<ReviewBatch[]>([]);
+  const [syncCursor, setSyncCursor] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewBatchDetail | null>(null);
+  const [detailCache, setDetailCache] = useState<Record<string, ReviewBatchDetail>>({});
   const [draftContent, setDraftContent] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshingBatches, setRefreshingBatches] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const prefetchingBatchIdsRef = useRef<Set<string>>(new Set());
 
   const hydrateDrafts = (items: ReviewItem[]) => {
     setDraftContent((current) => {
@@ -163,26 +371,118 @@ export default function ReviewInbox() {
     });
   };
 
-  const loadBatches = async (preferredBatchId?: string | null) => {
-    setLoading(true);
-    setError(null);
+  const storeDetail = (batchId: string, response: ReviewBatchDetail) => {
+    setDetailCache((current) => ({
+      ...current,
+      [batchId]: response,
+    }));
+  };
+
+  const loadBatches = async (
+    preferredBatchId?: string | null,
+    options?: { background?: boolean; silentError?: boolean; cursor?: string | null },
+  ): Promise<LoadBatchesResult | null> => {
+    const background = options?.background === true;
+    const silentError = options?.silentError === true;
+    const cursor = options?.cursor?.trim() || null;
+    if (background) {
+      setRefreshingBatches(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      const response: any = await listReviewInboxBatchesV2();
-      const items = (response.items || []) as ReviewBatch[];
-      setBatches(items);
-      const nextSelected = preferredBatchId && items.some((item) => item.id === preferredBatchId)
-        ? preferredBatchId
-        : (items[0]?.id || null);
+      const requestParams = cursor ? { cursor } : undefined;
+      const response = await listReviewInboxBatchesV2(requestParams) as ReviewBatchListResponse;
+      if (response.sync?.cursor) {
+        setSyncCursor(response.sync.cursor);
+      }
+      const incomingItems = sortReviewBatches((response.items || []) as ReviewBatch[]);
+
+      if (background && cursor && response.sync?.mode === 'delta') {
+        const currentBatches = batches;
+        const currentBatchIds = new Set(currentBatches.map((batch) => batch.id));
+        const changedIds = new Set(incomingItems.map((batch) => batch.id));
+        const mergedItems = mergeReviewBatches(currentBatches, incomingItems);
+        const newActionableCount = incomingItems.filter((batch) => (
+          !currentBatchIds.has(batch.id) && isActionableSummary(batch.summary)
+        )).length;
+        const selectedBatchChanged = Boolean(preferredBatchId && changedIds.has(preferredBatchId));
+
+        setBatches(mergedItems);
+        if (changedIds.size > 0) {
+          setDetailCache((current) => Object.fromEntries(
+            Object.entries(current).filter(([batchId]) => (
+              !changedIds.has(batchId) || batchId === preferredBatchId
+            )),
+          ));
+        }
+        if (selectedBatchChanged) {
+          setNotice({
+            message: t('reviewInbox.syncCurrentBatchChanged'),
+            type: 'success',
+          });
+        } else if (newActionableCount > 0) {
+          setNotice({
+            message: t('reviewInbox.syncNewPending', { count: newActionableCount }),
+            type: 'success',
+          });
+        }
+
+        return {
+          items: mergedItems,
+          nextSelected: preferredBatchId || selectedBatchId || mergedItems[0]?.id || null,
+          selectionPreserved: Boolean(preferredBatchId),
+        };
+      }
+
+      setBatches(incomingItems);
+      setDetailCache((current) => {
+        const allowedIds = new Set(incomingItems.map((item) => item.id));
+        return Object.fromEntries(
+          Object.entries(current).filter(([batchId]) => allowedIds.has(batchId)),
+        );
+      });
+      const selectionPreserved = Boolean(preferredBatchId && incomingItems.some((item) => item.id === preferredBatchId));
+      const nextSelected = selectionPreserved
+        ? preferredBatchId as string
+        : (incomingItems[0]?.id || null);
       setSelectedBatchId(nextSelected);
+      return {
+        items: incomingItems,
+        nextSelected,
+        selectionPreserved,
+      };
     } catch (loadError) {
-      setError(formatRequestError(t, loadError));
+      const message = formatRequestError(t, loadError);
+      if (background) {
+        if (!silentError) {
+          setNotice({ message, type: 'error' });
+        }
+      } else {
+        setError(message);
+      }
+      return null;
     } finally {
-      setLoading(false);
+      if (background) {
+        setRefreshingBatches(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
-  const loadDetail = async (batchId: string, options?: { preserveCurrent?: boolean }) => {
+  const loadDetail = async (batchId: string, options?: { preserveCurrent?: boolean; forceRefresh?: boolean }) => {
+    const cachedDetail = detailCache[batchId] || null;
+    const forceRefresh = options?.forceRefresh === true;
     const preserveCurrent = options?.preserveCurrent === true && detail?.batch.id === batchId;
+    if (cachedDetail && !forceRefresh) {
+      setDetail(cachedDetail);
+      hydrateDrafts(cachedDetail.items || []);
+      setDetailError(null);
+      setDetailLoading(false);
+      return;
+    }
     setDetailLoading(true);
     setDetailError(null);
     if (!preserveCurrent) {
@@ -191,6 +491,7 @@ export default function ReviewInbox() {
     try {
       const response = await getReviewInboxBatchV2(batchId) as ReviewBatchDetail;
       setDetail(response);
+      storeDetail(batchId, response);
       hydrateDrafts(response.items || []);
     } catch (loadError) {
       setDetailError(formatRequestError(t, loadError));
@@ -203,7 +504,7 @@ export default function ReviewInbox() {
   };
 
   useEffect(() => {
-    void loadBatches();
+    void loadBatches(readRequestedBatchId());
   }, []);
 
   useEffect(() => {
@@ -214,37 +515,128 @@ export default function ReviewInbox() {
     void loadDetail(selectedBatchId);
   }, [selectedBatchId]);
 
+  const actionableItems = useMemo(
+    () => detail?.items.filter((item) => item.status === 'pending' || item.status === 'failed') || [],
+    [detail],
+  );
+  const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
+
+  useEffect(() => {
+    if (error || !selectedBatchId || !selectedDetail) return;
+    const nextBatchId = getNextActionableBatchId(batches, selectedBatchId);
+    if (!nextBatchId) return;
+    if (detailCache[nextBatchId]) return;
+    if (prefetchingBatchIdsRef.current.has(nextBatchId)) return;
+
+    prefetchingBatchIdsRef.current.add(nextBatchId);
+    void (async () => {
+      try {
+        const response = await getReviewInboxBatchV2(nextBatchId) as ReviewBatchDetail;
+        storeDetail(nextBatchId, response);
+      } catch {
+        // Best-effort prefetch should not disrupt the current review flow.
+      } finally {
+        prefetchingBatchIdsRef.current.delete(nextBatchId);
+      }
+    })();
+  }, [batches, selectedBatchId, selectedDetail, error, detailCache]);
+
+  useEffect(() => {
+    if (loading || error) return;
+    syncRequestedBatchId(selectedBatchId);
+  }, [selectedBatchId, loading, error]);
+
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(null), 3000);
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const pendingItems = useMemo(
-    () => detail?.items.filter((item) => item.status === 'pending') || [],
-    [detail],
-  );
-  const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
-
-  const refreshCurrentBatch = async (batchId: string) => {
-    await loadBatches(batchId);
-    await loadDetail(batchId, { preserveCurrent: true });
+  const refreshBatchList = async (options?: {
+    syncCurrentDetail?: boolean;
+    clearNotice?: boolean;
+    silentError?: boolean;
+    incremental?: boolean;
+  }) => {
+    if (loading || refreshingBatches) return;
+    if (options?.clearNotice) {
+      setNotice(null);
+    }
+    const preferredBatchId = selectedBatchId;
+    const result = await loadBatches(preferredBatchId, {
+      background: true,
+      silentError: options?.silentError,
+      cursor: options?.incremental ? syncCursor : null,
+    });
+    if (!result || !preferredBatchId) return;
+    if (
+      options?.syncCurrentDetail &&
+      result.selectionPreserved &&
+      result.nextSelected === preferredBatchId
+    ) {
+      await loadDetail(preferredBatchId, {
+        preserveCurrent: true,
+        forceRefresh: true,
+      });
+    }
   };
 
-  const handleBatchApply = async (payload: {
-    accept_all?: boolean;
-    reject_all?: boolean;
-    item_actions?: Array<{
-      item_id: string;
-      action: 'accept' | 'reject' | 'edit_then_accept';
-      payload_override?: Record<string, unknown>;
-    }>;
-  }) => {
+  const handleRefreshBatches = async () => {
+    await refreshBatchList({
+      syncCurrentDetail: true,
+      clearNotice: true,
+    });
+  };
+
+  useEffect(() => {
+    if (loading || error || applying || refreshingBatches || batches.length === 0) return;
+
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void refreshBatchList({ silentError: true, incremental: true });
+    }, REVIEW_INBOX_AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [loading, error, applying, refreshingBatches, batches.length, selectedBatchId, syncCursor]);
+
+  const handleBatchApply = async (payload: ReviewBatchApplyPayload) => {
     if (!selectedBatchId) return;
     setApplying(true);
     setNotice(null);
     try {
-      const result: any = await applyReviewInboxBatchV2(selectedBatchId, payload);
+      const result = await applyReviewInboxBatchV2(selectedBatchId, payload) as ReviewBatchApplyResult;
+      const updatedBatches = sortReviewBatches(batches.map((batch) => (
+        batch.id === selectedBatchId
+          ? {
+              ...batch,
+              ...(result.batch || {}),
+              summary: result.batch_summary || batch.summary,
+            }
+          : batch
+      )));
+      const updatedCurrentBatch = updatedBatches.find((batch) => batch.id === selectedBatchId) || null;
+      const nextActionableBatchId = updatedCurrentBatch && !isActionableSummary(updatedCurrentBatch.summary)
+        ? getNextActionableBatchId(updatedBatches, selectedBatchId)
+        : null;
+
+      setDetailError(null);
+      setBatches(updatedBatches);
+      setDetail((current) => {
+        if (!current || current.batch.id !== selectedBatchId) return current;
+        const nextDetail = {
+          batch: {
+            ...current.batch,
+            ...(result.batch || {}),
+          },
+          summary: result.batch_summary || current.summary,
+          items: updateItemsFromApplyResult(current.items, payload, result),
+        };
+        storeDetail(selectedBatchId, nextDetail);
+        return nextDetail;
+      });
+      if (nextActionableBatchId) {
+        setSelectedBatchId(nextActionableBatchId);
+      }
       setNotice({
         message: t('reviewInbox.applySuccess', {
           committed: result.summary?.committed ?? 0,
@@ -253,7 +645,6 @@ export default function ReviewInbox() {
         }),
         type: 'success',
       });
-      await refreshCurrentBatch(selectedBatchId);
     } catch (applyError) {
       setNotice({ message: formatRequestError(t, applyError), type: 'error' });
     } finally {
@@ -286,9 +677,19 @@ export default function ReviewInbox() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ margin: 0 }}>{t('reviewInbox.listTitle')}</h3>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              {t('common.total', { count: batches.length })}
-            </span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {t('common.total', { count: batches.length })}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void handleRefreshBatches()}
+                disabled={loading || refreshingBatches}
+              >
+                {refreshingBatches ? t('reviewInbox.refreshingList') : t('reviewInbox.refreshList')}
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -325,7 +726,7 @@ export default function ReviewInbox() {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
                     <span>{formatAgentNameLabel(t, batch.agent_id)}</span>
-                    <span>{t('reviewInbox.pendingSummary', { pending: batch.summary.pending, total: batch.summary.total })}</span>
+                    <span>{formatActionableSummary(t, batch.summary)}</span>
                   </div>
                 </button>
               ))}
@@ -351,7 +752,7 @@ export default function ReviewInbox() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => void loadDetail(selectedBatchId)}
+                  onClick={() => void loadDetail(selectedBatchId, { forceRefresh: true })}
                   disabled={detailLoading}
                 >
                   {t('reviewInbox.retryDetail')}
@@ -378,7 +779,7 @@ export default function ReviewInbox() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => void loadDetail(selectedBatchId, { preserveCurrent: true })}
+                    onClick={() => void loadDetail(selectedBatchId, { preserveCurrent: true, forceRefresh: true })}
                     disabled={detailLoading}
                   >
                     {t('reviewInbox.retryDetail')}
@@ -408,9 +809,9 @@ export default function ReviewInbox() {
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={applying || pendingItems.length === 0}
+                    disabled={applying || actionableItems.length === 0}
                     onClick={() => void handleBatchApply({
-                      item_actions: pendingItems.map((item) => buildAcceptAction(item, draftContent)),
+                      item_actions: actionableItems.map((item) => buildAcceptAction(item, draftContent)),
                     })}
                   >
                     {applying ? t('reviewInbox.applying') : t('reviewInbox.actionAcceptAll')}
@@ -418,7 +819,7 @@ export default function ReviewInbox() {
                   <button
                     type="button"
                     className="btn"
-                    disabled={applying || pendingItems.length === 0}
+                    disabled={applying || actionableItems.length === 0}
                     onClick={() => void handleBatchApply({ reject_all: true })}
                   >
                     {t('reviewInbox.actionRejectAll')}
@@ -427,17 +828,14 @@ export default function ReviewInbox() {
               </div>
 
               <div style={{ marginBottom: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-                {t('reviewInbox.pendingSummary', {
-                  pending: selectedDetail.summary.pending,
-                  total: selectedDetail.summary.total,
-                })}
+                {formatActionableSummary(t, selectedDetail.summary)}
               </div>
 
-              {pendingItems.length === 0 ? (
+              {actionableItems.length === 0 ? (
                 <div className="empty">{t('reviewInbox.emptyItems')}</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {pendingItems.map((item) => {
+                  {actionableItems.map((item) => {
                     const content = getVisibleDraft(item, draftContent);
                     const originalContent = getPayloadContent(item);
                     const warnings = Array.isArray(item.payload.warnings)
@@ -469,12 +867,26 @@ export default function ReviewInbox() {
                                 {formatSourceTypeLabel(t, item.payload.source_type)}
                               </span>
                             )}
+                            {item.status === 'failed' && (
+                              <span className="badge" style={{ background: 'rgba(239,68,68,0.15)', color: '#fca5a5' }}>
+                                {t('reviewInbox.statusFailed')}
+                              </span>
+                            )}
                           </div>
                         </div>
 
                         <div style={{ marginBottom: 10, fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>
                           <strong>{t('reviewInbox.suggestedReason')}:</strong> {item.suggested_reason}
                         </div>
+
+                        {item.status === 'failed' && (
+                          <div style={{ marginBottom: 10, fontSize: 12, color: '#fca5a5', lineHeight: 1.7 }}>
+                            <strong>{t('reviewInbox.failedMessage')}:</strong> {item.error_message || 'commit_failed'}
+                            <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>
+                              {t('reviewInbox.failedHint')}
+                            </div>
+                          </div>
+                        )}
 
                         {item.suggested_rewrite && (
                           <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7 }}>
@@ -525,7 +937,7 @@ export default function ReviewInbox() {
                               item_actions: [buildAcceptAction(item, draftContent)],
                             })}
                           >
-                            {t('reviewInbox.actionAccept')}
+                            {item.status === 'failed' ? t('reviewInbox.actionRetry') : t('reviewInbox.actionAccept')}
                           </button>
                           <button
                             type="button"

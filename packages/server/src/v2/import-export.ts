@@ -455,7 +455,7 @@ async function buildPreviewFromSegments(
   let carry: PreviewCarryContext = {};
 
   for (const segment of segments) {
-    const normalizedCandidates = await recordsV2.previewImportCandidates({
+    const candidateDetails = await recordsV2.previewImportCandidateDetails({
       agent_id: agentId,
       content: segment.content,
       requested_kind: shouldApplyRequestedKindHint(segment.content, segment.requested_kind)
@@ -465,13 +465,13 @@ async function buildPreviewFromSegments(
       carry_context: carry,
     });
 
-    for (const normalized of normalizedCandidates) {
-      carry = updatePreviewCarryContext(carry, normalized);
+    for (const detail of candidateDetails) {
+      carry = updatePreviewCarryContext(carry, detail.candidate);
       recordCandidates.push(previewRecordFromNormalized(
-        normalized,
+        detail.candidate,
         recordCandidates.length,
-        segment.content,
-        normalizeEvidence(undefined, segment.content, 'user_confirmed'),
+        detail.source_excerpt,
+        normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
       ));
     }
   }

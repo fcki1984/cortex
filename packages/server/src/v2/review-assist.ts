@@ -30,10 +30,10 @@ function supportsRewriteSourceType(sourceType: string | null): boolean {
   return sourceType === 'user_explicit' || sourceType === 'user_confirmed';
 }
 
-function buildSuggestedRewrite(payload: ReviewRecordPayload): string | null {
-  const sourceText = asString(payload.source_excerpt) || asString(payload.content);
-  if (!sourceText) return null;
-
+function canonicalRewriteFromText(
+  payload: ReviewRecordPayload,
+  sourceText: string,
+): string | null {
   const normalizedKind = asString(payload.normalized_kind);
   const attributeKey = asString(payload.attribute_key);
   const ownerScope = asString(payload.owner_scope) === 'agent' ? 'agent' : 'user';
@@ -85,6 +85,18 @@ function buildSuggestedRewrite(payload: ReviewRecordPayload): string | null {
   }
 
   return null;
+}
+
+function buildSuggestedRewrite(payload: ReviewRecordPayload): string | null {
+  const normalizedContent = asString(payload.content);
+  if (normalizedContent) {
+    const rewriteFromCandidate = canonicalRewriteFromText(payload, normalizedContent);
+    if (rewriteFromCandidate) return rewriteFromCandidate;
+  }
+
+  const sourceText = asString(payload.source_excerpt);
+  if (!sourceText) return null;
+  return canonicalRewriteFromText(payload, sourceText);
 }
 
 function fallbackRecordSuggestion(payload: ReviewRecordPayload): ReviewAssistSuggestion {

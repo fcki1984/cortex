@@ -143,7 +143,13 @@ export function deleteAgent(id: string): { deleted: boolean; orphaned_memories: 
 
   const db = getDb();
   const memoryCount = (db.prepare('SELECT COUNT(*) as cnt FROM memories WHERE agent_id = ?').get(id) as any).cnt;
-  const result = db.prepare('DELETE FROM agents WHERE id = ?').run(id);
+  const deleteReviewBatches = db.prepare('DELETE FROM review_batches_v2 WHERE agent_id = ?');
+  const deleteAgentRow = db.prepare('DELETE FROM agents WHERE id = ?');
+  const runDelete = db.transaction((agentId: string) => {
+    deleteReviewBatches.run(agentId);
+    return deleteAgentRow.run(agentId);
+  });
+  const result = runDelete(id);
 
   return { deleted: result.changes > 0, orphaned_memories: memoryCount };
 }

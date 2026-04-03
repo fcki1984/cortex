@@ -124,9 +124,14 @@ function downloadFile(content: string, filename: string, type: string): void {
 function Notice({
   message,
   type,
+  action,
 }: {
   message: string;
   type: 'success' | 'error';
+  action?: {
+    label: string;
+    href: string;
+  } | null;
 }) {
   return (
     <div
@@ -140,7 +145,18 @@ function Notice({
         border: `1px solid ${type === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
       }}
     >
-      {message}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span>{message}</span>
+        {action ? (
+          <a
+            href={action.href}
+            className="btn"
+            style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}
+          >
+            {action.label}
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -215,6 +231,14 @@ function formatExportFormatLabel(t: (key: string, params?: Record<string, string
   return format === 'memory_md' ? 'MEMORY.md' : 'JSON';
 }
 
+function formatInlinePreview(text: string | undefined | null, maxLength = 72): string | null {
+  if (!text) return null;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
 export default function ImportExport() {
   const { t } = useI18n();
   const [tab, setTab] = useState<'import' | 'export'>('import');
@@ -235,7 +259,14 @@ export default function ImportExport() {
   const [sendingToInbox, setSendingToInbox] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
-  const [notice, setNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [notice, setNotice] = useState<{
+    message: string;
+    type: 'success' | 'error';
+    action?: {
+      label: string;
+      href: string;
+    } | null;
+  } | null>(null);
   const fileInputId = useId();
 
   const loadAgents = async () => {
@@ -468,11 +499,23 @@ export default function ImportExport() {
       });
       setPreview(null);
       setConfirmResult(null);
+      const sourcePreview = formatInlinePreview(result.source_preview);
       setNotice({
-        message: t('importExport.reviewInboxCreated', {
-          count: result.summary?.pending ?? result.summary?.total ?? 0,
-        }),
+        message: sourcePreview
+          ? t('importExport.reviewInboxCreatedWithPreview', {
+              count: result.summary?.pending ?? result.summary?.total ?? 0,
+              preview: sourcePreview,
+            })
+          : t('importExport.reviewInboxCreated', {
+              count: result.summary?.pending ?? result.summary?.total ?? 0,
+            }),
         type: 'success',
+        action: typeof result.batch_id === 'string' && result.batch_id
+          ? {
+              label: t('importExport.reviewInboxOpenBatch'),
+              href: `/review-inbox?batch=${encodeURIComponent(result.batch_id)}`,
+            }
+          : null,
       });
     } catch (error: any) {
       setNotice({ message: formatRequestError(t, error), type: 'error' });
@@ -485,7 +528,7 @@ export default function ImportExport() {
     <div>
       <h1 className="page-title">{t('nav.importExport')}</h1>
 
-      {notice && <Notice message={notice.message} type={notice.type} />}
+      {notice && <Notice message={notice.message} type={notice.type} action={notice.action} />}
 
       {agentsError && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(239,68,68,0.35)' }}>

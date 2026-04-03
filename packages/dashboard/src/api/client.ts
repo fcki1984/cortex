@@ -291,6 +291,7 @@ export const listReviewInboxBatchesV2 = (params?: {
   source_kind?: 'live_ingest' | 'import_preview';
   limit?: number | string;
   offset?: number | string;
+  cursor?: string;
 }) => {
   const qs = new URLSearchParams();
   if (params?.agent_id) qs.set('agent_id', params.agent_id);
@@ -298,6 +299,7 @@ export const listReviewInboxBatchesV2 = (params?: {
   if (params?.source_kind) qs.set('source_kind', params.source_kind);
   if (params?.limit != null) qs.set('limit', String(params.limit));
   if (params?.offset != null) qs.set('offset', String(params.offset));
+  if (params?.cursor) qs.set('cursor', params.cursor);
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return request(`${V2.reviewInbox}${suffix}`);
 };

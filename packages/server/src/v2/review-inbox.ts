@@ -28,6 +28,7 @@ type ReviewBatchRow = {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  sync_cursor: number;
 };
 
 type ReviewItemRow = {
@@ -68,12 +69,17 @@ type ReviewBatchSummary = {
   failed: number;
 };
 
-type ReviewBatch = Omit<ReviewBatchRow, 'conversation_ref_id' | 'session_id' | 'import_format' | 'source_label' | 'resolved_at'> & {
+type ReviewBatch = Omit<ReviewBatchRow, 'conversation_ref_id' | 'session_id' | 'import_format' | 'source_label' | 'resolved_at' | 'sync_cursor'> & {
   conversation_ref_id?: string | null;
   session_id?: string | null;
   import_format?: ImportFormat | null;
   source_label?: string | null;
   resolved_at?: string | null;
+};
+
+type ReviewBatchSync = {
+  cursor: string;
+  mode: 'full' | 'delta';
 };
 
 type ReviewItem = Omit<ReviewItemRow, 'payload_json' | 'committed_record_id' | 'committed_relation_id' | 'error_message'> & {
@@ -112,14 +118,16 @@ function summarize(items: ReviewItem[]): ReviewBatchSummary {
 
 function resolveBatchStatus(summary: ReviewBatchSummary): ReviewBatchStatus {
   if (summary.pending === summary.total) return 'pending';
-  if (summary.pending > 0) return 'partially_applied';
+  if (summary.pending > 0 || summary.failed > 0) return 'partially_applied';
   if (summary.accepted === 0 && summary.failed === 0) return 'dismissed';
   return 'completed';
 }
 
 function inflateBatch(row: ReviewBatchRow): ReviewBatch {
+  const { sync_cursor, ...rest } = row;
+  void sync_cursor;
   return {
-    ...row,
+    ...rest,
     conversation_ref_id: row.conversation_ref_id,
     session_id: row.session_id,
     import_format: row.import_format,
@@ -176,6 +184,60 @@ function buildImportItems(preview: {
   ];
 }
 
+function payloadSourceExcerpt(payload: Record<string, unknown>): string {
+  return typeof payload.source_excerpt === 'string' ? payload.source_excerpt.trim() : '';
+}
+
+function deriveReviewSourcePreviewFromPayloads(
+  payloads: Record<string, unknown>[],
+  fallback: string,
+): string {
+  const excerpts: string[] = [];
+  const seen = new Set<string>();
+
+  for (const payload of payloads) {
+    const sourceExcerpt = payloadSourceExcerpt(payload);
+    if (!sourceExcerpt || seen.has(sourceExcerpt)) continue;
+    seen.add(sourceExcerpt);
+    excerpts.push(sourceExcerpt);
+  }
+
+  if (excerpts.length > 0) {
+    return excerpts.join('\n');
+  }
+
+  return fallback.trim();
+}
+
+function deriveReviewSourcePreview(
+  items: ReviewBatchItemInput[],
+  fallback: string,
+): string {
+  return deriveReviewSourcePreviewFromPayloads(items.map(item => item.payload), fallback);
+}
+
+function deriveActionableReviewSourcePreview(
+  items: ReviewItem[],
+  fallback: string,
+): string {
+  return deriveReviewSourcePreviewFromPayloads(
+    items
+      .filter(item => item.status === 'pending' || item.status === 'failed')
+      .map(item => item.payload),
+    fallback,
+  );
+}
+
+function encodeReviewInboxCursor(value: number): string {
+  return String(Math.max(0, value));
+}
+
+function decodeReviewInboxCursor(cursor?: string): number | null {
+  if (!cursor?.trim()) return null;
+  const parsed = Number.parseInt(cursor, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export class CortexReviewInboxV2 {
   constructor(
     private readonly recordsV2: CortexRecordsV2,
@@ -195,19 +257,28 @@ export class CortexReviewInboxV2 {
 
   private updateBatchStatus(batchId: string): ReviewBatch {
     const db = getDb();
+    const existingRow = db.prepare('SELECT * FROM review_batches_v2 WHERE id = ?').get(batchId) as ReviewBatchRow | undefined;
+    if (!existingRow) {
+      throw new Error('Review batch not found');
+    }
     const items = this.listItemsByBatchId(batchId);
     const summary = summarize(items);
     const status = resolveBatchStatus(summary);
     const now = new Date().toISOString();
+    const sourcePreview = deriveActionableReviewSourcePreview(items, existingRow.source_preview).slice(0, 500);
+
+    const syncCursor = this.allocateSyncCursor();
 
     db.prepare(`
       UPDATE review_batches_v2
-      SET status = ?, updated_at = ?, resolved_at = ?
+      SET status = ?, updated_at = ?, resolved_at = ?, source_preview = ?, sync_cursor = ?
       WHERE id = ?
     `).run(
       status,
       now,
       summary.pending === 0 ? now : null,
+      sourcePreview,
+      syncCursor,
       batchId,
     );
 
@@ -216,6 +287,14 @@ export class CortexReviewInboxV2 {
       throw new Error('Review batch not found');
     }
     return inflateBatch(row);
+  }
+
+  private allocateSyncCursor(): number {
+    const db = getDb();
+    const result = db.prepare(`
+      INSERT INTO review_batch_sync_seq_v2 DEFAULT VALUES
+    `).run();
+    return Number(result.lastInsertRowid);
   }
 
   private updateItemOutcome(input: {
@@ -277,7 +356,7 @@ export class CortexReviewInboxV2 {
       input.session_id || null,
       input.import_format || null,
       input.source_label || null,
-      input.source_preview.slice(0, 500),
+      deriveReviewSourcePreview(input.items, input.source_preview).slice(0, 500),
       now,
       now,
     );
@@ -375,9 +454,14 @@ export class CortexReviewInboxV2 {
     source_kind?: ReviewSourceKind;
     limit?: number;
     offset?: number;
-  } = {}): { items: Array<ReviewBatch & { summary: ReviewBatchSummary }>; total: number } {
+    cursor?: string;
+  } = {}): {
+    items: Array<ReviewBatch & { summary: ReviewBatchSummary }>;
+    total: number;
+    sync: ReviewBatchSync;
+  } {
     const db = getDb();
-    const conditions: string[] = [];
+    const conditions: string[] = ['EXISTS (SELECT 1 FROM agents WHERE agents.id = review_batches_v2.agent_id)'];
     const params: unknown[] = [];
 
     if (opts.agent_id) {
@@ -396,17 +480,32 @@ export class CortexReviewInboxV2 {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = opts.limit || 50;
     const offset = opts.offset || 0;
+    const cursorValue = decodeReviewInboxCursor(opts.cursor);
     const total = (db.prepare(`SELECT COUNT(*) as cnt FROM review_batches_v2 ${where}`).get(...params) as { cnt: number }).cnt;
+    const cursorRow = db.prepare(`
+      SELECT COALESCE(MAX(sync_cursor), 0) as cursor
+      FROM review_batches_v2
+      ${where}
+    `).get(...params) as { cursor: number | null };
+
+    const listConditions = [...conditions];
+    const listParams = [...params];
+    if (cursorValue != null) {
+      listConditions.push('sync_cursor > ?');
+      listParams.push(cursorValue);
+    }
+
+    const listWhere = listConditions.length > 0 ? `WHERE ${listConditions.join(' AND ')}` : '';
     const rows = db.prepare(`
       SELECT *
       FROM review_batches_v2
-      ${where}
+      ${listWhere}
       ORDER BY
         CASE status WHEN 'pending' THEN 0 WHEN 'partially_applied' THEN 1 WHEN 'completed' THEN 2 ELSE 3 END,
         updated_at DESC,
         created_at DESC
       LIMIT ? OFFSET ?
-    `).all(...params, limit, offset) as ReviewBatchRow[];
+    `).all(...listParams, limit, offset) as ReviewBatchRow[];
 
     return {
       items: rows.map((row) => {
@@ -417,12 +516,21 @@ export class CortexReviewInboxV2 {
         };
       }),
       total,
+      sync: {
+        cursor: encodeReviewInboxCursor(cursorRow.cursor ?? 0),
+        mode: cursorValue == null ? 'full' : 'delta',
+      },
     };
   }
 
   getBatch(id: string): { batch: ReviewBatch; items: ReviewItem[]; summary: ReviewBatchSummary } | null {
     const db = getDb();
-    const row = db.prepare('SELECT * FROM review_batches_v2 WHERE id = ?').get(id) as ReviewBatchRow | undefined;
+    const row = db.prepare(`
+      SELECT *
+      FROM review_batches_v2
+      WHERE id = ?
+        AND EXISTS (SELECT 1 FROM agents WHERE agents.id = review_batches_v2.agent_id)
+    `).get(id) as ReviewBatchRow | undefined;
     if (!row) return null;
     const items = this.listItemsByBatchId(id);
     return {
@@ -443,6 +551,7 @@ export class CortexReviewInboxV2 {
       rejected: number;
       failed: number;
     };
+    batch_summary: ReviewBatchSummary;
     committed: Array<Record<string, unknown>>;
     rejected: Array<Record<string, unknown>>;
     failed: Array<Record<string, unknown>>;
@@ -461,7 +570,7 @@ export class CortexReviewInboxV2 {
     const itemIdByCandidateId = new Map<string, string>();
 
     for (const item of batchDetail.items) {
-      if (item.status !== 'pending') continue;
+      if (item.status !== 'pending' && item.status !== 'failed') continue;
 
       const override = actionMap.get(item.id);
       const resolvedAction = input.reject_all
@@ -560,6 +669,7 @@ export class CortexReviewInboxV2 {
         rejected: rejected.length,
         failed: failed.length,
       },
+      batch_summary: summary,
       committed,
       rejected,
       failed,

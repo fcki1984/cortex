@@ -102,6 +102,12 @@ type CandidateOrigin = 'fast' | 'deep' | 'deterministic' | 'fallback';
 type CollectedCandidateDetail = {
   candidate: NormalizedRecordCandidate;
   origins: CandidateOrigin[];
+  source_excerpt: string;
+};
+
+export type PreviewImportCandidateDetail = {
+  candidate: NormalizedRecordCandidate;
+  source_excerpt: string;
 };
 
 type IngestDetailDisposition = 'auto_commit' | 'review' | 'note';
@@ -187,11 +193,12 @@ function mergeCandidateDetails(
   merged: Map<string, CollectedCandidateDetail>,
   candidate: NormalizedRecordCandidate,
   origin: CandidateOrigin,
+  sourceExcerpt: string,
 ): void {
   const key = dedupeKey(candidate);
   const existing = merged.get(key);
   if (!existing) {
-    merged.set(key, { candidate, origins: [origin] });
+    merged.set(key, { candidate, origins: [origin], source_excerpt: sourceExcerpt });
     return;
   }
 
@@ -202,20 +209,26 @@ function mergeCandidateDetails(
   merged.set(key, {
     candidate: nextPriority >= existingPriority ? candidate : existing.candidate,
     origins,
+    source_excerpt: existing.source_excerpt,
   });
 }
 
 function filterRedundantSessionNoteDetails(
   details: CollectedCandidateDetail[],
   deterministic: NormalizedRecordCandidate | null,
+  sourceContent?: string,
 ): CollectedCandidateDetail[] {
-  if (!deterministic) return details;
-  const deterministicText = candidateText(deterministic).trim();
-  if (!deterministicText) return details;
+  const deterministicText = deterministic ? candidateText(deterministic).trim() : '';
+  const sourceText = sourceContent?.trim() || '';
+  const hasDurableDetail = details.some((detail) => detail.candidate.written_kind !== 'session_note');
+  if (!deterministicText && !(hasDurableDetail && sourceText)) return details;
 
   return details.filter((detail) => {
     if (detail.candidate.written_kind !== 'session_note') return true;
-    return candidateText(detail.candidate).trim() !== deterministicText;
+    const detailText = candidateText(detail.candidate).trim();
+    if (deterministicText && detailText === deterministicText) return false;
+    if (hasDurableDetail && sourceText && detailText === sourceText) return false;
+    return true;
   });
 }
 
@@ -227,7 +240,41 @@ function preferDeterministicAtomicDetail(
 
   const deterministicKey = dedupeKey(deterministic);
   const winner = details.find((detail) => dedupeKey(detail.candidate) === deterministicKey);
-  return [winner || { candidate: deterministic, origins: ['deterministic'] }];
+  return [winner || {
+    candidate: deterministic,
+    origins: ['deterministic'],
+    source_excerpt: candidateText(deterministic),
+  }];
+}
+
+function scopeReviewEvidenceToSourceExcerpt(
+  evidence: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }>,
+  sourceExcerpt: string,
+): Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }> {
+  const scoped: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }> = [];
+
+  for (const entry of evidence) {
+    const content = (entry.role === 'user' ? sourceExcerpt : entry.content).trim();
+    if (!content) continue;
+
+    const next = {
+      ...entry,
+      content,
+    };
+    const previous = scoped[scoped.length - 1];
+    if (
+      previous &&
+      previous.role === next.role &&
+      previous.content === next.content &&
+      previous.conversation_ref_id === next.conversation_ref_id
+    ) {
+      continue;
+    }
+
+    scoped.push(next);
+  }
+
+  return scoped;
 }
 
 function buildReviewRecordCandidate(
@@ -272,12 +319,52 @@ function buildReviewRecordCandidate(
     purge_after: candidate.kind === 'session_note' ? candidate.purge_after || null : undefined,
     source_excerpt: sourceExcerpt,
     warnings: normalized.reason_code ? [normalized.reason_code] : [],
-    evidence,
+    evidence: scopeReviewEvidenceToSourceExcerpt(evidence, sourceExcerpt),
   };
+}
+
+function isSharedContractAutoCommitSafeCandidate(normalized: NormalizedRecordCandidate): boolean {
+  if (normalized.written_kind === 'session_note') return false;
+
+  const record = normalized.candidate;
+  const content = candidateText(normalized).trim();
+  if (!content) return false;
+
+  const decision = resolveAtomicContractDecision(
+    content,
+    record.kind === 'profile_rule' ? record.owner_scope : 'user',
+  );
+  if (decision.speculative || decision.requested_kind !== record.kind) return false;
+
+  if (record.kind === 'profile_rule') {
+    if (record.owner_scope !== 'user' || record.subject_key !== 'user') return false;
+    if (!COLLOQUIAL_PROFILE_RULE_KEYS.has(record.attribute_key)) return false;
+    if (decision.attribute_key !== record.attribute_key) return false;
+  } else if (record.kind === 'fact_slot') {
+    if (decision.attribute_key !== record.attribute_key) return false;
+  } else if (record.kind === 'task_state') {
+    if (decision.state_key !== record.state_key) return false;
+  } else {
+    return false;
+  }
+
+  const renormalized = normalizeManualInput(record.agent_id, {
+    content,
+    source_type: record.source_type,
+    session_id: undefined,
+  });
+
+  return (
+    renormalized.written_kind === record.kind &&
+    renormalized.candidate.kind === record.kind &&
+    stableContractKey(renormalized) === stableContractKey(normalized) &&
+    candidateText(renormalized).trim() === content
+  );
 }
 
 function classifyIngestDetailDisposition(detail: CollectedCandidateDetail): IngestDetailDisposition {
   if (detail.candidate.written_kind === 'session_note') return 'note';
+  if (isSharedContractAutoCommitSafeCandidate(detail.candidate)) return 'auto_commit';
   if (detail.origins.includes('deterministic') || detail.origins.includes('fast')) return 'auto_commit';
   return 'review';
 }
@@ -502,16 +589,30 @@ function revalidateDeepDurableCandidate(input: {
   if (shouldRejectWeakColloquialProfileRuleCandidate(input.content, input.candidate)) return null;
 
   const record = input.candidate.candidate;
+  const candidateContent = candidateText(input.candidate).trim();
   const revalidated = normalizeManualInput(input.agent_id, {
     kind: input.candidate.requested_kind,
-    content: candidateText(input.candidate),
+    content: candidateContent,
     source_type: record.source_type,
     tags: record.tags,
     priority: record.priority,
     session_id: input.session_id,
     owner_scope: record.kind === 'profile_rule' ? record.owner_scope : undefined,
+    subject_key: record.kind === 'profile_rule'
+      ? record.subject_key
+      : record.kind === 'task_state'
+        ? record.subject_key
+        : undefined,
+    attribute_key: record.kind === 'profile_rule'
+      ? record.attribute_key
+      : record.kind === 'fact_slot'
+        ? record.attribute_key
+        : undefined,
     status: record.kind === 'task_state' ? record.status : undefined,
-    entity_key: record.kind === 'fact_slot' ? input.carry_context?.entity_key : undefined,
+    entity_key: record.kind === 'fact_slot'
+      ? (record.entity_key || input.carry_context?.entity_key)
+      : undefined,
+    state_key: record.kind === 'task_state' ? record.state_key : undefined,
   });
   if (revalidated.written_kind === 'session_note') return null;
   if (stableContractKey(revalidated) !== stableContractKey(input.candidate)) return null;
@@ -528,6 +629,7 @@ function revalidateDeepDurableCandidate(input: {
   }
 
   if (isSpeculativeContent(input.content)) return null;
+  if (candidateContent === input.content.trim()) return null;
   return revalidated;
 }
 
@@ -897,23 +999,23 @@ export class CortexRecordsV2 {
 
     const merged = new Map<string, CollectedCandidateDetail>();
     for (const candidate of fast) {
-      mergeCandidateDetails(merged, candidate, 'fast');
+      mergeCandidateDetails(merged, candidate, 'fast', input.content);
     }
     for (const candidate of validatedDeep) {
-      mergeCandidateDetails(merged, candidate, 'deep');
+      mergeCandidateDetails(merged, candidate, 'deep', input.content);
     }
     if (deterministic) {
-      mergeCandidateDetails(merged, deterministic, 'deterministic');
+      mergeCandidateDetails(merged, deterministic, 'deterministic', input.content);
     }
 
     const mergedCandidateDetails = preferDeterministicAtomicDetail(
-      filterRedundantSessionNoteDetails(Array.from(merged.values()), deterministic),
+      filterRedundantSessionNoteDetails(Array.from(merged.values()), deterministic, input.content),
       deterministic,
     );
 
     return {
       candidateDetails: mergedCandidateDetails.length === 0 && deep.length > 0 && validatedDeep.length === 0 && hintedFallback.written_kind === 'session_note'
-        ? [{ candidate: hintedFallback, origins: ['fallback'] }]
+        ? [{ candidate: hintedFallback, origins: ['fallback'], source_excerpt: input.content }]
         : mergedCandidateDetails,
       hintedFallback,
     };
@@ -987,7 +1089,7 @@ export class CortexRecordsV2 {
 
       let clauseCandidateDetails: CollectedCandidateDetail[] = [];
       if (deterministic) {
-        clauseCandidateDetails = [{ candidate: deterministic, origins: ['deterministic'] }];
+        clauseCandidateDetails = [{ candidate: deterministic, origins: ['deterministic'], source_excerpt: clause }];
       } else {
         const clauseExchange = {
           user: clause,
@@ -1081,6 +1183,50 @@ export class CortexRecordsV2 {
     }
 
     return candidates;
+  }
+
+  async previewImportCandidateDetails(input: {
+    agent_id: string;
+    content: string;
+    requested_kind?: RecordKind;
+    source_type?: SourceType;
+    session_id?: string;
+    carry_context?: ClauseCarryContext;
+  }): Promise<PreviewImportCandidateDetail[]> {
+    const content = stripInjectedContent(input.content || '').trim();
+    if (!content) return [];
+
+    const exchange = {
+      user: content,
+      assistant: '',
+      messages: [{ role: 'user' as const, content }],
+    };
+    const { candidateDetails, hintedFallback } = await this.collectExchangeCandidateDetails({
+      agent_id: input.agent_id,
+      content,
+      exchange,
+      requested_kind: input.requested_kind,
+      source_type: input.source_type || 'user_confirmed',
+      session_id: input.session_id,
+      carry_context: input.carry_context,
+    });
+
+    if (candidateDetails.length === 0) {
+      return [{ candidate: hintedFallback, source_excerpt: content }];
+    }
+
+    if (
+      input.requested_kind &&
+      hintedFallback.written_kind !== 'session_note' &&
+      candidateDetails.every(detail => detail.candidate.written_kind === 'session_note')
+    ) {
+      return [{ candidate: hintedFallback, source_excerpt: content }];
+    }
+
+    return candidateDetails.map(detail => ({
+      candidate: detail.candidate,
+      source_excerpt: detail.source_excerpt,
+    }));
   }
 
   async initialize(): Promise<void> {
@@ -1225,6 +1371,7 @@ export class CortexRecordsV2 {
           candidateDetails = priorAssistantProposalDurables.map((candidate) => ({
             candidate,
             origins: ['deterministic'],
+            source_excerpt: user,
           }));
         } else {
           confirmationProposal = null;
@@ -1253,6 +1400,7 @@ export class CortexRecordsV2 {
             candidateDetails = [{
               candidate: rewritten,
               origins: ['deterministic'],
+              source_excerpt: user,
             }];
             proposalEvidence = priorAssistantProposal;
           }
@@ -1264,6 +1412,7 @@ export class CortexRecordsV2 {
           candidateDetails = [{
             candidate: selective.candidate,
             origins: ['deterministic'],
+            source_excerpt: user,
           }];
           proposalEvidence = priorAssistantProposal;
         } else if (selective?.action === 'drop_all') {
@@ -1277,6 +1426,7 @@ export class CortexRecordsV2 {
           candidateDetails = [{
             candidate: downgraded,
             origins: ['deterministic'],
+            source_excerpt: user,
           }];
           proposalEvidence = priorAssistantProposal;
         } else if (normalizedCandidates.length === 0 && isShortUserProposalRejection(user)) {
@@ -1290,6 +1440,7 @@ export class CortexRecordsV2 {
           candidateDetails = [{
             candidate: rejected,
             origins: ['deterministic'],
+            source_excerpt: user,
           }];
           proposalEvidence = priorAssistantProposal;
         }
@@ -1302,6 +1453,7 @@ export class CortexRecordsV2 {
         candidateDetails = [{
           candidate: hintedFallback,
           origins: ['deterministic'],
+          source_excerpt: user,
         }];
       } else if (user.length >= 12) {
         const fallback = normalizeManualInput(agentId, {
@@ -1319,6 +1471,7 @@ export class CortexRecordsV2 {
         candidateDetails = [{
           candidate: normalizedCandidates[0]!,
           origins: ['fallback'],
+          source_excerpt: user,
         }];
       }
     }
@@ -1369,7 +1522,7 @@ export class CortexRecordsV2 {
       reviewRecordCandidates.push(buildReviewRecordCandidate(
         detail.candidate,
         index,
-        user,
+        detail.source_excerpt,
         evidence,
       ));
     }

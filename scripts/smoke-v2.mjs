@@ -188,6 +188,7 @@ async function runRound(round) {
   const compoundAgentId = `${probeAgentId}-compound`;
   const conflictAgentId = `${probeAgentId}-conflict`;
   const organizationVariantAgentId = `${probeAgentId}-org`;
+  const reviewImportAgentId = `${probeAgentId}-review`;
   const cleanupAgentIds = [
     probeAgentId,
     roundtripSourceAgentId,
@@ -196,6 +197,7 @@ async function runRound(round) {
     compoundAgentId,
     conflictAgentId,
     organizationVariantAgentId,
+    reviewImportAgentId,
   ];
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus, smokePhase } = {}) {
@@ -447,6 +449,80 @@ async function runRound(round) {
     assert((preview.json?.relation_candidates || []).some((item) => item.predicate === 'lives_in'), 'text import preview did not derive lives_in');
     logStep('import preview', 'text contract looks correct');
 
+    const reviewInboxImport = await request('create review inbox import batch', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: reviewImportAgentId,
+        format: 'text',
+        content: '回答控制在三句话内',
+      },
+    });
+    assert(reviewInboxImport.response.status === 201, `POST /api/v2/review-inbox/import returned ${reviewInboxImport.response.status}`);
+    assert(reviewInboxImport.json?.summary?.pending === 1, 'review inbox import did not create exactly one pending item');
+    const reviewImportBatchId = reviewInboxImport.json?.batch_id;
+    assert(typeof reviewImportBatchId === 'string' && reviewImportBatchId.length > 0, 'review inbox import did not return batch_id');
+
+    const reviewInboxListFull = await request('list review inbox batches (full)', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewImportAgentId)}&limit=20`, {
+      retryable: true,
+    });
+    assert(reviewInboxListFull.response.status === 200, `GET /api/v2/review-inbox full returned ${reviewInboxListFull.response.status}`);
+    assert(reviewInboxListFull.json?.sync?.mode === 'full', 'review inbox full list did not return sync.mode=full');
+    assert(typeof reviewInboxListFull.json?.sync?.cursor === 'string' && reviewInboxListFull.json.sync.cursor.length > 0, 'review inbox full list did not return sync cursor');
+    assert((reviewInboxListFull.json?.items || []).some((item) => item.id === reviewImportBatchId), 'review inbox full list did not include created batch');
+
+    const reviewInboxDetail = await request('get review inbox batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}`, {
+      retryable: true,
+    });
+    assert(reviewInboxDetail.response.status === 200, `GET /api/v2/review-inbox/:id returned ${reviewInboxDetail.response.status}`);
+    assert(reviewInboxDetail.json?.summary?.pending === 1, 'review inbox detail did not preserve pending summary');
+    assert(reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请把回答控制在三句话内', 'review inbox detail did not preserve canonical suggested rewrite');
+
+    const reviewInboxApply = await request('apply review inbox batch', 'POST', `/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}/apply`, {
+      body: {
+        accept_all: true,
+      },
+    });
+    assert(reviewInboxApply.response.status === 200, `POST /api/v2/review-inbox/:id/apply returned ${reviewInboxApply.response.status}`);
+    assert(reviewInboxApply.json?.summary?.committed === 1, 'review inbox apply did not commit exactly one item');
+    assert(reviewInboxApply.json?.remaining_pending === 0, 'review inbox apply left pending items behind');
+
+    const reviewInboxRecords = await request('list review inbox committed records', 'GET', `/api/v2/records${query({
+      agent_id: reviewImportAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(reviewInboxRecords.response.status === 200, `GET /api/v2/records review inbox returned ${reviewInboxRecords.response.status}`);
+    assert((reviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内'), 'review inbox apply did not write the canonical record');
+
+    const reviewInboxDeltaBase = await request('list review inbox batches after apply', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewImportAgentId)}&limit=20`, {
+      retryable: true,
+    });
+    assert(reviewInboxDeltaBase.response.status === 200, `GET /api/v2/review-inbox delta base returned ${reviewInboxDeltaBase.response.status}`);
+    assert(reviewInboxDeltaBase.json?.sync?.mode === 'full', 'review inbox delta base list did not return sync.mode=full');
+    assert(typeof reviewInboxDeltaBase.json?.sync?.cursor === 'string' && reviewInboxDeltaBase.json.sync.cursor.length > 0, 'review inbox delta base list did not return sync cursor');
+
+    const reviewInboxDeltaImport = await request('create second review inbox import batch', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: reviewImportAgentId,
+        format: 'text',
+        content: '不要复杂方案',
+      },
+    });
+    assert(reviewInboxDeltaImport.response.status === 201, `POST /api/v2/review-inbox/import second batch returned ${reviewInboxDeltaImport.response.status}`);
+    const reviewInboxDeltaBatchId = reviewInboxDeltaImport.json?.batch_id;
+    assert(typeof reviewInboxDeltaBatchId === 'string' && reviewInboxDeltaBatchId.length > 0, 'second review inbox import did not return batch_id');
+
+    const reviewInboxDelta = await request('list review inbox batches (delta)', 'GET', `/api/v2/review-inbox${query({
+      agent_id: reviewImportAgentId,
+      limit: 20,
+      cursor: reviewInboxDeltaBase.json?.sync?.cursor,
+    })}`, {
+      retryable: true,
+    });
+    assert(reviewInboxDelta.response.status === 200, `GET /api/v2/review-inbox delta returned ${reviewInboxDelta.response.status}`);
+    assert(reviewInboxDelta.json?.sync?.mode === 'delta', 'review inbox delta list did not return sync.mode=delta');
+    assert((reviewInboxDelta.json?.items || []).length === 1, 'review inbox delta list did not return exactly one changed batch');
+    assert(reviewInboxDelta.json?.items?.[0]?.id === reviewInboxDeltaBatchId, 'review inbox delta list returned the wrong batch');
+    logStep('review inbox', 'import, detail, apply, and delta sync all passed');
+
     const roundtripSourceRecord = await request('create round-trip source record', 'POST', '/api/v2/records', {
       body: {
         kind: 'fact_slot',
@@ -477,8 +553,30 @@ async function runRound(round) {
     });
     assert(deletedRecord.response.status === 201, `POST /api/v2/records deleted-agent returned ${deletedRecord.response.status}`);
     await confirmFirstCandidate(deletedAgentId, 'lives_in', smokeRunId);
+    const deletedReviewBatch = await request('create deleted-agent review inbox batch', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: deletedAgentId,
+        format: 'text',
+        content: '回答控制在三句话内',
+      },
+    });
+    assert(deletedReviewBatch.response.status === 201, `POST /api/v2/review-inbox/import deleted-agent returned ${deletedReviewBatch.response.status}`);
+    const deletedReviewBatchId = deletedReviewBatch.json?.batch_id;
+    assert(typeof deletedReviewBatchId === 'string' && deletedReviewBatchId.length > 0, 'deleted-agent review inbox import did not return batch_id');
     const deletedAgentResponse = await request('delete probe deleted-agent', 'DELETE', `/api/v2/agents/${encodeURIComponent(deletedAgentId)}`);
     assert(deletedAgentResponse.response.status === 200, `DELETE /api/v2/agents/:id returned ${deletedAgentResponse.response.status}`);
+
+    const deletedReviewList = await request('list deleted-agent review inbox batches', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(deletedAgentId)}&limit=20`, {
+      retryable: true,
+    });
+    assert(deletedReviewList.response.status === 200, `GET /api/v2/review-inbox deleted-agent returned ${deletedReviewList.response.status}`);
+    assert((deletedReviewList.json?.items || []).length === 0, 'deleted-agent review inbox batch is still visible');
+
+    const deletedReviewDetail = await request('get deleted-agent review inbox batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(deletedReviewBatchId)}`, {
+      expectedStatus: 404,
+      retryable: true,
+    });
+    assert(deletedReviewDetail.response.status === 404, `GET /api/v2/review-inbox/:id deleted-agent returned ${deletedReviewDetail.response.status}`);
 
     const allAgentsExport = await request('export all agents bundle', 'GET', `/api/v2/export${query({
       scope: 'all_agents',

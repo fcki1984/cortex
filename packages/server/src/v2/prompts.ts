@@ -6,8 +6,31 @@ const REFERENCE_EXAMPLES = V2_CONTRACT_REFERENCE_EXAMPLES
 
 const NEGATIVE_EXAMPLES = [
   '- "中文就行吧" -> session_note',
+  '- "以后都中文回答就行吧" -> session_note',
+  '- "后面中文就可以吧" -> session_note',
+  '- "中文就可以吧" -> session_note',
+  '- "中文即可吧" -> session_note',
+  '- "中文就好吧" -> session_note',
   '- "三句就够了吧" -> session_note',
+  '- "三句话内就可以吧" -> session_note',
+  '- "三句话内即可吧" -> session_note',
+  '- "三句话内就好吧" -> session_note',
+  '- "最多三句话更好" -> session_note',
+  '- "别超过三句话更好" -> session_note',
+  '- "尽量用中文" -> session_note',
+  '- "优先用中文回答" -> session_note',
+  '- "尽量别超过三句话" -> session_note',
   '- "可能简单点更好" -> session_note',
+  '- "尽量简单点" -> session_note',
+  '- "优先简单点" -> session_note',
+  '- "简单方案就行吧" -> session_note',
+  '- "简单方案即可吧" -> session_note',
+  '- "简单方案就可以吧" -> session_note',
+  '- "简单方案就好吧" -> session_note',
+  '- "轻量方案就行吧" -> session_note',
+  '- "轻量方案就可以吧" -> session_note',
+  '- "轻量方案就好吧" -> session_note',
+  '- "方案简单些吧" -> session_note',
 ].join('\n');
 
 export const V2_EXTRACTION_SYSTEM_PROMPT = `You are the extraction stage of a structured memory system.

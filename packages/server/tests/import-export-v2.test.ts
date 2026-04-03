@@ -68,9 +68,41 @@ describe('V2 Import / Export', () => {
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('请把回答控制在三句话内');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句就够');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('别整复杂方案');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('方案简单一点');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('轻量方案即可');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('方案简单一些');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('方案轻量一点');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('后面中文就可以');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就可以');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就行');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文即可');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就好');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内就可以');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内即可');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内就好');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('方案简单些');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('简单方案就可以');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('简单方案就好');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('轻量方案就可以');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('轻量方案就好');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就行吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就可以吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文即可吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('中文就好吧');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句就够了吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内就可以吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内即可吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('三句话内就好吧');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('可能简单点更好');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('尽量用中文');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('尽量别超过三句话');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('尽量简单点');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('后面中文就可以吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('方案简单些吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('简单方案就可以吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('简单方案就好吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('轻量方案就可以吧');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('轻量方案就好吧');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('我在 OpenAI 工作');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('当前任务是重构 Cortex recall');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('最近也许会考虑换方案');
@@ -239,6 +271,476 @@ describe('V2 Import / Export', () => {
     expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
     expect(preview.record_candidates[0]?.content).toBe('三句就够了吧');
     expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('canonicalizes newly supported colloquial language preview content into a durable profile rule', async () => {
+    const { records } = await createServices();
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-followup',
+      format: 'text',
+      content: '以后都中文回答',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(preview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('canonicalizes newly supported colloquial complexity preview content into a durable profile rule', async () => {
+    const { records } = await createServices();
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-complexity-followup',
+      format: 'text',
+      content: '简单方案就行',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(preview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(preview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('keeps newly hedged colloquial language preview content as session_note even when deep extraction proposes a durable rule', async () => {
+    const { records } = await createServices(createWeakColloquialProfileRuleDriftMockLLM());
+
+    const preview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-language-followup',
+      format: 'text',
+      content: '以后都中文回答就行吧',
+    });
+
+    expect(preview.record_candidates).toHaveLength(1);
+    expect(preview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(preview.record_candidates[0]?.content).toBe('以后都中文回答就行吧');
+    expect(preview.relation_candidates).toHaveLength(0);
+  });
+
+  it('canonicalizes additional constraint-style colloquial preview content into durable profile rules', async () => {
+    const { records } = await createServices();
+
+    const lengthPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-length-cap',
+      format: 'text',
+      content: '别超过三句话',
+    });
+
+    expect(lengthPreview.record_candidates).toHaveLength(1);
+    expect(lengthPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lengthPreview.record_candidates[0]?.attribute_key).toBe('response_length');
+    expect(lengthPreview.record_candidates[0]?.content).toBe('请把回答控制在三句话内');
+    expect(lengthPreview.relation_candidates).toHaveLength(0);
+
+    const complexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-lightweight',
+      format: 'text',
+      content: '轻量方案就行',
+    });
+
+    expect(complexityPreview.record_candidates).toHaveLength(1);
+    expect(complexityPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(complexityPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(complexityPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(complexityPreview.relation_candidates).toHaveLength(0);
+
+    const softerComplexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-simple-a-bit',
+      format: 'text',
+      content: '方案简单一点',
+    });
+
+    expect(softerComplexityPreview.record_candidates).toHaveLength(1);
+    expect(softerComplexityPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(softerComplexityPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(softerComplexityPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(softerComplexityPreview.relation_candidates).toHaveLength(0);
+
+    const lightweightOkayPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-lightweight-okay',
+      format: 'text',
+      content: '轻量方案即可',
+    });
+
+    expect(lightweightOkayPreview.record_candidates).toHaveLength(1);
+    expect(lightweightOkayPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lightweightOkayPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(lightweightOkayPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(lightweightOkayPreview.relation_candidates).toHaveLength(0);
+
+    const softerWordedPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-simple-somewhat',
+      format: 'text',
+      content: '方案简单一些',
+    });
+
+    expect(softerWordedPreview.record_candidates).toHaveLength(1);
+    expect(softerWordedPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(softerWordedPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(softerWordedPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(softerWordedPreview.relation_candidates).toHaveLength(0);
+
+    const lighterPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-light-somewhat',
+      format: 'text',
+      content: '方案轻量一点',
+    });
+
+    expect(lighterPreview.record_candidates).toHaveLength(1);
+    expect(lighterPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lighterPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(lighterPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(lighterPreview.relation_candidates).toHaveLength(0);
+
+    const shorterLanguagePreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-can',
+      format: 'text',
+      content: '后面中文就可以',
+    });
+
+    expect(shorterLanguagePreview.record_candidates).toHaveLength(1);
+    expect(shorterLanguagePreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterLanguagePreview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(shorterLanguagePreview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(shorterLanguagePreview.relation_candidates).toHaveLength(0);
+
+    const shorterDirectLanguagePreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-short-can',
+      format: 'text',
+      content: '中文就可以',
+    });
+
+    expect(shorterDirectLanguagePreview.record_candidates).toHaveLength(1);
+    expect(shorterDirectLanguagePreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterDirectLanguagePreview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(shorterDirectLanguagePreview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(shorterDirectLanguagePreview.relation_candidates).toHaveLength(0);
+
+    const shorterDirectLanguageOkayPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-short-okay',
+      format: 'text',
+      content: '中文就行',
+    });
+
+    expect(shorterDirectLanguageOkayPreview.record_candidates).toHaveLength(1);
+    expect(shorterDirectLanguageOkayPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterDirectLanguageOkayPreview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(shorterDirectLanguageOkayPreview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(shorterDirectLanguageOkayPreview.relation_candidates).toHaveLength(0);
+
+    const shorterDirectLanguageCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-short-can-2',
+      format: 'text',
+      content: '中文即可',
+    });
+
+    expect(shorterDirectLanguageCanPreview.record_candidates).toHaveLength(1);
+    expect(shorterDirectLanguageCanPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterDirectLanguageCanPreview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(shorterDirectLanguageCanPreview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(shorterDirectLanguageCanPreview.relation_candidates).toHaveLength(0);
+
+    const shorterLengthPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-length-short-can',
+      format: 'text',
+      content: '三句话内就可以',
+    });
+
+    expect(shorterLengthPreview.record_candidates).toHaveLength(1);
+    expect(shorterLengthPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterLengthPreview.record_candidates[0]?.attribute_key).toBe('response_length');
+    expect(shorterLengthPreview.record_candidates[0]?.content).toBe('请把回答控制在三句话内');
+    expect(shorterLengthPreview.relation_candidates).toHaveLength(0);
+
+    const shorterLengthCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-length-short-can-2',
+      format: 'text',
+      content: '三句话内即可',
+    });
+
+    expect(shorterLengthCanPreview.record_candidates).toHaveLength(1);
+    expect(shorterLengthCanPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterLengthCanPreview.record_candidates[0]?.attribute_key).toBe('response_length');
+    expect(shorterLengthCanPreview.record_candidates[0]?.content).toBe('请把回答控制在三句话内');
+    expect(shorterLengthCanPreview.relation_candidates).toHaveLength(0);
+
+    const shorterComplexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-simple-short',
+      format: 'text',
+      content: '方案简单些',
+    });
+
+    expect(shorterComplexityPreview.record_candidates).toHaveLength(1);
+    expect(shorterComplexityPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(shorterComplexityPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(shorterComplexityPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(shorterComplexityPreview.relation_candidates).toHaveLength(0);
+
+    const simpleOkayPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-simple-okay',
+      format: 'text',
+      content: '简单方案就可以',
+    });
+
+    expect(simpleOkayPreview.record_candidates).toHaveLength(1);
+    expect(simpleOkayPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(simpleOkayPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(simpleOkayPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(simpleOkayPreview.relation_candidates).toHaveLength(0);
+
+    const lightweightOkayCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-lightweight-can',
+      format: 'text',
+      content: '轻量方案就可以',
+    });
+
+    expect(lightweightOkayCanPreview.record_candidates).toHaveLength(1);
+    expect(lightweightOkayCanPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lightweightOkayCanPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(lightweightOkayCanPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(lightweightOkayCanPreview.relation_candidates).toHaveLength(0);
+
+    const directLanguageGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-language-short-good',
+      format: 'text',
+      content: '中文就好',
+    });
+
+    expect(directLanguageGoodPreview.record_candidates).toHaveLength(1);
+    expect(directLanguageGoodPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(directLanguageGoodPreview.record_candidates[0]?.attribute_key).toBe('language_preference');
+    expect(directLanguageGoodPreview.record_candidates[0]?.content).toBe('请用中文回答');
+    expect(directLanguageGoodPreview.relation_candidates).toHaveLength(0);
+
+    const lengthGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-length-short-good',
+      format: 'text',
+      content: '三句话内就好',
+    });
+
+    expect(lengthGoodPreview.record_candidates).toHaveLength(1);
+    expect(lengthGoodPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lengthGoodPreview.record_candidates[0]?.attribute_key).toBe('response_length');
+    expect(lengthGoodPreview.record_candidates[0]?.content).toBe('请把回答控制在三句话内');
+    expect(lengthGoodPreview.relation_candidates).toHaveLength(0);
+
+    const simpleGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-simple-good',
+      format: 'text',
+      content: '简单方案就好',
+    });
+
+    expect(simpleGoodPreview.record_candidates).toHaveLength(1);
+    expect(simpleGoodPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(simpleGoodPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(simpleGoodPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(simpleGoodPreview.relation_candidates).toHaveLength(0);
+
+    const lightweightGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-colloquial-lightweight-good',
+      format: 'text',
+      content: '轻量方案就好',
+    });
+
+    expect(lightweightGoodPreview.record_candidates).toHaveLength(1);
+    expect(lightweightGoodPreview.record_candidates[0]?.normalized_kind).toBe('profile_rule');
+    expect(lightweightGoodPreview.record_candidates[0]?.attribute_key).toBe('solution_complexity');
+    expect(lightweightGoodPreview.record_candidates[0]?.content).toBe('不要复杂方案');
+    expect(lightweightGoodPreview.relation_candidates).toHaveLength(0);
+  });
+
+  it('keeps newly hedged constraint-style colloquial preview content as session_note even when deep extraction proposes a durable rule', async () => {
+    const { records } = await createServices(createWeakColloquialProfileRuleDriftMockLLM());
+
+    const lengthPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-length-cap',
+      format: 'text',
+      content: '别超过三句话更好',
+    });
+
+    expect(lengthPreview.record_candidates).toHaveLength(1);
+    expect(lengthPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(lengthPreview.record_candidates[0]?.content).toBe('别超过三句话更好');
+    expect(lengthPreview.relation_candidates).toHaveLength(0);
+
+    const complexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-lightweight',
+      format: 'text',
+      content: '轻量方案就行吧',
+    });
+
+    expect(complexityPreview.record_candidates).toHaveLength(1);
+    expect(complexityPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(complexityPreview.record_candidates[0]?.content).toBe('轻量方案就行吧');
+    expect(complexityPreview.relation_candidates).toHaveLength(0);
+
+    const softLanguagePreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-soft-language',
+      format: 'text',
+      content: '尽量用中文',
+    });
+
+    expect(softLanguagePreview.record_candidates).toHaveLength(1);
+    expect(softLanguagePreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(softLanguagePreview.record_candidates[0]?.content).toBe('尽量用中文');
+    expect(softLanguagePreview.relation_candidates).toHaveLength(0);
+
+    const softLengthPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-soft-length',
+      format: 'text',
+      content: '尽量别超过三句话',
+    });
+
+    expect(softLengthPreview.record_candidates).toHaveLength(1);
+    expect(softLengthPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(softLengthPreview.record_candidates[0]?.content).toBe('尽量别超过三句话');
+    expect(softLengthPreview.relation_candidates).toHaveLength(0);
+
+    const softComplexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-soft-complexity',
+      format: 'text',
+      content: '尽量简单点',
+    });
+
+    expect(softComplexityPreview.record_candidates).toHaveLength(1);
+    expect(softComplexityPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(softComplexityPreview.record_candidates[0]?.content).toBe('尽量简单点');
+    expect(softComplexityPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedLanguagePreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-language-can',
+      format: 'text',
+      content: '后面中文就可以吧',
+    });
+
+    expect(hedgedLanguagePreview.record_candidates).toHaveLength(1);
+    expect(hedgedLanguagePreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLanguagePreview.record_candidates[0]?.content).toBe('后面中文就可以吧');
+    expect(hedgedLanguagePreview.relation_candidates).toHaveLength(0);
+
+    const hedgedDirectLanguagePreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-direct-language-can',
+      format: 'text',
+      content: '中文就可以吧',
+    });
+
+    expect(hedgedDirectLanguagePreview.record_candidates).toHaveLength(1);
+    expect(hedgedDirectLanguagePreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedDirectLanguagePreview.record_candidates[0]?.content).toBe('中文就可以吧');
+    expect(hedgedDirectLanguagePreview.relation_candidates).toHaveLength(0);
+
+    const hedgedDirectLanguageCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-direct-language-can-2',
+      format: 'text',
+      content: '中文即可吧',
+    });
+
+    expect(hedgedDirectLanguageCanPreview.record_candidates).toHaveLength(1);
+    expect(hedgedDirectLanguageCanPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedDirectLanguageCanPreview.record_candidates[0]?.content).toBe('中文即可吧');
+    expect(hedgedDirectLanguageCanPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedDirectLanguageGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-direct-language-good',
+      format: 'text',
+      content: '中文就好吧',
+    });
+
+    expect(hedgedDirectLanguageGoodPreview.record_candidates).toHaveLength(1);
+    expect(hedgedDirectLanguageGoodPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedDirectLanguageGoodPreview.record_candidates[0]?.content).toBe('中文就好吧');
+    expect(hedgedDirectLanguageGoodPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedLengthCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-length-can',
+      format: 'text',
+      content: '三句话内就可以吧',
+    });
+
+    expect(hedgedLengthCanPreview.record_candidates).toHaveLength(1);
+    expect(hedgedLengthCanPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLengthCanPreview.record_candidates[0]?.content).toBe('三句话内就可以吧');
+    expect(hedgedLengthCanPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedLengthCanPreview2 = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-length-can-2',
+      format: 'text',
+      content: '三句话内即可吧',
+    });
+
+    expect(hedgedLengthCanPreview2.record_candidates).toHaveLength(1);
+    expect(hedgedLengthCanPreview2.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLengthCanPreview2.record_candidates[0]?.content).toBe('三句话内即可吧');
+    expect(hedgedLengthCanPreview2.relation_candidates).toHaveLength(0);
+
+    const hedgedLengthGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-length-good',
+      format: 'text',
+      content: '三句话内就好吧',
+    });
+
+    expect(hedgedLengthGoodPreview.record_candidates).toHaveLength(1);
+    expect(hedgedLengthGoodPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLengthGoodPreview.record_candidates[0]?.content).toBe('三句话内就好吧');
+    expect(hedgedLengthGoodPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedComplexityPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-simple-short',
+      format: 'text',
+      content: '方案简单些吧',
+    });
+
+    expect(hedgedComplexityPreview.record_candidates).toHaveLength(1);
+    expect(hedgedComplexityPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedComplexityPreview.record_candidates[0]?.content).toBe('方案简单些吧');
+    expect(hedgedComplexityPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedSimpleOkayPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-simple-okay',
+      format: 'text',
+      content: '简单方案就可以吧',
+    });
+
+    expect(hedgedSimpleOkayPreview.record_candidates).toHaveLength(1);
+    expect(hedgedSimpleOkayPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedSimpleOkayPreview.record_candidates[0]?.content).toBe('简单方案就可以吧');
+    expect(hedgedSimpleOkayPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedSimpleGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-simple-good',
+      format: 'text',
+      content: '简单方案就好吧',
+    });
+
+    expect(hedgedSimpleGoodPreview.record_candidates).toHaveLength(1);
+    expect(hedgedSimpleGoodPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedSimpleGoodPreview.record_candidates[0]?.content).toBe('简单方案就好吧');
+    expect(hedgedSimpleGoodPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedLightweightCanPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-lightweight-can',
+      format: 'text',
+      content: '轻量方案就可以吧',
+    });
+
+    expect(hedgedLightweightCanPreview.record_candidates).toHaveLength(1);
+    expect(hedgedLightweightCanPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLightweightCanPreview.record_candidates[0]?.content).toBe('轻量方案就可以吧');
+    expect(hedgedLightweightCanPreview.relation_candidates).toHaveLength(0);
+
+    const hedgedLightweightGoodPreview = await previewImport(records, {
+      agent_id: 'import-preview-weak-colloquial-lightweight-good',
+      format: 'text',
+      content: '轻量方案就好吧',
+    });
+
+    expect(hedgedLightweightGoodPreview.record_candidates).toHaveLength(1);
+    expect(hedgedLightweightGoodPreview.record_candidates[0]?.normalized_kind).toBe('session_note');
+    expect(hedgedLightweightGoodPreview.record_candidates[0]?.content).toBe('轻量方案就好吧');
+    expect(hedgedLightweightGoodPreview.relation_candidates).toHaveLength(0);
   });
 
   it('canonicalizes colloquial response-length preview content into a durable profile rule', async () => {
