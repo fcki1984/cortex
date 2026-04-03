@@ -365,6 +365,14 @@ function isSharedContractAutoCommitSafeCandidate(normalized: NormalizedRecordCan
 function classifyIngestDetailDisposition(detail: CollectedCandidateDetail): IngestDetailDisposition {
   if (detail.candidate.written_kind === 'session_note') return 'note';
   if (isSharedContractAutoCommitSafeCandidate(detail.candidate)) return 'auto_commit';
+  if (
+    detail.candidate.candidate.kind === 'profile_rule' &&
+    detail.candidate.candidate.owner_scope === 'user' &&
+    detail.candidate.candidate.subject_key === 'user' &&
+    detail.candidate.candidate.attribute_key === 'response_style'
+  ) {
+    return 'review';
+  }
   if (detail.origins.includes('deterministic') || detail.origins.includes('fast')) return 'auto_commit';
   return 'review';
 }

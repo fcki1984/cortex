@@ -177,6 +177,47 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('routes deterministic response-style profile rules into review instead of auto-committing them', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-response-style-deterministic',
+        user_message: '回答简洁直接',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(1);
+    expect(typeof body.review_batch_id).toBe('string');
+    expect(body.records).toHaveLength(0);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${body.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.source_preview).toBe('回答简洁直接');
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '回答简洁直接',
+          source_excerpt: '回答简洁直接',
+        }),
+      }),
+    ]);
+  });
+
   it('auto-commits newly supported colloquial complexity preferences without creating a review batch', async () => {
     const setup = await createApp();
     app = setup.app;
