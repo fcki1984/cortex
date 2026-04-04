@@ -1433,6 +1433,45 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-language' }).items).toHaveLength(0);
   });
 
+  it('keeps multiple active survivors when a short follow-up drops only one current profile rule', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-multi',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-multi',
+      kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-multi',
+      kind: 'profile_rule',
+      content: '不要复杂方案',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-multi',
+      user_message: '别加三句话限制',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(2);
+    expect(ingested.records.every((record) => record.written_kind === 'profile_rule')).toBe(true);
+    expect(ingested.records.every((record) => record.source_type === 'user_confirmed')).toBe(true);
+    expect(ingested.records.map((record) => record.content)).toEqual([
+      '请用中文回答',
+      '不要复杂方案',
+    ]);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-multi' }).items.map((record) => record.content).sort()).toEqual([
+      '不要复杂方案',
+      '请用中文回答',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-multi' }).items).toHaveLength(0);
+  });
+
   it('keeps ingest aligned with clause-level winners for compound user input', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 

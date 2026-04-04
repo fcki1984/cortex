@@ -2498,6 +2498,74 @@ describe('API V2 Integration', () => {
     expect(listedBody.items.map((item: any) => item.content)).toEqual(['请用中文回答']);
   });
 
+  it('keeps multiple active survivors through /api/v2/ingest when a short follow-up drops only one current profile rule', async () => {
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-selective-active-multi',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请把回答控制在三句话内',
+        agent_id: 'api-user-selective-active-multi',
+      },
+    });
+    expect(seededLength.statusCode).toBe(201);
+
+    const seededComplexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '不要复杂方案',
+        agent_id: 'api-user-selective-active-multi',
+      },
+    });
+    expect(seededComplexity.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '别加三句话限制',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-multi',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.every((item: any) => item.written_kind === 'profile_rule')).toBe(true);
+    expect(body.records.every((item: any) => item.source_type === 'user_confirmed')).toBe(true);
+    expect(body.records.map((item: any) => item.content)).toEqual([
+      '请用中文回答',
+      '不要复杂方案',
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-multi',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content).sort()).toEqual([
+      '不要复杂方案',
+      '请用中文回答',
+    ]);
+  });
+
   it('previews MEMORY.md sections with v2 kind hints', async () => {
     const preview = await app.inject({
       method: 'POST',

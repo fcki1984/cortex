@@ -578,7 +578,7 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
   userContent: string;
   sessionId?: string;
   activeDurables: ActiveDurableEntry[];
-}): { candidate: NormalizedRecordCandidate; delete_record_ids: string[] } | null {
+}): { candidates: NormalizedRecordCandidate[]; delete_record_ids: string[] } | null {
   if (input.activeDurables.length === 0) return null;
 
   const selection = inferShortUserProposalSelection(input.userContent);
@@ -606,12 +606,11 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
     if (survivors.length === 0) return null;
   }
 
-  if (survivors.length !== 1) return null;
+  if (survivors.length === 0) return null;
 
-  const survivor = survivors[0]!;
   const deleteRecordIds = keepSet.size > 0
     ? selectable
-      .filter(item => item.entry.record.id !== survivor.entry.record.id)
+      .filter(item => !survivors.some(survivor => survivor.entry.record.id === item.entry.record.id))
       .map(item => item.entry.record.id)
     : selectable
       .filter(item => dropSet.has(item.attribute))
@@ -619,15 +618,29 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
 
   if (deleteRecordIds.length === 0) return null;
 
-  const selectedCandidate = activeRecordToNormalizedCandidate(
-    survivor.entry.record,
-    'user_confirmed',
-    input.sessionId,
-  );
-  if (!selectedCandidate || selectedCandidate.written_kind === 'session_note') return null;
+  const attributeOrder = new Map([
+    ['language_preference', 0],
+    ['response_length', 1],
+    ['solution_complexity', 2],
+  ]);
+
+  const selectedCandidates = survivors
+    .slice()
+    .sort((left, right) => (
+      (attributeOrder.get(left.attribute) ?? 99) - (attributeOrder.get(right.attribute) ?? 99)
+    ))
+    .map((survivor) => activeRecordToNormalizedCandidate(
+      survivor.entry.record,
+      'user_confirmed',
+      input.sessionId,
+    ))
+    .filter((candidate): candidate is NormalizedRecordCandidate => (
+      !!candidate && candidate.written_kind !== 'session_note'
+    ));
+  if (selectedCandidates.length !== survivors.length) return null;
 
   return {
-    candidate: selectedCandidate,
+    candidates: selectedCandidates,
     delete_record_ids: deleteRecordIds,
   };
 }
@@ -1709,15 +1722,17 @@ export class CortexRecordsV2 {
         activeDurables: activeDurableEntries,
       });
       if (selectedActive) {
-        normalizedCandidates = [selectedActive.candidate];
-        candidateDetails = [{
-          candidate: selectedActive.candidate,
-          origins: ['deterministic'],
+        normalizedCandidates = selectedActive.candidates;
+        candidateDetails = selectedActive.candidates.map((candidate) => ({
+          candidate,
+          origins: ['deterministic'] as CandidateOrigin[],
           source_excerpt: user,
-        }];
+        }));
         activeSelectionDeleteIds = selectedActive.delete_record_ids;
-        const fingerprint = normalizedCandidateFingerprint(selectedActive.candidate);
-        if (fingerprint) forceVisibleFingerprints.add(fingerprint);
+        for (const candidate of selectedActive.candidates) {
+          const fingerprint = normalizedCandidateFingerprint(candidate);
+          if (fingerprint) forceVisibleFingerprints.add(fingerprint);
+        }
       }
     }
 
