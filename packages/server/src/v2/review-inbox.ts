@@ -5,6 +5,7 @@ import {
   confirmImport,
   previewImportForReviewInbox,
   type ImportFormat,
+  type PreviewRecordCandidate,
 } from './import-export.js';
 import type { CortexRelationsV2 } from './relations.js';
 import {
@@ -161,6 +162,13 @@ function reviewRecordFingerprint(item: ReviewBatchItemInput): string | null {
   return recordFingerprint(
     recordPayloadStableKey(item.payload),
     asString(item.suggested_rewrite) || asString(item.payload.content),
+  );
+}
+
+function autoCommitPreviewFingerprint(candidate: PreviewRecordCandidate): string | null {
+  return recordFingerprint(
+    recordPayloadStableKey(candidate),
+    candidate.content,
   );
 }
 
@@ -508,6 +516,22 @@ export class CortexReviewInboxV2 {
     return kept;
   }
 
+  private suppressNoOpAutoCommitCandidates(agentId: string, candidates: PreviewRecordCandidate[]): PreviewRecordCandidate[] {
+    if (candidates.length === 0) return candidates;
+
+    const activeFingerprints = this.listActiveReviewFingerprints(agentId);
+    const kept: PreviewRecordCandidate[] = [];
+
+    for (const candidate of candidates) {
+      const fingerprint = autoCommitPreviewFingerprint(candidate);
+      if (fingerprint && activeFingerprints.has(fingerprint)) continue;
+      if (fingerprint) activeFingerprints.add(fingerprint);
+      kept.push(candidate);
+    }
+
+    return kept;
+  }
+
   createBatch(input: {
     agent_id: string;
     source_kind: ReviewSourceKind;
@@ -628,13 +652,17 @@ export class CortexReviewInboxV2 {
   }> {
     const preview = await previewImportForReviewInbox(this.recordsV2, input);
     let autoCommittedCount = 0;
+    const autoCommitRecordCandidates = this.suppressNoOpAutoCommitCandidates(
+      input.agent_id,
+      preview.auto_commit_record_candidates,
+    );
     let reviewRecordCandidates = [...preview.review_record_candidates];
     let reviewRelationCandidates = [...preview.review_relation_candidates];
 
-    if (preview.auto_commit_record_candidates.length > 0) {
+    if (autoCommitRecordCandidates.length > 0) {
       const autoCommitResult = await confirmImport(this.recordsV2, this.relationsV2, {
         agent_id: input.agent_id,
-        record_candidates: preview.auto_commit_record_candidates,
+        record_candidates: autoCommitRecordCandidates,
         relation_candidates: [],
       });
       autoCommittedCount = autoCommitResult.summary.committed;
@@ -646,7 +674,7 @@ export class CortexReviewInboxV2 {
       );
 
       if (failedAutoCandidateIds.size > 0) {
-        const failedAutoRecords = preview.auto_commit_record_candidates.filter((candidate) => (
+        const failedAutoRecords = autoCommitRecordCandidates.filter((candidate) => (
           failedAutoCandidateIds.has(candidate.candidate_id)
         ));
         reviewRecordCandidates = [...failedAutoRecords, ...reviewRecordCandidates];

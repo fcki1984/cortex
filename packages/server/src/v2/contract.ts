@@ -368,6 +368,7 @@ const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
 const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
 const SHORT_USER_RESPONSE_LENGTH_REWRITE_RE = /(?:改成|换成|改为|换为|控制在|限制在)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)/i;
+const SHORT_USER_RESPONSE_LENGTH_COMPACT_REWRITE_RE = /^(?:改|换)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)$/i;
 const SHORT_USER_DISAGREEMENT_PREFIX_RE = /^(?:不(?:是)?|别|先别|不要|不用)[，,、 ]*/i;
 const SHORT_USER_DROP_ALL_RE = /^(?:都不要|全都不要|都别要|都别加|都去掉|都删掉)$/i;
 const ASSISTANT_PROPOSAL_CONJUNCTION_RE = /[，,]\s*(?:并(?:且)?|以及|and\b)\s*/i;
@@ -408,7 +409,8 @@ export function canonicalLanguageLabel(raw: string | null | undefined): '中文'
 
 function canonicalSentenceCount(raw: string): string {
   const compact = raw.replace(/\s+/g, '');
-  return compact.replace(/句$/, '句话');
+  const withoutBound = compact.replace(/(?:内|以内)$/u, '');
+  return withoutBound.replace(/句$/u, '句话');
 }
 
 function detectContentLocale(content: string): 'zh' | 'en' | 'ja' | null {
@@ -612,7 +614,14 @@ export function inferShortUserProposalRewrite(content: string): ShortUserProposa
   const responseLengthMatch = normalized.match(SHORT_USER_RESPONSE_LENGTH_REWRITE_RE);
   if (responseLengthMatch?.[1]) {
     return {
-      synthesized_content: `请把回答控制在${canonicalSentenceCount(responseLengthMatch[1])}`,
+      synthesized_content: `请把回答控制在${canonicalSentenceCount(responseLengthMatch[1])}内`,
+    };
+  }
+
+  const compactResponseLengthMatch = normalized.match(SHORT_USER_RESPONSE_LENGTH_COMPACT_REWRITE_RE);
+  if (compactResponseLengthMatch?.[1]) {
+    return {
+      synthesized_content: `请把回答控制在${canonicalSentenceCount(compactResponseLengthMatch[1])}内`,
     };
   }
 

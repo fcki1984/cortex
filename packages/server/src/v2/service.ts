@@ -579,6 +579,68 @@ function stableContractKey(candidate: NormalizedRecordCandidate): string | null 
   }
 }
 
+function activeRecordFingerprint(record: CortexRecord): string | null {
+  if (!recordIsActive(record) || record.kind === 'session_note') return null;
+
+  let stableKey: string | null = null;
+  switch (record.kind) {
+    case 'profile_rule':
+      stableKey = `${record.kind}:${record.owner_scope}:${record.subject_key}:${record.attribute_key}`;
+      break;
+    case 'fact_slot':
+      stableKey = `${record.kind}:${record.entity_key}:${record.attribute_key}`;
+      break;
+    case 'task_state':
+      stableKey = `${record.kind}:${record.subject_key}:${record.state_key}`;
+      break;
+  }
+
+  const content = record.content.trim();
+  return stableKey && content ? JSON.stringify([stableKey, content]) : null;
+}
+
+function normalizedCandidateFingerprint(candidate: NormalizedRecordCandidate): string | null {
+  if (candidate.written_kind === 'session_note') return null;
+  const stableKey = stableContractKey(candidate);
+  const content = candidateText(candidate).trim();
+  return stableKey && content ? JSON.stringify([stableKey, content]) : null;
+}
+
+function listActiveDurableFingerprints(agentId: string): Set<string> {
+  const active = listRecords({
+    agent_id: agentId,
+    include_inactive: false,
+    limit: Math.max(100, getRecordsCount(agentId) + 10),
+    order_by: 'updated_at',
+    order_dir: 'desc',
+  }).items;
+
+  return new Set(
+    active
+      .map(activeRecordFingerprint)
+      .filter((fingerprint): fingerprint is string => typeof fingerprint === 'string'),
+  );
+}
+
+function suppressNoOpAutoCommitDetails(
+  agentId: string,
+  details: CollectedCandidateDetail[],
+): CollectedCandidateDetail[] {
+  if (details.length === 0) return details;
+
+  const activeFingerprints = listActiveDurableFingerprints(agentId);
+  const kept: CollectedCandidateDetail[] = [];
+
+  for (const detail of details) {
+    const fingerprint = normalizedCandidateFingerprint(detail.candidate);
+    if (fingerprint && activeFingerprints.has(fingerprint)) continue;
+    if (fingerprint) activeFingerprints.add(fingerprint);
+    kept.push(detail);
+  }
+
+  return kept;
+}
+
 function shouldRejectWeakColloquialProfileRuleCandidate(
   content: string,
   candidate: NormalizedRecordCandidate,
@@ -1528,7 +1590,10 @@ export class CortexRecordsV2 {
     }> = [];
     const reviewRecordCandidates: Array<Record<string, unknown>> = [];
 
-    const autoCommitDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) !== 'review');
+    const autoCommitDetails = suppressNoOpAutoCommitDetails(
+      agentId,
+      candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) !== 'review'),
+    );
     const reviewDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) === 'review');
 
     for (const detail of autoCommitDetails) {

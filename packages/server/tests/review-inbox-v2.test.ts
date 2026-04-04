@@ -178,6 +178,53 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('suppresses canonical no-op auto-commit ingest work when the same truth is already active', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-auto-noop-language',
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-noop-language',
+        user_message: '后续交流中文就行',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(0);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-auto-noop-language',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
+  });
+
   it('routes deterministic response-style profile rules into review instead of auto-committing them', async () => {
     const setup = await createApp();
     app = setup.app;
@@ -1904,6 +1951,53 @@ describe('V2 review inbox', () => {
         content: '请用中文回答',
       }),
     ]));
+  });
+
+  it('suppresses empty import batches when safe import content already matches active truth', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-import-noop-language',
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-noop-language',
+        format: 'text',
+        content: '后续交流中文就行',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.source_preview || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(0);
+    expect(createdBody.summary).toEqual({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-import-noop-language',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
   it('keeps import review batches focused on remaining review-only clauses after safe auto-commit', async () => {

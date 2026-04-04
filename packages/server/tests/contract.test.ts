@@ -625,4 +625,16 @@ describe('V2 shared atomic contract', () => {
       drop_all: false,
     });
   });
+
+  it('extends short proposal rewrites to support compact response-length updates', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserProposalRewrite = (contractModule as Record<string, unknown>).inferShortUserProposalRewrite as
+      | ((input: string) => { synthesized_content: string } | null)
+      | undefined;
+
+    expect(typeof inferShortUserProposalRewrite).toBe('function');
+    expect(inferShortUserProposalRewrite!('改两句')).toEqual({
+      synthesized_content: '请把回答控制在两句话内',
+    });
+  });
 });

@@ -25,7 +25,7 @@ export type ExportFormat = 'json' | 'memory_md';
 export type ExportScope = 'current_agent' | 'all_agents';
 export type ImportRelationMode = 'candidate' | 'confirmed_restore';
 
-type PreviewRecordCandidate = {
+export type PreviewRecordCandidate = {
   candidate_id: string;
   selected: boolean;
   requested_kind: RecordKind;
