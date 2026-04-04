@@ -242,6 +242,7 @@ export default {
     reviewInboxAutoCommitted: '已自动写入 {{auto}} 条，另有 {{pending}} 条进入审查箱。',
     reviewInboxAutoCommittedWithPreview: '已自动写入 {{auto}} 条，另有 {{pending}} 条进入审查箱。当前待审：{{preview}}',
     reviewInboxAutoCommittedOnly: '已自动写入 {{count}} 条，无需进入审查箱。',
+    reviewInboxNoop: '内容已与当前记忆一致，无需进入审查箱。',
     reviewInboxOpenBatch: '打开对应审查批次',
     reviewInboxFormatUnsupported: '当前格式不支持发送到审查箱，请改用纯文本或 MEMORY.md。',
     agentRequired: '请先选择目标智能体。',

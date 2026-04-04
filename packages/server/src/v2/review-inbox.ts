@@ -12,6 +12,7 @@ import {
   buildRelationReviewAssist,
 } from './review-assist.js';
 import type { CortexRecordsV2 } from './service.js';
+import type { CortexRecord } from './types.js';
 
 export type ReviewSourceKind = 'live_ingest' | 'import_preview';
 export type ReviewBatchStatus = 'pending' | 'partially_applied' | 'completed' | 'dismissed';
@@ -101,6 +102,71 @@ function parseJsonObject(raw: string | null | undefined): Record<string, unknown
   } catch {
     return {};
   }
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function recordPayloadKind(payload: Record<string, unknown>): string | null {
+  return asString(payload.normalized_kind) || asString(payload.kind);
+}
+
+function recordPayloadStableKey(payload: Record<string, unknown>): string | null {
+  switch (recordPayloadKind(payload)) {
+    case 'profile_rule': {
+      const ownerScope = asString(payload.owner_scope);
+      const subjectKey = asString(payload.subject_key);
+      const attributeKey = asString(payload.attribute_key);
+      if (!ownerScope || !subjectKey || !attributeKey) return null;
+      return `profile_rule:${ownerScope}:${subjectKey}:${attributeKey}`;
+    }
+    case 'fact_slot': {
+      const entityKey = asString(payload.entity_key);
+      const attributeKey = asString(payload.attribute_key);
+      if (!entityKey || !attributeKey) return null;
+      return `fact_slot:${entityKey}:${attributeKey}`;
+    }
+    case 'task_state': {
+      const subjectKey = asString(payload.subject_key);
+      const stateKey = asString(payload.state_key);
+      if (!subjectKey || !stateKey) return null;
+      return `task_state:${subjectKey}:${stateKey}`;
+    }
+    default:
+      return null;
+  }
+}
+
+function activeRecordStableKey(record: CortexRecord): string | null {
+  switch (record.kind) {
+    case 'profile_rule':
+      return `profile_rule:${record.owner_scope}:${record.subject_key}:${record.attribute_key}`;
+    case 'fact_slot':
+      return `fact_slot:${record.entity_key}:${record.attribute_key}`;
+    case 'task_state':
+      return `task_state:${record.subject_key}:${record.state_key}`;
+    case 'session_note':
+      return null;
+  }
+}
+
+function recordFingerprint(key: string | null, content: string | null): string | null {
+  if (!key || !content) return null;
+  return JSON.stringify([key, content]);
+}
+
+function reviewRecordFingerprint(item: ReviewBatchItemInput): string | null {
+  if (item.item_type !== 'record') return null;
+  return recordFingerprint(
+    recordPayloadStableKey(item.payload),
+    asString(item.suggested_rewrite) || asString(item.payload.content),
+  );
+}
+
+function activeRecordFingerprint(record: CortexRecord): string | null {
+  if (!record.content.trim()) return null;
+  return recordFingerprint(activeRecordStableKey(record), record.content.trim());
 }
 
 function summarize(items: ReviewItem[]): ReviewBatchSummary {
@@ -338,6 +404,79 @@ export class CortexReviewInboxV2 {
     );
   }
 
+  private listActiveReviewFingerprints(agentId: string): Set<string> {
+    const records = this.recordsV2.listRecords({
+      agent_id: agentId,
+      include_inactive: false,
+      limit: 1000,
+      order_by: 'updated_at',
+      order_dir: 'desc',
+    }).items;
+
+    return new Set(
+      records
+        .map(activeRecordFingerprint)
+        .filter((fingerprint): fingerprint is string => typeof fingerprint === 'string'),
+    );
+  }
+
+  private listPendingReviewFingerprints(agentId: string): Set<string> {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT review_items_v2.payload_json, review_items_v2.suggested_rewrite
+      FROM review_items_v2
+      INNER JOIN review_batches_v2 ON review_batches_v2.id = review_items_v2.batch_id
+      WHERE review_batches_v2.agent_id = ?
+        AND review_items_v2.item_type = 'record'
+        AND review_items_v2.status = 'pending'
+        AND review_batches_v2.status IN ('pending', 'partially_applied')
+    `).all(agentId) as Array<{ payload_json: string; suggested_rewrite: string | null }>;
+
+    const fingerprints = new Set<string>();
+    for (const row of rows) {
+      const payload = parseJsonObject(row.payload_json);
+      const fingerprint = recordFingerprint(
+        recordPayloadStableKey(payload),
+        asString(row.suggested_rewrite) || asString(payload.content),
+      );
+      if (fingerprint) fingerprints.add(fingerprint);
+    }
+
+    return fingerprints;
+  }
+
+  private suppressRedundantItems(agentId: string, items: ReviewBatchItemInput[]): ReviewBatchItemInput[] {
+    if (items.length === 0) return [];
+
+    const activeFingerprints = this.listActiveReviewFingerprints(agentId);
+    const pendingFingerprints = this.listPendingReviewFingerprints(agentId);
+    const kept: ReviewBatchItemInput[] = [];
+    const keptRecordCandidateIds = new Set<string>();
+
+    for (const item of items) {
+      if (item.item_type !== 'record') continue;
+
+      const fingerprint = reviewRecordFingerprint(item);
+      if (fingerprint && (activeFingerprints.has(fingerprint) || pendingFingerprints.has(fingerprint))) {
+        continue;
+      }
+
+      if (fingerprint) pendingFingerprints.add(fingerprint);
+      const candidateId = asString(item.payload.candidate_id);
+      if (candidateId) keptRecordCandidateIds.add(candidateId);
+      kept.push(item);
+    }
+
+    for (const item of items) {
+      if (item.item_type !== 'relation') continue;
+      const sourceCandidateId = asString(item.payload.source_candidate_id);
+      if (sourceCandidateId && !keptRecordCandidateIds.has(sourceCandidateId)) continue;
+      kept.push(item);
+    }
+
+    return kept;
+  }
+
   createBatch(input: {
     agent_id: string;
     source_kind: ReviewSourceKind;
@@ -412,11 +551,11 @@ export class CortexReviewInboxV2 {
     source_preview: string;
     items: Array<Record<string, unknown>>;
   }): {
-    batch: ReviewBatch;
+    batch: ReviewBatch | null;
     items: ReviewItem[];
     summary: ReviewBatchSummary;
   } {
-    const itemInputs = input.items.map((payload) => {
+    const itemInputs = this.suppressRedundantItems(input.agent_id, input.items.map((payload) => {
       const suggestion = buildRecordReviewAssist(payload);
       return {
         item_type: 'record' as const,
@@ -425,7 +564,15 @@ export class CortexReviewInboxV2 {
         suggested_reason: suggestion.suggested_reason,
         suggested_rewrite: suggestion.suggested_rewrite,
       };
-    });
+    }));
+
+    if (itemInputs.length === 0) {
+      return {
+        batch: null,
+        items: [],
+        summary: emptySummary(),
+      };
+    }
 
     return this.createBatch({
       agent_id: input.agent_id,
@@ -479,8 +626,9 @@ export class CortexReviewInboxV2 {
       record_candidates: reviewRecordCandidates,
       relation_candidates: reviewRelationCandidates,
     });
+    const survivingReviewItems = this.suppressRedundantItems(input.agent_id, reviewItems);
 
-    if (reviewItems.length === 0) {
+    if (survivingReviewItems.length === 0) {
       return {
         batch: null,
         items: [],
@@ -495,7 +643,7 @@ export class CortexReviewInboxV2 {
       import_format: input.format,
       source_label: input.source_label || input.format,
       source_preview: input.content,
-      items: reviewItems,
+      items: survivingReviewItems,
     });
     return {
       ...created,

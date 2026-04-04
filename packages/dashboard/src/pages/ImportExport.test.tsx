@@ -290,4 +290,30 @@ describe('ImportExport page', () => {
     expect(await screen.findByText('已自动写入 1 条，无需进入审查箱。')).toBeTruthy();
     expect(screen.queryByRole('link', { name: '打开对应审查批次' })).toBeNull();
   });
+
+  it('shows a no-op success notice when review inbox import produces no batch and no new writes', async () => {
+    const user = userEvent.setup();
+    apiMocks.createReviewInboxImportV2.mockResolvedValueOnce({
+      batch_id: null,
+      source_preview: '说话干脆一点',
+      auto_committed_count: 0,
+      summary: {
+        total: 0,
+        pending: 0,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    });
+
+    renderPage();
+
+    await screen.findByLabelText('目标智能体');
+    await user.selectOptions(screen.getByLabelText('来源格式'), 'text');
+    await user.type(screen.getByLabelText('来源内容'), '说话干脆一点');
+    await user.click(screen.getByRole('button', { name: '发送到审查箱' }));
+
+    expect(await screen.findByText('内容已与当前记忆一致，无需进入审查箱。')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '打开对应审查批次' })).toBeNull();
+  });
 });

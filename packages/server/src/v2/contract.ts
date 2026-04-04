@@ -578,12 +578,20 @@ function mentionsResponseLength(content: string): boolean {
   return /(?:(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:限制|内|以内)?|句数限制|长度限制)/i.test(content);
 }
 
+function mentionsSolutionComplexity(content: string): boolean {
+  return !!findProfileRuleAliasSpec('solution_complexity')?.matches_conversational(content);
+}
+
 function dropsLanguagePreference(content: string): boolean {
   return /(?:别|不要|别用|取消|去掉|删掉).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content);
 }
 
 function dropsResponseLength(content: string): boolean {
   return /(?:别|不要|别加|取消|去掉|删掉).{0,10}(?:(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:限制|内|以内)?|句数|长度限制)/i.test(content);
+}
+
+function dropsSolutionComplexity(content: string): boolean {
+  return /(?:别|不要|取消|去掉|删掉).{0,10}(?:简单|轻量|复杂方案|复杂限制)/i.test(content);
 }
 
 export function inferShortUserProposalRewrite(content: string): ShortUserProposalRewrite | null {
@@ -635,6 +643,12 @@ export function inferShortUserProposalSelection(content: string): ShortUserPropo
     drop.add('response_length');
   } else if (mentionsResponseLength(trimmed)) {
     keep.add('response_length');
+  }
+
+  if (dropsSolutionComplexity(trimmed)) {
+    drop.add('solution_complexity');
+  } else if (mentionsSolutionComplexity(trimmed)) {
+    keep.add('solution_complexity');
   }
 
   if (keep.size === 0 && drop.size === 0) return null;

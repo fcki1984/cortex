@@ -79,9 +79,9 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
       records: result.records,
       conversation_ref_id: result.conversation_ref_id,
       skipped: result.skipped,
-      review_batch_id: reviewBatch?.batch.id || null,
+      review_batch_id: reviewBatch?.batch?.id || null,
       review_pending_count: reviewBatch?.summary.pending || 0,
-      review_source_preview: reviewBatch?.batch.source_preview || null,
+      review_source_preview: reviewBatch?.batch?.source_preview || null,
       review_summary: reviewBatch?.summary || null,
       auto_committed_count: result.records.length,
     };

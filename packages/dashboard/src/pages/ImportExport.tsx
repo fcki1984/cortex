@@ -299,8 +299,8 @@ function buildReviewInboxNotice(
   }
 
   return {
-    message: t('importExport.reviewInboxCreated', { count: pendingCount }),
-    action,
+    message: t('importExport.reviewInboxNoop'),
+    action: null,
   };
 }
 

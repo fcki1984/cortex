@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runBestEffortSteps, runSmokeRequest } from '../../../scripts/smoke-v2-lib.mjs';
+import { normalizeSmokeBaseUrl, resolveSmokeBaseUrl, runBestEffortSteps, runSmokeRequest } from '../../../scripts/smoke-v2-lib.mjs';
 
 describe('smoke-v2 helper library', () => {
+  it('prefers an explicit validation URL and normalizes MCP endpoints for deployment smoke runs', () => {
+    expect(resolveSmokeBaseUrl({
+      validationBaseUrl: 'https://mem.dctma.vip/mcp/message',
+      baseUrl: 'http://localhost:21100',
+      cliBaseUrl: 'http://localhost:3000',
+    })).toEqual({
+      baseUrl: 'https://mem.dctma.vip',
+      source: 'validation',
+    });
+
+    expect(normalizeSmokeBaseUrl('https://mem.dctma.vip/mcp')).toBe('https://mem.dctma.vip');
+  });
+
   it('retries a retryable safe request once after a transient fetch failure', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))

@@ -7,6 +7,43 @@ function normalizeHeaders({ authToken, smokeRunId, headers = {}, hasBody }) {
   };
 }
 
+export function normalizeSmokeBaseUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  if (trimmed.endsWith('/mcp/message')) return trimmed.slice(0, -'/mcp/message'.length);
+  if (trimmed.endsWith('/mcp')) return trimmed.slice(0, -'/mcp'.length);
+  return trimmed;
+}
+
+export function resolveSmokeBaseUrl({
+  validationBaseUrl,
+  baseUrl,
+  cliBaseUrl,
+  defaultBaseUrl = 'http://localhost:21100',
+} = {}) {
+  const candidates = [
+    { source: 'validation', raw: validationBaseUrl },
+    { source: 'base', raw: baseUrl },
+    { source: 'cli', raw: cliBaseUrl },
+    { source: 'default', raw: defaultBaseUrl },
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeSmokeBaseUrl(candidate.raw);
+    if (normalized) {
+      return {
+        baseUrl: normalized,
+        source: candidate.source,
+      };
+    }
+  }
+
+  return {
+    baseUrl: normalizeSmokeBaseUrl(defaultBaseUrl),
+    source: 'default',
+  };
+}
+
 function maybeParseJson(text) {
   if (!text) return null;
   try {

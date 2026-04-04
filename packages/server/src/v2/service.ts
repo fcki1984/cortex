@@ -496,7 +496,11 @@ function selectableProposalProfileRuleAttribute(candidate: NormalizedRecordCandi
     record.kind === 'profile_rule' &&
     record.owner_scope === 'user' &&
     record.subject_key === 'user' &&
-    (record.attribute_key === 'language_preference' || record.attribute_key === 'response_length')
+    (
+      record.attribute_key === 'language_preference'
+      || record.attribute_key === 'response_length'
+      || record.attribute_key === 'solution_complexity'
+    )
   ) {
     return record.attribute_key;
   }

@@ -1,20 +1,18 @@
 #!/usr/bin/env node
 
-import { runBestEffortSteps, runSmokeRequest } from './smoke-v2-lib.mjs';
+import { resolveSmokeBaseUrl, runBestEffortSteps, runSmokeRequest } from './smoke-v2-lib.mjs';
 
-const rawBaseUrl = process.env.CORTEX_BASE_URL || process.env.CORTEX_URL || process.argv[2] || 'http://localhost:21100';
+const resolvedBaseUrl = resolveSmokeBaseUrl({
+  validationBaseUrl: process.env.CORTEX_SMOKE_VALIDATION_URL || process.env.CORTEX_REMOTE_VALIDATION_URL,
+  baseUrl: process.env.CORTEX_BASE_URL || process.env.CORTEX_URL,
+  cliBaseUrl: process.argv[2],
+  defaultBaseUrl: 'http://localhost:21100',
+});
 const authToken = process.env.CORTEX_AUTH_TOKEN || '';
 const baseAgentId = process.env.CORTEX_AGENT_ID || `smoke-v2-${Date.now()}`;
 const smokeRounds = Math.max(1, Number(process.env.SMOKE_ROUNDS || process.argv[3] || '1'));
-
-function normalizeBaseUrl(rawUrl) {
-  const trimmed = rawUrl.trim().replace(/\/+$/, '');
-  if (trimmed.endsWith('/mcp/message')) return trimmed.slice(0, -'/mcp/message'.length);
-  if (trimmed.endsWith('/mcp')) return trimmed.slice(0, -'/mcp'.length);
-  return trimmed;
-}
-
-const baseUrl = normalizeBaseUrl(rawBaseUrl);
+const baseUrl = resolvedBaseUrl.baseUrl;
+const baseUrlSource = resolvedBaseUrl.source;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -217,7 +215,7 @@ async function runRound(round) {
     });
   }
 
-  process.stdout.write(`Cortex V2 smoke test -> ${baseUrl} (agent: ${probeAgentId}, round ${round}/${smokeRounds}, trace: ${smokeRunId})\n`);
+  process.stdout.write(`Cortex V2 smoke test -> ${baseUrl} [${baseUrlSource}] (agent: ${probeAgentId}, round ${round}/${smokeRounds}, trace: ${smokeRunId})\n`);
 
   try {
     for (let i = 0; i < 3; i += 1) {
@@ -526,8 +524,9 @@ async function runRound(round) {
       },
     });
     assert(reviewInboxDeltaImport.response.status === 201, `POST /api/v2/review-inbox/import second review batch returned ${reviewInboxDeltaImport.response.status}`);
-    const reviewInboxDeltaBatchId = reviewInboxDeltaImport.json?.batch_id;
-    assert(typeof reviewInboxDeltaBatchId === 'string' && reviewInboxDeltaBatchId.length > 0, 'second review inbox import did not return batch_id');
+    assert(reviewInboxDeltaImport.json?.batch_id == null, 'second review inbox import should have been suppressed as a no-op');
+    assert(reviewInboxDeltaImport.json?.auto_committed_count === 0, 'second review inbox import should not auto-commit duplicate truth');
+    assert(reviewInboxDeltaImport.json?.summary?.pending === 0, 'second review inbox import left unexpected pending items');
 
     const reviewInboxDelta = await request('list review inbox batches (delta)', 'GET', `/api/v2/review-inbox${query({
       agent_id: reviewImportAgentId,
@@ -538,9 +537,8 @@ async function runRound(round) {
     });
     assert(reviewInboxDelta.response.status === 200, `GET /api/v2/review-inbox delta returned ${reviewInboxDelta.response.status}`);
     assert(reviewInboxDelta.json?.sync?.mode === 'delta', 'review inbox delta list did not return sync.mode=delta');
-    assert((reviewInboxDelta.json?.items || []).length === 1, 'review inbox delta list did not return exactly one changed batch');
-    assert(reviewInboxDelta.json?.items?.[0]?.id === reviewInboxDeltaBatchId, 'review inbox delta list returned the wrong batch');
-    logStep('review inbox', 'auto-commit, review batch, apply, and delta sync all passed');
+    assert((reviewInboxDelta.json?.items || []).length === 0, 'review inbox delta list should stay empty after a suppressed duplicate import');
+    logStep('review inbox', 'auto-commit, review batch, apply, suppression, and delta sync all passed');
 
     const roundtripSourceRecord = await request('create round-trip source record', 'POST', '/api/v2/records', {
       body: {

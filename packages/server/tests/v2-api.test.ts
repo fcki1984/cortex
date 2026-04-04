@@ -2319,6 +2319,30 @@ describe('API V2 Integration', () => {
     expect(body.records[0]?.content).not.toContain('三句话');
   });
 
+  it('commits only the selected solution-complexity durable when a short follow-up keeps that part of a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '就简单点',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-assistant-proposal-complexity',
+        messages: [
+          { role: 'assistant', content: '之后请用中文回答，并不要复杂方案。' },
+          { role: 'user', content: '就简单点' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('profile_rule');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toBe('不要复杂方案');
+  });
+
   it('previews MEMORY.md sections with v2 kind hints', async () => {
     const preview = await app.inject({
       method: 'POST',

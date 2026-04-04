@@ -607,4 +607,22 @@ describe('V2 shared atomic contract', () => {
     expect(relationPredicateForFactAttribute(normalized.candidate.attribute_key)).toBe('works_at');
     expect(extractFactRelationObjectValue(normalized.candidate.attribute_key, normalized.candidate.value_text)).toBe('OpenAI');
   });
+
+  it('extends short proposal selection to keep deterministic solution-complexity follow-ups', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserProposalSelection = (contractModule as Record<string, unknown>).inferShortUserProposalSelection as
+      | ((input: string) => {
+          keep_profile_rule_attributes: string[];
+          drop_profile_rule_attributes: string[];
+          drop_all: boolean;
+        } | null)
+      | undefined;
+
+    expect(typeof inferShortUserProposalSelection).toBe('function');
+    expect(inferShortUserProposalSelection!('就简单点')).toEqual({
+      keep_profile_rule_attributes: ['solution_complexity'],
+      drop_profile_rule_attributes: [],
+      drop_all: false,
+    });
+  });
 });

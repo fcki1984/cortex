@@ -221,6 +221,47 @@ describe('V2 review inbox', () => {
     ]);
   });
 
+  it('suppresses repeated live review-only inputs when the canonical rewrite already exists as active truth', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-noop-existing-response-style',
+        kind: 'profile_rule',
+        content: '请简洁直接回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-noop-existing-response-style',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toHaveLength(0);
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-noop-existing-response-style',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
   it('routes colloquial response-style imports into review with the same canonical rewrite', async () => {
     const setup = await createApp();
     app = setup.app;
@@ -260,6 +301,94 @@ describe('V2 review inbox', () => {
         }),
       }),
     ]);
+  });
+
+  it('suppresses import review batches when the canonical review-only rewrite already exists as active truth', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-import-noop-existing-response-style',
+        kind: 'profile_rule',
+        content: '请简洁直接回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-noop-existing-response-style',
+        format: 'text',
+        content: '说话干脆一点',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(0);
+    expect(createdBody.summary).toEqual({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-import-noop-existing-response-style',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
+  it('does not create a second pending review batch when the same canonical review-only key is already pending', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-noop-existing-pending-response-style',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    expect(first.statusCode).toBe(201);
+    const firstBody = JSON.parse(first.payload);
+    expect(typeof firstBody.review_batch_id).toBe('string');
+    expect(firstBody.review_pending_count).toBe(1);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-noop-existing-pending-response-style',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(second.statusCode).toBe(201);
+    const secondBody = JSON.parse(second.payload);
+    expect(secondBody.auto_committed_count).toBe(0);
+    expect(secondBody.review_pending_count).toBe(0);
+    expect(secondBody.review_batch_id || null).toBe(null);
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-noop-existing-pending-response-style',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(1);
   });
 
   it('accepts response-style review batches through the canonical suggested rewrite', async () => {

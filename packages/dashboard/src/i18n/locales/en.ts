@@ -242,6 +242,7 @@ export default {
     reviewInboxAutoCommitted: 'Auto-committed {{auto}} items and sent {{pending}} items to the review inbox.',
     reviewInboxAutoCommittedWithPreview: 'Auto-committed {{auto}} items and sent {{pending}} items to the review inbox. Current focus: {{preview}}',
     reviewInboxAutoCommittedOnly: 'Auto-committed {{count}} items. No review batch was needed.',
+    reviewInboxNoop: 'This content already matches the current memory. No review batch was needed.',
     reviewInboxOpenBatch: 'Open This Review Batch',
     reviewInboxFormatUnsupported: 'This format cannot be sent to the review inbox. Use plain text or MEMORY.md instead.',
     agentRequired: 'Please select a target agent first.',
