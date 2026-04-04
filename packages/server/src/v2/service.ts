@@ -105,6 +105,11 @@ type CollectedCandidateDetail = {
   source_excerpt: string;
 };
 
+type ActiveDurableEntry = {
+  record: CortexRecord;
+  candidate: NormalizedRecordCandidate;
+};
+
 export type PreviewImportCandidateDisposition = IngestDetailDisposition;
 
 export type PreviewImportCandidateDetail = {
@@ -490,6 +495,143 @@ function collectAssistantProposalDurables(
     .map(entry => entry.candidate);
 }
 
+function activeRecordToNormalizedCandidate(
+  record: CortexRecord,
+  sourceType: SourceType = record.source_type,
+  sessionId?: string,
+): NormalizedRecordCandidate | null {
+  if (!recordIsActive(record) || record.kind === 'session_note') return null;
+
+  return normalizeManualInput(record.agent_id, {
+    kind: record.kind,
+    content: record.content,
+    source_type: sourceType,
+    tags: record.tags,
+    priority: record.priority,
+    session_id: sessionId,
+    owner_scope: record.kind === 'profile_rule' ? record.owner_scope : undefined,
+    subject_key: record.kind === 'profile_rule'
+      ? record.subject_key
+      : record.kind === 'task_state'
+        ? record.subject_key
+        : undefined,
+    attribute_key: record.kind === 'profile_rule'
+      ? record.attribute_key
+      : record.kind === 'fact_slot'
+        ? record.attribute_key
+        : undefined,
+    entity_key: record.kind === 'fact_slot' ? record.entity_key : undefined,
+    state_key: record.kind === 'task_state' ? record.state_key : undefined,
+    status: record.kind === 'task_state' ? record.status : undefined,
+  });
+}
+
+function collectActiveDurableEntries(agentId: string): ActiveDurableEntry[] {
+  const active = listRecords({
+    agent_id: agentId,
+    include_inactive: false,
+    limit: Math.max(100, getRecordsCount(agentId) + 10),
+    order_by: 'updated_at',
+    order_dir: 'desc',
+  }).items;
+
+  return active
+    .map((record) => {
+      const candidate = activeRecordToNormalizedCandidate(record);
+      return candidate && candidate.written_kind !== 'session_note'
+        ? { record, candidate }
+        : null;
+    })
+    .filter((entry): entry is ActiveDurableEntry => !!entry);
+}
+
+function resolveShortUserRewriteAgainstDurables(input: {
+  agentId: string;
+  userContent: string;
+  sessionId?: string;
+  durables: NormalizedRecordCandidate[];
+}): NormalizedRecordCandidate | null {
+  if (input.durables.length === 0) return null;
+
+  const rewrite = inferShortUserProposalRewrite(input.userContent);
+  if (!rewrite) return null;
+
+  const rewritten = normalizeManualInput(input.agentId, {
+    content: rewrite.synthesized_content,
+    source_type: 'user_explicit',
+    session_id: input.sessionId,
+  });
+  if (rewritten.written_kind === 'session_note') return null;
+
+  const rewrittenKey = stableContractKey(rewritten);
+  if (!rewrittenKey) return null;
+
+  const compatibleDurables = input.durables.filter(candidate => (
+    candidate.written_kind !== 'session_note' &&
+    stableContractKey(candidate) === rewrittenKey
+  ));
+
+  return compatibleDurables.length === 1 ? rewritten : null;
+}
+
+function resolveShortUserSelectionAgainstActiveDurables(input: {
+  userContent: string;
+  sessionId?: string;
+  activeDurables: ActiveDurableEntry[];
+}): { candidate: NormalizedRecordCandidate; delete_record_ids: string[] } | null {
+  if (input.activeDurables.length === 0) return null;
+
+  const selection = inferShortUserProposalSelection(input.userContent);
+  if (!selection || selection.drop_all) return null;
+
+  const selectable = input.activeDurables
+    .map((entry) => ({
+      entry,
+      attribute: selectableProposalProfileRuleAttribute(entry.candidate),
+    }))
+    .filter((entry): entry is { entry: ActiveDurableEntry; attribute: string } => !!entry.attribute);
+  if (selectable.length === 0) return null;
+
+  const keepSet = new Set(selection.keep_profile_rule_attributes);
+  const dropSet = new Set(selection.drop_profile_rule_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter(item => keepSet.has(item.attribute));
+    if (survivors.length === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter(item => !dropSet.has(item.attribute));
+    if (survivors.length === 0) return null;
+  }
+
+  if (survivors.length !== 1) return null;
+
+  const survivor = survivors[0]!;
+  const deleteRecordIds = keepSet.size > 0
+    ? selectable
+      .filter(item => item.entry.record.id !== survivor.entry.record.id)
+      .map(item => item.entry.record.id)
+    : selectable
+      .filter(item => dropSet.has(item.attribute))
+      .map(item => item.entry.record.id);
+
+  if (deleteRecordIds.length === 0) return null;
+
+  const selectedCandidate = activeRecordToNormalizedCandidate(
+    survivor.entry.record,
+    'user_confirmed',
+    input.sessionId,
+  );
+  if (!selectedCandidate || selectedCandidate.written_kind === 'session_note') return null;
+
+  return {
+    candidate: selectedCandidate,
+    delete_record_ids: deleteRecordIds,
+  };
+}
+
 function selectableProposalProfileRuleAttribute(candidate: NormalizedRecordCandidate): string | null {
   const record = candidate.candidate;
   if (
@@ -625,6 +767,7 @@ function listActiveDurableFingerprints(agentId: string): Set<string> {
 function suppressNoOpAutoCommitDetails(
   agentId: string,
   details: CollectedCandidateDetail[],
+  opts: { keepFingerprints?: Set<string> } = {},
 ): CollectedCandidateDetail[] {
   if (details.length === 0) return details;
 
@@ -633,6 +776,11 @@ function suppressNoOpAutoCommitDetails(
 
   for (const detail of details) {
     const fingerprint = normalizedCandidateFingerprint(detail.candidate);
+    if (fingerprint && opts.keepFingerprints?.has(fingerprint)) {
+      activeFingerprints.add(fingerprint);
+      kept.push(detail);
+      continue;
+    }
     if (fingerprint && activeFingerprints.has(fingerprint)) continue;
     if (fingerprint) activeFingerprints.add(fingerprint);
     kept.push(detail);
@@ -1458,6 +1606,10 @@ export class CortexRecordsV2 {
     const priorAssistantProposalDurables = priorAssistantProposal
       ? collectAssistantProposalDurables(agentId, priorAssistantProposal.content, req.session_id)
       : [];
+    const activeDurableEntries = collectActiveDurableEntries(agentId);
+    const activeDurables = activeDurableEntries.map(entry => entry.candidate);
+    let activeSelectionDeleteIds: string[] = [];
+    const forceVisibleFingerprints = new Set<string>();
     let confirmationProposal: ExchangeMessage | null = null;
     if (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) {
       if (priorAssistantProposal && isShortUserConfirmation(user)) {
@@ -1477,30 +1629,20 @@ export class CortexRecordsV2 {
 
     let proposalEvidence: ExchangeMessage | null = confirmationProposal;
     if ((normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) && priorAssistantProposal) {
-      const rewrite = inferShortUserProposalRewrite(user);
-      if (rewrite) {
-        const rewritten = normalizeManualInput(agentId, {
-          content: rewrite.synthesized_content,
-          source_type: 'user_explicit',
-          session_id: req.session_id,
-        });
-        if (rewritten.written_kind !== 'session_note') {
-          const rewrittenKey = stableContractKey(rewritten);
-          const compatibleDurables = priorAssistantProposalDurables.filter(candidate => (
-            candidate.written_kind !== 'session_note' &&
-            stableContractKey(candidate) === rewrittenKey
-          ));
-
-          if (rewrittenKey && compatibleDurables.length === 1) {
-            normalizedCandidates = [rewritten];
-            candidateDetails = [{
-              candidate: rewritten,
-              origins: ['deterministic'],
-              source_excerpt: user,
-            }];
-            proposalEvidence = priorAssistantProposal;
-          }
-        }
+      const rewritten = resolveShortUserRewriteAgainstDurables({
+        agentId,
+        userContent: user,
+        sessionId: req.session_id,
+        durables: priorAssistantProposalDurables,
+      });
+      if (rewritten) {
+        normalizedCandidates = [rewritten];
+        candidateDetails = [{
+          candidate: rewritten,
+          origins: ['deterministic'],
+          source_excerpt: user,
+        }];
+        proposalEvidence = priorAssistantProposal;
       } else {
         const selective = arbitrateShortUserProposalSelection(user, priorAssistantProposalDurables);
         if (selective?.action === 'keep') {
@@ -1540,6 +1682,42 @@ export class CortexRecordsV2 {
           }];
           proposalEvidence = priorAssistantProposal;
         }
+      }
+    }
+
+    if (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) {
+      const rewritten = resolveShortUserRewriteAgainstDurables({
+        agentId,
+        userContent: user,
+        sessionId: req.session_id,
+        durables: activeDurables,
+      });
+      if (rewritten) {
+        normalizedCandidates = [rewritten];
+        candidateDetails = [{
+          candidate: rewritten,
+          origins: ['deterministic'],
+          source_excerpt: user,
+        }];
+      }
+    }
+
+    if (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) {
+      const selectedActive = resolveShortUserSelectionAgainstActiveDurables({
+        userContent: user,
+        sessionId: req.session_id,
+        activeDurables: activeDurableEntries,
+      });
+      if (selectedActive) {
+        normalizedCandidates = [selectedActive.candidate];
+        candidateDetails = [{
+          candidate: selectedActive.candidate,
+          origins: ['deterministic'],
+          source_excerpt: user,
+        }];
+        activeSelectionDeleteIds = selectedActive.delete_record_ids;
+        const fingerprint = normalizedCandidateFingerprint(selectedActive.candidate);
+        if (fingerprint) forceVisibleFingerprints.add(fingerprint);
       }
     }
 
@@ -1593,6 +1771,7 @@ export class CortexRecordsV2 {
     const autoCommitDetails = suppressNoOpAutoCommitDetails(
       agentId,
       candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) !== 'review'),
+      { keepFingerprints: forceVisibleFingerprints },
     );
     const reviewDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) === 'review');
 
@@ -1615,6 +1794,10 @@ export class CortexRecordsV2 {
         source_type: result.record.source_type,
         content: result.record.content,
       });
+    }
+
+    for (const recordId of Array.from(new Set(activeSelectionDeleteIds))) {
+      await this.deleteRecord(recordId);
     }
 
     for (const [index, detail] of reviewDetails.entries()) {

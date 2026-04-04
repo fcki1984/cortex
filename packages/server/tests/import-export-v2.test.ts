@@ -1353,6 +1353,86 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-selective-drop-all' }).items).toHaveLength(0);
   });
 
+  it('rewrites a short language follow-up against the current active truth without needing a prior assistant proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-language-rewrite',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-language-rewrite',
+      user_message: '改英文',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('Please answer in English');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-language-rewrite' }).items.map((record) => record.content)).toEqual([
+      'Please answer in English',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-language-rewrite' }).items).toHaveLength(0);
+  });
+
+  it('rewrites a short response-length follow-up against the current active truth without needing a prior assistant proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-length-rewrite',
+      kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-length-rewrite',
+      user_message: '改两句',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('请把回答控制在两句话内');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-length-rewrite' }).items.map((record) => record.content)).toEqual([
+      '请把回答控制在两句话内',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-length-rewrite' }).items).toHaveLength(0);
+  });
+
+  it('keeps only the selected active language rule when a short follow-up drops the current response-length truth', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-language',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-language',
+      kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-language',
+      user_message: '只保留中文',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('profile_rule');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('请用中文回答');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-language' }).items.map((record) => record.content)).toEqual([
+      '请用中文回答',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-language' }).items).toHaveLength(0);
+  });
+
   it('keeps ingest aligned with clause-level winners for compound user input', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 
