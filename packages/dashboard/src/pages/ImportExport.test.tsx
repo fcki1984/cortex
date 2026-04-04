@@ -233,6 +233,53 @@ describe('ImportExport page', () => {
 
   it('sends text import content to the review inbox from the system page', async () => {
     const user = userEvent.setup();
+    apiMocks.createReviewInboxImportV2.mockResolvedValueOnce({
+      batch_id: 'batch_1',
+      source_preview: '说话干脆一点',
+      auto_committed_count: 1,
+      summary: {
+        total: 1,
+        pending: 1,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    });
+    renderPage();
+
+    await screen.findByLabelText('目标智能体');
+    await user.selectOptions(screen.getByLabelText('来源格式'), 'text');
+    await user.type(screen.getByLabelText('来源内容'), '后续交流中文就行。说话干脆一点');
+    await user.click(screen.getByRole('button', { name: '发送到审查箱' }));
+
+    await waitFor(() => {
+      expect(apiMocks.createReviewInboxImportV2).toHaveBeenCalledWith({
+        agent_id: 'default',
+        format: 'text',
+        content: '后续交流中文就行。说话干脆一点',
+        filename: undefined,
+      });
+    });
+
+    expect(await screen.findByText('已自动写入 1 条，另有 1 条进入审查箱。当前待审：说话干脆一点')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '打开对应审查批次' }).getAttribute('href')).toBe('/review-inbox?batch=batch_1');
+  });
+
+  it('shows an auto-commit-only success notice when review inbox import does not create a batch', async () => {
+    const user = userEvent.setup();
+    apiMocks.createReviewInboxImportV2.mockResolvedValueOnce({
+      batch_id: null,
+      source_preview: null,
+      auto_committed_count: 1,
+      summary: {
+        total: 0,
+        pending: 0,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    });
+
     renderPage();
 
     await screen.findByLabelText('目标智能体');
@@ -240,16 +287,7 @@ describe('ImportExport page', () => {
     await user.type(screen.getByLabelText('来源内容'), '后续交流中文就行');
     await user.click(screen.getByRole('button', { name: '发送到审查箱' }));
 
-    await waitFor(() => {
-      expect(apiMocks.createReviewInboxImportV2).toHaveBeenCalledWith({
-        agent_id: 'default',
-        format: 'text',
-        content: '后续交流中文就行',
-        filename: undefined,
-      });
-    });
-
-    expect(await screen.findByText('已发送到审查箱，待处理 1 条。当前待审：后续交流中文就行')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '打开对应审查批次' }).getAttribute('href')).toBe('/review-inbox?batch=batch_1');
+    expect(await screen.findByText('已自动写入 1 条，无需进入审查箱。')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '打开对应审查批次' })).toBeNull();
   });
 });

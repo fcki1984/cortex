@@ -266,9 +266,27 @@ describe('API V2 Integration', () => {
 
       expect(ingested.statusCode).toBe(201);
       const ingestedBody = JSON.parse(ingested.payload);
-      expect(ingestedBody.records).toHaveLength(1);
-      expect(ingestedBody.records[0]?.requested_kind).toBe(sample.requested_kind);
-      expect(ingestedBody.records[0]?.written_kind).toBe(sample.written_kind);
+      if (sample.requested_kind === 'profile_rule' && sample.attribute_key === 'response_style') {
+        expect(ingestedBody.auto_committed_count).toBe(0);
+        expect(ingestedBody.review_pending_count).toBe(1);
+        expect(ingestedBody.review_batch_id).toBeTruthy();
+        expect(ingestedBody.records).toHaveLength(0);
+
+        const detail = await app.inject({
+          method: 'GET',
+          url: `/api/v2/review-inbox/${ingestedBody.review_batch_id}`,
+        });
+        expect(detail.statusCode).toBe(200);
+        const detailBody = JSON.parse(detail.payload);
+        expect(detailBody.items).toHaveLength(1);
+        expect(detailBody.items[0]?.payload?.normalized_kind).toBe(sample.written_kind);
+        expect(detailBody.items[0]?.payload?.attribute_key || null).toBe(sample.attribute_key || null);
+        expect(detailBody.items[0]?.payload?.state_key || null).toBe(sample.state_key || null);
+      } else {
+        expect(ingestedBody.records).toHaveLength(1);
+        expect(ingestedBody.records[0]?.requested_kind).toBe(sample.requested_kind);
+        expect(ingestedBody.records[0]?.written_kind).toBe(sample.written_kind);
+      }
 
       const ingestRelations = await app.inject({
         method: 'GET',
@@ -1767,6 +1785,57 @@ describe('API V2 Integration', () => {
     } finally {
       cortex.recordsV2 = originalRecordsV2;
     }
+  });
+
+  it('deterministically routes colloquial response-style ingest inputs into review instead of session notes', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '说话干脆一点',
+        assistant_message: '记住了',
+        agent_id: 'api-review-routing-colloquial-response-style',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(0);
+    expect(ingestBody.review_pending_count).toBe(1);
+    expect(ingestBody.review_batch_id).toBeTruthy();
+    expect(ingestBody.review_source_preview).toBe('说话干脆一点');
+    expect(ingestBody.review_summary).toEqual({
+      total: 1,
+      pending: 1,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+    expect(ingestBody.records).toHaveLength(0);
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-review-routing-colloquial-response-style',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toHaveLength(0);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${ingestBody.review_batch_id}`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual([
+      expect.objectContaining({
+        suggested_rewrite: '请简洁直接回答',
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+        }),
+      }),
+    ]);
   });
 
   it('returns narrowed review metadata for mixed auto-commit plus review ingest results', async () => {

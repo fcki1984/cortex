@@ -105,9 +105,13 @@ type CollectedCandidateDetail = {
   source_excerpt: string;
 };
 
+export type PreviewImportCandidateDisposition = IngestDetailDisposition;
+
 export type PreviewImportCandidateDetail = {
   candidate: NormalizedRecordCandidate;
+  origins: CandidateOrigin[];
   source_excerpt: string;
+  disposition: PreviewImportCandidateDisposition;
 };
 
 type IngestDetailDisposition = 'auto_commit' | 'review' | 'note';
@@ -362,7 +366,7 @@ function isSharedContractAutoCommitSafeCandidate(normalized: NormalizedRecordCan
   );
 }
 
-function classifyIngestDetailDisposition(detail: CollectedCandidateDetail): IngestDetailDisposition {
+function classifySharedDetailDisposition(detail: Pick<CollectedCandidateDetail, 'candidate' | 'origins'>): IngestDetailDisposition {
   if (detail.candidate.written_kind === 'session_note') return 'note';
   if (isSharedContractAutoCommitSafeCandidate(detail.candidate)) return 'auto_commit';
   if (
@@ -1220,7 +1224,15 @@ export class CortexRecordsV2 {
     });
 
     if (candidateDetails.length === 0) {
-      return [{ candidate: hintedFallback, source_excerpt: content }];
+      return [{
+        candidate: hintedFallback,
+        origins: ['fallback'],
+        source_excerpt: content,
+        disposition: classifySharedDetailDisposition({
+          candidate: hintedFallback,
+          origins: ['fallback'],
+        }),
+      }];
     }
 
     if (
@@ -1228,12 +1240,22 @@ export class CortexRecordsV2 {
       hintedFallback.written_kind !== 'session_note' &&
       candidateDetails.every(detail => detail.candidate.written_kind === 'session_note')
     ) {
-      return [{ candidate: hintedFallback, source_excerpt: content }];
+      return [{
+        candidate: hintedFallback,
+        origins: ['fallback'],
+        source_excerpt: content,
+        disposition: classifySharedDetailDisposition({
+          candidate: hintedFallback,
+          origins: ['fallback'],
+        }),
+      }];
     }
 
     return candidateDetails.map(detail => ({
       candidate: detail.candidate,
+      origins: detail.origins,
       source_excerpt: detail.source_excerpt,
+      disposition: classifySharedDetailDisposition(detail),
     }));
   }
 
@@ -1502,8 +1524,8 @@ export class CortexRecordsV2 {
     }> = [];
     const reviewRecordCandidates: Array<Record<string, unknown>> = [];
 
-    const autoCommitDetails = candidateDetails.filter((detail) => classifyIngestDetailDisposition(detail) !== 'review');
-    const reviewDetails = candidateDetails.filter((detail) => classifyIngestDetailDisposition(detail) === 'review');
+    const autoCommitDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) !== 'review');
+    const reviewDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) === 'review');
 
     for (const detail of autoCommitDetails) {
       const normalized = detail.candidate;

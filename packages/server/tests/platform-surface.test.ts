@@ -108,10 +108,10 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}');
     expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}/apply');
     expect(smoke).toContain("reviewInboxListFull.json?.sync?.mode === 'full'");
-    expect(smoke).toContain("reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请把回答控制在三句话内'");
+    expect(smoke).toContain("reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请简洁直接回答'");
     expect(smoke).toContain('cursor: reviewInboxDeltaBase.json?.sync?.cursor');
     expect(smoke).toContain("reviewInboxApply.json?.summary?.committed === 1");
-    expect(smoke).toContain("reviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内')");
+    expect(smoke).toContain("reviewInboxRecords.json?.items || []).some((item) => item.content === '请简洁直接回答')");
   });
 
   it('parses MCP search_debug payloads instead of matching stale source text', () => {

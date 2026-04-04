@@ -101,6 +101,19 @@ type ExportSummary = {
   agents: AgentRecord[];
 };
 
+type ReviewInboxImportResponse = {
+  batch_id?: string | null;
+  source_preview?: string | null;
+  auto_committed_count?: number;
+  summary?: {
+    total?: number;
+    pending?: number;
+    accepted?: number;
+    rejected?: number;
+    failed?: number;
+  };
+};
+
 const RECORD_KIND_OPTIONS: RecordKind[] = ['profile_rule', 'fact_slot', 'task_state', 'session_note'];
 
 function guessImportFormat(filename: string): ImportFormat | null {
@@ -237,6 +250,58 @@ function formatInlinePreview(text: string | undefined | null, maxLength = 72): s
   if (!normalized) return null;
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function buildReviewInboxNotice(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  result: ReviewInboxImportResponse,
+): { message: string; action: { label: string; href: string } | null } {
+  const pendingCount = Math.max(0, result.summary?.pending ?? result.summary?.total ?? 0);
+  const autoCommittedCount = Math.max(0, result.auto_committed_count ?? 0);
+  const sourcePreview = formatInlinePreview(result.source_preview);
+  const action = typeof result.batch_id === 'string' && result.batch_id
+    ? {
+        label: t('importExport.reviewInboxOpenBatch'),
+        href: `/review-inbox?batch=${encodeURIComponent(result.batch_id)}`,
+      }
+    : null;
+
+  if (pendingCount > 0 && autoCommittedCount > 0) {
+    return {
+      message: sourcePreview
+        ? t('importExport.reviewInboxAutoCommittedWithPreview', {
+            auto: autoCommittedCount,
+            pending: pendingCount,
+            preview: sourcePreview,
+          })
+        : t('importExport.reviewInboxAutoCommitted', {
+            auto: autoCommittedCount,
+            pending: pendingCount,
+          }),
+      action,
+    };
+  }
+
+  if (pendingCount > 0) {
+    return {
+      message: sourcePreview
+        ? t('importExport.reviewInboxCreatedWithPreview', { count: pendingCount, preview: sourcePreview })
+        : t('importExport.reviewInboxCreated', { count: pendingCount }),
+      action,
+    };
+  }
+
+  if (autoCommittedCount > 0) {
+    return {
+      message: t('importExport.reviewInboxAutoCommittedOnly', { count: autoCommittedCount }),
+      action: null,
+    };
+  }
+
+  return {
+    message: t('importExport.reviewInboxCreated', { count: pendingCount }),
+    action,
+  };
 }
 
 export default function ImportExport() {
@@ -491,7 +556,7 @@ export default function ImportExport() {
     setSendingToInbox(true);
     setNotice(null);
     try {
-      const result: any = await createReviewInboxImportV2({
+      const result = await createReviewInboxImportV2({
         agent_id: importAgentId,
         format: importFormat,
         content: sourceContent,
@@ -499,23 +564,11 @@ export default function ImportExport() {
       });
       setPreview(null);
       setConfirmResult(null);
-      const sourcePreview = formatInlinePreview(result.source_preview);
+      const nextNotice = buildReviewInboxNotice(t, result as ReviewInboxImportResponse);
       setNotice({
-        message: sourcePreview
-          ? t('importExport.reviewInboxCreatedWithPreview', {
-              count: result.summary?.pending ?? result.summary?.total ?? 0,
-              preview: sourcePreview,
-            })
-          : t('importExport.reviewInboxCreated', {
-              count: result.summary?.pending ?? result.summary?.total ?? 0,
-            }),
+        message: nextNotice.message,
         type: 'success',
-        action: typeof result.batch_id === 'string' && result.batch_id
-          ? {
-              label: t('importExport.reviewInboxOpenBatch'),
-              href: `/review-inbox?batch=${encodeURIComponent(result.batch_id)}`,
-            }
-          : null,
+        action: nextNotice.action,
       });
     } catch (error: any) {
       setNotice({ message: formatRequestError(t, error), type: 'error' });

@@ -9,6 +9,8 @@ import {
   inferTaskStateKey,
   isWeakConversationalProfileRule,
   isSpeculativeContent,
+  matchesColloquialRecallRefactorTask,
+  matchesConversationalLocationFact,
 } from './contract.js';
 import type {
   NormalizedRecordCandidate,
@@ -244,6 +246,7 @@ function firstDefined<T>(...values: Array<T | null | undefined>): T | null {
 function inferUserSubject(content: string): string | null {
   const trimmed = content.trim();
   if (USER_SUBJECT_RE.test(trimmed)) return 'user';
+  if (matchesConversationalLocationFact(trimmed)) return 'user';
   if (IMPLICIT_USER_FOLLOWUP_PREFIX_RE.test(trimmed) && inferRequestedKindFromContent(trimmed) === 'fact_slot') {
     return 'user';
   }
@@ -252,6 +255,7 @@ function inferUserSubject(content: string): string | null {
 
 function inferSubjectKey(content: string): string | null {
   if (USER_SUBJECT_RE.test(content)) return 'user';
+  if (matchesColloquialRecallRefactorTask(content)) return 'cortex';
   if (/\bcortex\b/i.test(content)) return 'cortex';
   if (AGENT_SUBJECT_RE.test(content)) return 'agent';
   return null;

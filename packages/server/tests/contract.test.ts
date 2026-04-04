@@ -275,6 +275,49 @@ describe('V2 shared atomic contract', () => {
     }
   });
 
+  it('canonicalizes accepted colloquial fact and task inputs without relying on deep extraction', () => {
+    const samples = [
+      {
+        input: '人在东京这边',
+        written_kind: 'fact_slot',
+        attribute_key: 'location',
+        state_key: null,
+        content: '我住东京',
+      },
+      {
+        input: '先收一下 recall 那块',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      },
+    ] as const;
+
+    for (const sample of samples) {
+      const normalized = normalizeManualInput(`contract-colloquial-extra-${sample.input}`, {
+        content: sample.input,
+      });
+
+      expect(normalized.written_kind).toBe(sample.written_kind);
+      expect(normalized.candidate.kind).toBe(sample.written_kind);
+      expect(
+        normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
+          ? normalized.candidate.attribute_key
+          : null,
+      ).toBe(sample.attribute_key);
+      expect(
+        normalized.candidate.kind === 'task_state'
+          ? normalized.candidate.state_key
+          : null,
+      ).toBe(sample.state_key);
+      expect(
+        normalized.candidate.kind === 'profile_rule' || normalized.candidate.kind === 'fact_slot'
+          ? normalized.candidate.value_text
+          : normalized.candidate.summary,
+      ).toBe(sample.content);
+    }
+  });
+
   it('exposes a shared colloquial profile-rule helper with weak-language gating', async () => {
     const contractModule = await import('../src/v2/contract.js');
     const matchConversationalProfileRule = (contractModule as Record<string, unknown>).matchConversationalProfileRule as
@@ -457,6 +500,18 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('说话干脆一点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('回答风格简洁直接')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
     expect(matchConversationalProfileRule!('中文就行吧')).toBe(null);
     expect(matchConversationalProfileRule!('以后都中文回答就行吧')).toBe(null);
     expect(matchConversationalProfileRule!('三句就够了吧')).toBe(null);
@@ -504,6 +559,10 @@ describe('V2 shared atomic contract', () => {
       expect.objectContaining({
         attribute_key: 'solution_complexity',
         canonical_content: '不要复杂方案',
+      }),
+      expect.objectContaining({
+        attribute_key: 'response_style',
+        canonical_content: '请简洁直接回答',
       }),
     ]));
 

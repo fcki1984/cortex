@@ -76,8 +76,9 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
       });
       reply.code(201);
       return {
-        batch_id: result.batch.id,
-        source_preview: result.batch.source_preview,
+        batch_id: result.batch?.id || null,
+        source_preview: result.batch?.source_preview || null,
+        auto_committed_count: result.auto_committed_count,
         summary: result.summary,
       };
     } catch (error: any) {

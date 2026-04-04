@@ -449,14 +449,33 @@ async function runRound(round) {
     assert((preview.json?.relation_candidates || []).some((item) => item.predicate === 'lives_in'), 'text import preview did not derive lives_in');
     logStep('import preview', 'text contract looks correct');
 
-    const reviewInboxImport = await request('create review inbox import batch', 'POST', '/api/v2/review-inbox/import', {
+    const reviewInboxAutoImport = await request('auto-commit stable review inbox import', 'POST', '/api/v2/review-inbox/import', {
       body: {
         agent_id: reviewImportAgentId,
         format: 'text',
         content: '回答控制在三句话内',
       },
     });
-    assert(reviewInboxImport.response.status === 201, `POST /api/v2/review-inbox/import returned ${reviewInboxImport.response.status}`);
+    assert(reviewInboxAutoImport.response.status === 201, `POST /api/v2/review-inbox/import auto-commit returned ${reviewInboxAutoImport.response.status}`);
+    assert(reviewInboxAutoImport.json?.batch_id == null, 'stable review inbox import should not leave a batch behind');
+    assert(reviewInboxAutoImport.json?.auto_committed_count === 1, 'stable review inbox import did not auto-commit exactly one item');
+    assert(reviewInboxAutoImport.json?.summary?.pending === 0, 'stable review inbox import left unexpected pending items');
+
+    const autoCommittedReviewInboxRecords = await request('list auto-committed review inbox records', 'GET', `/api/v2/records${query({
+      agent_id: reviewImportAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(autoCommittedReviewInboxRecords.response.status === 200, `GET /api/v2/records auto-committed review inbox returned ${autoCommittedReviewInboxRecords.response.status}`);
+    assert((autoCommittedReviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内'), 'stable review inbox import did not write the canonical auto-committed record');
+
+    const reviewInboxImport = await request('create review inbox review batch', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: reviewImportAgentId,
+        format: 'text',
+        content: '回答风格简洁直接',
+      },
+    });
+    assert(reviewInboxImport.response.status === 201, `POST /api/v2/review-inbox/import review batch returned ${reviewInboxImport.response.status}`);
     assert(reviewInboxImport.json?.summary?.pending === 1, 'review inbox import did not create exactly one pending item');
     const reviewImportBatchId = reviewInboxImport.json?.batch_id;
     assert(typeof reviewImportBatchId === 'string' && reviewImportBatchId.length > 0, 'review inbox import did not return batch_id');
@@ -474,7 +493,7 @@ async function runRound(round) {
     });
     assert(reviewInboxDetail.response.status === 200, `GET /api/v2/review-inbox/:id returned ${reviewInboxDetail.response.status}`);
     assert(reviewInboxDetail.json?.summary?.pending === 1, 'review inbox detail did not preserve pending summary');
-    assert(reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请把回答控制在三句话内', 'review inbox detail did not preserve canonical suggested rewrite');
+    assert(reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请简洁直接回答', 'review inbox detail did not preserve canonical suggested rewrite');
 
     const reviewInboxApply = await request('apply review inbox batch', 'POST', `/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}/apply`, {
       body: {
@@ -490,7 +509,7 @@ async function runRound(round) {
       limit: 20,
     })}`, { retryable: true });
     assert(reviewInboxRecords.response.status === 200, `GET /api/v2/records review inbox returned ${reviewInboxRecords.response.status}`);
-    assert((reviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内'), 'review inbox apply did not write the canonical record');
+    assert((reviewInboxRecords.json?.items || []).some((item) => item.content === '请简洁直接回答'), 'review inbox apply did not write the canonical record');
 
     const reviewInboxDeltaBase = await request('list review inbox batches after apply', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewImportAgentId)}&limit=20`, {
       retryable: true,
@@ -499,14 +518,14 @@ async function runRound(round) {
     assert(reviewInboxDeltaBase.json?.sync?.mode === 'full', 'review inbox delta base list did not return sync.mode=full');
     assert(typeof reviewInboxDeltaBase.json?.sync?.cursor === 'string' && reviewInboxDeltaBase.json.sync.cursor.length > 0, 'review inbox delta base list did not return sync cursor');
 
-    const reviewInboxDeltaImport = await request('create second review inbox import batch', 'POST', '/api/v2/review-inbox/import', {
+    const reviewInboxDeltaImport = await request('create second review inbox review batch', 'POST', '/api/v2/review-inbox/import', {
       body: {
         agent_id: reviewImportAgentId,
         format: 'text',
-        content: '不要复杂方案',
+        content: '回复风格简洁直接',
       },
     });
-    assert(reviewInboxDeltaImport.response.status === 201, `POST /api/v2/review-inbox/import second batch returned ${reviewInboxDeltaImport.response.status}`);
+    assert(reviewInboxDeltaImport.response.status === 201, `POST /api/v2/review-inbox/import second review batch returned ${reviewInboxDeltaImport.response.status}`);
     const reviewInboxDeltaBatchId = reviewInboxDeltaImport.json?.batch_id;
     assert(typeof reviewInboxDeltaBatchId === 'string' && reviewInboxDeltaBatchId.length > 0, 'second review inbox import did not return batch_id');
 
@@ -521,7 +540,7 @@ async function runRound(round) {
     assert(reviewInboxDelta.json?.sync?.mode === 'delta', 'review inbox delta list did not return sync.mode=delta');
     assert((reviewInboxDelta.json?.items || []).length === 1, 'review inbox delta list did not return exactly one changed batch');
     assert(reviewInboxDelta.json?.items?.[0]?.id === reviewInboxDeltaBatchId, 'review inbox delta list returned the wrong batch');
-    logStep('review inbox', 'import, detail, apply, and delta sync all passed');
+    logStep('review inbox', 'auto-commit, review batch, apply, and delta sync all passed');
 
     const roundtripSourceRecord = await request('create round-trip source record', 'POST', '/api/v2/records', {
       body: {
@@ -557,7 +576,7 @@ async function runRound(round) {
       body: {
         agent_id: deletedAgentId,
         format: 'text',
-        content: '回答控制在三句话内',
+        content: '回答风格简洁直接',
       },
     });
     assert(deletedReviewBatch.response.status === 201, `POST /api/v2/review-inbox/import deleted-agent returned ${deletedReviewBatch.response.status}`);

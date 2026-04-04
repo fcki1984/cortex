@@ -38,15 +38,18 @@ export type ShortUserProposalSelection = {
   drop_all: boolean;
 };
 
+export type ConversationalProfileRuleDisposition = 'auto_commit' | 'review';
+
 export type ConversationalProfileRuleMatch = {
-  attribute_key: 'language_preference' | 'response_length' | 'solution_complexity';
+  attribute_key: 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style';
   canonical_content: string;
-  disposition: 'auto_commit';
+  disposition: ConversationalProfileRuleDisposition;
 };
 
 export type V2ContractProfileRuleAliasSet = {
   attribute_key: ConversationalProfileRuleMatch['attribute_key'];
   canonical_content: string;
+  disposition: ConversationalProfileRuleDisposition;
   strong_inputs: string[];
   weak_inputs: string[];
 };
@@ -56,10 +59,43 @@ type InternalProfileRuleAliasSpec = V2ContractProfileRuleAliasSet & {
   matches_attribute: (content: string) => boolean;
 };
 
+function matchesCanonicalResponseStyle(content: string): boolean {
+  return (
+    (
+      /(?:直接|干脆)/i.test(content) &&
+      /(?:回答|回复|说话|表达|风格|answer|reply|response|style)/i.test(content)
+    ) ||
+    /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|说话|表达|风格)?/i.test(content) ||
+    /(?:回答|回复|说话|表达|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
+    (
+      /(?:answer|reply|response|style)/i.test(content) &&
+      /(?:concise|brief)/i.test(content) &&
+      /direct/i.test(content)
+    )
+  );
+}
+
+function matchesResponseStyleAttribute(content: string): boolean {
+  return (
+    /(?:简洁|简短|精简|直接|concise|brief|short|direct).*(回答|回复|answer|response|解释)/i.test(content) ||
+    /(回答|回复|answer|response).*(简洁|简短|精简|直接|concise|brief|short|direct)/i.test(content) ||
+    matchesCanonicalResponseStyle(content)
+  );
+}
+
+export function matchesConversationalLocationFact(content: string): boolean {
+  return /(?:人(?:在)?|我(?:现在|目前)?在)\s*([\u4e00-\u9fff]{1,12})(?:这边|那边)/i.test(content);
+}
+
+export function matchesColloquialRecallRefactorTask(content: string): boolean {
+  return /(?:先(?:收|看|处理|搞)(?:一下|下)?|先把).{0,12}\brecall\b.{0,8}(?:那块|这块|这边)?/i.test(content);
+}
+
 const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
   {
     attribute_key: 'language_preference',
     canonical_content: '请用中文回答',
+    disposition: 'auto_commit',
     strong_inputs: [
       '请用中文回答',
       '后续交流中文就行',
@@ -101,6 +137,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
   {
     attribute_key: 'response_length',
     canonical_content: '请把回答控制在三句话内',
+    disposition: 'auto_commit',
     strong_inputs: [
       '请把回答控制在三句话内',
       '三句话内就行',
@@ -145,6 +182,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
   {
     attribute_key: 'solution_complexity',
     canonical_content: '不要复杂方案',
+    disposition: 'auto_commit',
     strong_inputs: [
       '不要复杂方案',
       '别整复杂方案',
@@ -185,12 +223,33 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       /(?:别搞太复杂|别整复杂方案|别太复杂|简单方案就好|轻量方案就好|keep it simple|avoid complex)/i.test(content)
     ),
   },
+  {
+    attribute_key: 'response_style',
+    canonical_content: '请简洁直接回答',
+    disposition: 'review',
+    strong_inputs: [
+      '请简洁直接回答',
+      '回答简洁直接',
+      '回答风格简洁直接',
+      '回复风格简洁直接',
+      '说话干脆一点',
+    ],
+    weak_inputs: [
+      '尽量简洁直接',
+      '尽量说话干脆一点',
+      '最好简洁直接一点',
+      '优先简洁直接回答',
+    ],
+    matches_conversational: (content: string) => matchesCanonicalResponseStyle(content),
+    matches_attribute: (content: string) => matchesResponseStyleAttribute(content),
+  },
 ];
 
 export const V2_CONTRACT_PROFILE_RULE_ALIAS_SETS: V2ContractProfileRuleAliasSet[] = PROFILE_RULE_ALIAS_SPECS.map(
-  ({ attribute_key, canonical_content, strong_inputs, weak_inputs }) => ({
+  ({ attribute_key, canonical_content, disposition, strong_inputs, weak_inputs }) => ({
     attribute_key,
     canonical_content,
+    disposition,
     strong_inputs: [...strong_inputs],
     weak_inputs: [...weak_inputs],
   }),
@@ -241,6 +300,14 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'fact_slot(entity_key=user, attribute_key=location)',
   },
   {
+    input: '人在东京这边',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    attribute_key: 'location',
+    relation_predicate: 'lives_in',
+    output: 'fact_slot(entity_key=user, attribute_key=location)',
+  },
+  {
     input: '现在在 OpenAI 工作',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
@@ -258,6 +325,14 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
   {
     input: '当前任务是重构 Cortex recall',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    state_key: 'refactor_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
+    input: '先收一下 recall 那块',
     requested_kind: 'task_state',
     written_kind: 'task_state',
     state_key: 'refactor_status',
@@ -408,19 +483,7 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   }
 
   if (attributeKey === 'response_style') {
-    if (
-      (
-        /(?:直接|干脆)/i.test(content) &&
-        /(?:回答|回复|说话|表达|风格)/i.test(content)
-      ) ||
-      /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|说话|表达|风格)?/i.test(content) ||
-      /(?:回答|回复|说话|表达|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
-      (
-        /(?:answer|reply|response|style)/i.test(content) &&
-        /(?:concise|brief)/i.test(content) &&
-        /direct/i.test(content)
-      )
-    ) {
+    if (matchesCanonicalResponseStyle(content)) {
       return /[A-Za-z]/.test(content)
         ? 'Please keep responses concise and direct'
         : '请简洁直接回答';
@@ -443,7 +506,7 @@ export function matchConversationalProfileRule(content: string): ConversationalP
     return {
       attribute_key: spec.attribute_key,
       canonical_content: canonicalContent,
-      disposition: 'auto_commit',
+      disposition: spec.disposition,
     };
   }
 
@@ -471,7 +534,12 @@ function canonicalFactSlotContent(attributeKey: string, content: string, entityK
 function canonicalTaskStateContent(stateKey: string, content: string, subjectKey?: string | null): string | null {
   if (subjectKey && subjectKey !== 'cortex') return null;
   if (stateKey !== 'refactor_status') return null;
-  if (!/cortex/i.test(content) || !/recall/i.test(content) || !/(?:重构|refactor)/i.test(content)) return null;
+  if (
+    !matchesColloquialRecallRefactorTask(content) &&
+    (!/cortex/i.test(content) || !/recall/i.test(content) || !/(?:重构|refactor)/i.test(content))
+  ) {
+    return null;
+  }
   return '当前任务是重构 Cortex recall';
 }
 
@@ -638,10 +706,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
   if (findProfileRuleAliasSpec('language_preference')?.matches_attribute(content)) {
     return 'language_preference';
   }
-  if (
-    /(?:简洁|简短|精简|直接|concise|brief|short|direct).*(回答|回复|answer|response|解释)/i.test(content) ||
-    /(回答|回复|answer|response).*(简洁|简短|精简|直接|concise|brief|short|direct)/i.test(content)
-  ) {
+  if (matchesResponseStyleAttribute(content) && ownerScope === 'user') {
     return 'response_style';
   }
   if (findProfileRuleAliasSpec('response_length')?.matches_attribute(content)) {
@@ -655,6 +720,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
 }
 
 function matchFactSlotAttribute(content: string): string | null {
+  if (matchesConversationalLocationFact(content)) return 'location';
   if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
   if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|任职于|就职于|供职于|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
@@ -666,6 +732,7 @@ function matchFactSlotAttribute(content: string): string | null {
 }
 
 function matchTaskStateKey(content: string): string | null {
+  if (matchesColloquialRecallRefactorTask(content)) return 'refactor_status';
   if (/重构|rewrite|refactor/i.test(content)) return 'refactor_status';
   if (/部署|deploy|deployment/i.test(content)) return 'deployment_status';
   if (/迁移|migrate|migration/i.test(content)) return 'migration_status';
@@ -688,6 +755,7 @@ export function extractFactRelationObjectValue(attributeKey: string | null | und
   switch (attributeKey) {
     case 'location':
       return matchRelationObjectValue(trimmed, [
+        /(?:人(?:在)?|我(?:现在|目前)?在)\s*([\u4e00-\u9fff]{1,12})(?:这边|那边)/i,
         /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,

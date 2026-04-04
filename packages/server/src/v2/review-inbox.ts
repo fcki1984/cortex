@@ -1,7 +1,11 @@
 import { ensureAgent } from '../db/index.js';
 import { getDb } from '../db/connection.js';
 import { generateId } from '../utils/helpers.js';
-import { confirmImport, previewImport, type ImportFormat } from './import-export.js';
+import {
+  confirmImport,
+  previewImportForReviewInbox,
+  type ImportFormat,
+} from './import-export.js';
 import type { CortexRelationsV2 } from './relations.js';
 import {
   buildRecordReviewAssist,
@@ -114,6 +118,16 @@ function summarize(items: ReviewItem[]): ReviewBatchSummary {
     rejected: 0,
     failed: 0,
   });
+}
+
+function emptySummary(): ReviewBatchSummary {
+  return {
+    total: 0,
+    pending: 0,
+    accepted: 0,
+    rejected: 0,
+    failed: 0,
+  };
 }
 
 function resolveBatchStatus(summary: ReviewBatchSummary): ReviewBatchStatus {
@@ -425,27 +439,68 @@ export class CortexReviewInboxV2 {
 
   async createImportBatch(input: {
     agent_id: string;
-    format: ImportFormat;
+    format: 'text' | 'memory_md';
     content: string;
     source_label?: string;
   }): Promise<{
-    batch: ReviewBatch;
+    batch: ReviewBatch | null;
     items: ReviewItem[];
     summary: ReviewBatchSummary;
+    auto_committed_count: number;
   }> {
-    if (input.format !== 'text' && input.format !== 'memory_md') {
-      throw new Error('review inbox import only supports text and memory_md');
+    const preview = await previewImportForReviewInbox(this.recordsV2, input);
+    let autoCommittedCount = 0;
+    let reviewRecordCandidates = [...preview.review_record_candidates];
+    let reviewRelationCandidates = [...preview.review_relation_candidates];
+
+    if (preview.auto_commit_record_candidates.length > 0) {
+      const autoCommitResult = await confirmImport(this.recordsV2, this.relationsV2, {
+        agent_id: input.agent_id,
+        record_candidates: preview.auto_commit_record_candidates,
+        relation_candidates: [],
+      });
+      autoCommittedCount = autoCommitResult.summary.committed;
+
+      const failedAutoCandidateIds = new Set(
+        autoCommitResult.failed
+          .filter((entry) => entry.type === 'record' && typeof entry.candidate_id === 'string')
+          .map((entry) => entry.candidate_id as string),
+      );
+
+      if (failedAutoCandidateIds.size > 0) {
+        const failedAutoRecords = preview.auto_commit_record_candidates.filter((candidate) => (
+          failedAutoCandidateIds.has(candidate.candidate_id)
+        ));
+        reviewRecordCandidates = [...failedAutoRecords, ...reviewRecordCandidates];
+      }
     }
 
-    const preview = await previewImport(this.recordsV2, input);
-    return this.createBatch({
+    const reviewItems = buildImportItems({
+      record_candidates: reviewRecordCandidates,
+      relation_candidates: reviewRelationCandidates,
+    });
+
+    if (reviewItems.length === 0) {
+      return {
+        batch: null,
+        items: [],
+        summary: emptySummary(),
+        auto_committed_count: autoCommittedCount,
+      };
+    }
+
+    const created = this.createBatch({
       agent_id: input.agent_id,
       source_kind: 'import_preview',
       import_format: input.format,
       source_label: input.source_label || input.format,
       source_preview: input.content,
-      items: buildImportItems(preview),
+      items: reviewItems,
     });
+    return {
+      ...created,
+      auto_committed_count: autoCommittedCount,
+    };
   }
 
   listBatches(opts: {

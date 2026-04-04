@@ -1091,9 +1091,23 @@ describe('V2 Import / Export', () => {
         assistant_message: '记住了',
       });
 
-      expect(ingested.records).toHaveLength(1);
-      expect(ingested.records[0]?.requested_kind).toBe(sample.requested_kind);
-      expect(ingested.records[0]?.written_kind).toBe(sample.written_kind);
+      if (sample.requested_kind === 'profile_rule' && sample.attribute_key === 'response_style') {
+        expect(ingested.records).toHaveLength(0);
+        expect(ingested.review_record_candidates).toHaveLength(1);
+        expect(ingested.review_record_candidates[0]).toEqual(expect.objectContaining({
+          requested_kind: sample.requested_kind,
+          normalized_kind: sample.written_kind,
+          attribute_key: sample.attribute_key,
+          state_key: sample.state_key || undefined,
+          content: preview.record_candidates[0]?.content,
+          source_excerpt: sample.input,
+        }));
+      } else {
+        expect(ingested.records).toHaveLength(1);
+        expect(ingested.records[0]?.requested_kind).toBe(sample.requested_kind);
+        expect(ingested.records[0]?.written_kind).toBe(sample.written_kind);
+        expect(ingested.review_record_candidates).toHaveLength(0);
+      }
       expect(relations.listCandidates({ agent_id: `contract-ingest-${index}` }).items.map((item) => item.predicate)).toEqual(
         sample.relation_predicate ? [sample.relation_predicate] : [],
       );

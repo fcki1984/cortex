@@ -14,6 +14,7 @@ import { CortexReviewInboxV2 } from '../src/v2/review-inbox.js';
 import {
   createNoOpLLM,
   createReviewAssistRecordPayload,
+  createReviewAssistRelationPayload,
   createReviewInboxCompoundDurableMockLLM,
   createReviewInboxDurableMockLLM,
   createReviewInboxResponseStyleMockLLM,
@@ -215,6 +216,47 @@ describe('V2 review inbox', () => {
           attribute_key: 'response_style',
           content: '请简洁直接回答',
           source_excerpt: '回答简洁直接',
+        }),
+      }),
+    ]);
+  });
+
+  it('routes colloquial response-style imports into review with the same canonical rewrite', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-colloquial-response-style',
+        format: 'text',
+        content: '说话干脆一点',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.auto_committed_count).toBe(0);
+    expect(createdBody.summary.pending).toBe(1);
+    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(typeof createdBody.batch_id).toBe('string');
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual([
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '请简洁直接回答',
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
         }),
       }),
     ]);
@@ -1336,7 +1378,7 @@ describe('V2 review inbox', () => {
   });
 
   it('returns updated existing batches when listing review inbox with a cursor', async () => {
-    const setup = await createApp({ reviewOnly: true });
+    const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
 
     const created = await app.inject({
@@ -1345,7 +1387,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-sync-delta-updated',
         format: 'text',
-        content: '回答控制在三句话内',
+        content: '说话干脆一点',
       },
     });
     expect(created.statusCode).toBe(201);
@@ -1629,8 +1671,64 @@ describe('V2 review inbox', () => {
     expect(JSON.parse(inbox.payload).items).toHaveLength(0);
   });
 
-  it('creates an import review batch for text input and applies accept_all through the existing write path', async () => {
-    const setup = await createApp({ reviewOnly: true });
+  it('auto-commits already-accepted colloquial compound durables without deep extraction help', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-compound-auto-deterministic',
+        user_message: '人在东京这边。先收一下 recall 那块',
+        assistant_message: '记住了',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: '我住东京',
+      }),
+      expect.objectContaining({
+        written_kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]));
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-compound-auto-deterministic',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: '我住东京',
+      }),
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-live-compound-auto-deterministic',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
+  it('auto-commits shared-contract-safe import text without creating a review batch', async () => {
+    const setup = await createApp();
     app = setup.app;
 
     const created = await app.inject({
@@ -1645,37 +1743,24 @@ describe('V2 review inbox', () => {
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
-    expect(typeof createdBody.batch_id).toBe('string');
-    expect(createdBody.source_preview).toBe('后续交流中文就行');
-    expect(createdBody.summary.pending).toBe(1);
-
-    const applied = await app.inject({
-      method: 'POST',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
-      payload: {
-        accept_all: true,
-      },
-    });
-
-    expect(applied.statusCode).toBe(200);
-    const appliedBody = JSON.parse(applied.payload);
-    expect(appliedBody.summary.committed).toBe(1);
-    expect(appliedBody.remaining_pending).toBe(0);
-    expect(appliedBody.batch_summary).toEqual({
-      total: 1,
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.source_preview || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
+    expect(createdBody.summary).toEqual({
+      total: 0,
       pending: 0,
-      accepted: 1,
+      accepted: 0,
       rejected: 0,
       failed: 0,
     });
 
-    const detail = await app.inject({
+    const inbox = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: '/api/v2/review-inbox?agent_id=review-import',
     });
-    const detailBody = JSON.parse(detail.payload);
-    expect(detailBody.batch.status).toBe('completed');
-    expect(detailBody.summary.accepted).toBe(1);
+
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
 
     const records = await app.inject({
       method: 'GET',
@@ -1692,8 +1777,8 @@ describe('V2 review inbox', () => {
     ]));
   });
 
-  it('persists canonical rewrites for import review batches built from deterministic preview items', async () => {
-    const setup = await createApp();
+  it('keeps import review batches focused on remaining review-only clauses after safe auto-commit', async () => {
+    const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
 
     const created = await app.inject({
@@ -1702,13 +1787,16 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-import-preview',
         format: 'text',
-        content: '回答控制在三句话内',
+        content: '后续交流中文就行。说话干脆一点',
       },
     });
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
-    expect(createdBody.source_preview).toBe('回答控制在三句话内');
+    expect(typeof createdBody.batch_id).toBe('string');
+    expect(createdBody.auto_committed_count).toBe(1);
+    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(createdBody.summary.pending).toBe(1);
 
     const detail = await app.inject({
       method: 'GET',
@@ -1716,10 +1804,32 @@ describe('V2 review inbox', () => {
     });
 
     expect(detail.statusCode).toBe(200);
-    expect(JSON.parse(detail.payload).items[0]).toEqual(expect.objectContaining({
-      suggested_action: 'accept',
-      suggested_rewrite: '请把回答控制在三句话内',
-    }));
+    expect(JSON.parse(detail.payload).items).toEqual([
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '请简洁直接回答',
+        payload: expect.objectContaining({
+          normalized_kind: 'profile_rule',
+          attribute_key: 'response_style',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+        }),
+      }),
+    ]);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-preview',
+    });
+
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]));
   });
 
   it('keeps response-style import review batches aligned with the same canonical rewrite and apply path', async () => {
@@ -1788,7 +1898,7 @@ describe('V2 review inbox', () => {
     ]));
   });
 
-  it('keeps clause-level source excerpts for deep-only compound import review items', async () => {
+  it('auto-commits clause-level deep-only compound import items without creating review work', async () => {
     const setup = await createApp({ compoundReview: true });
     app = setup.app;
 
@@ -1804,32 +1914,30 @@ describe('V2 review inbox', () => {
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(2);
 
-    const detail = await app.inject({
+    const records = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: '/api/v2/records?agent_id=review-import-compound-preview',
     });
 
-    expect(detail.statusCode).toBe(200);
-    expect(JSON.parse(detail.payload).items).toEqual(expect.arrayContaining([
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        payload: expect.objectContaining({
-          normalized_kind: 'fact_slot',
-          content: '我住东京',
-          source_excerpt: '人在东京这边',
-        }),
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: '我住东京',
       }),
       expect.objectContaining({
-        payload: expect.objectContaining({
-          normalized_kind: 'task_state',
-          content: '当前任务是重构 Cortex recall',
-          source_excerpt: '先收一下 recall 那块',
-        }),
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
       }),
     ]));
   });
 
-  it('uses clause excerpts as import review batch source previews instead of raw markdown scaffolding', async () => {
+  it('auto-commits safe memory-md imports without creating review batches', async () => {
     const setup = await createApp({ compoundReview: true });
     app = setup.app;
 
@@ -1850,49 +1958,55 @@ describe('V2 review inbox', () => {
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
 
-    const detail = await app.inject({
+    const records = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: '/api/v2/records?agent_id=review-import-memory-md-source-preview',
     });
 
-    expect(detail.statusCode).toBe(200);
-    const detailBody = JSON.parse(detail.payload);
-    expect(detailBody.batch.source_preview).toBe('先收一下 recall 那块');
-    expect(detailBody.items).toEqual([
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        payload: expect.objectContaining({
-          source_excerpt: '先收一下 recall 那块',
-        }),
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
       }),
-    ]);
+    ]));
   });
 
   it('commits explicit payload overrides through review batch apply', async () => {
     const setup = await createApp();
     app = setup.app;
-
-    const created = await app.inject({
-      method: 'POST',
-      url: '/api/v2/review-inbox/import',
-      payload: {
-        agent_id: 'review-import-override',
-        format: 'text',
-        content: '回答控制在三句话内',
-      },
+    const created = setup.reviewInbox.createBatch({
+      agent_id: 'review-import-override',
+      source_kind: 'import_preview',
+      source_preview: '把输出语言设成中文',
+      items: [{
+        item_type: 'record',
+        payload: createReviewAssistRecordPayload({
+          candidate_id: 'override_record_1',
+          content: '请把回答控制在三句话内',
+          attribute_key: 'response_length',
+          source_excerpt: '回答控制在三句话内',
+        }),
+        suggested_action: 'accept',
+        suggested_reason: 'explicit_profile_rule',
+        suggested_rewrite: '请把回答控制在三句话内',
+      }],
     });
 
-    const createdBody = JSON.parse(created.payload);
     const detail = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const detailBody = JSON.parse(detail.payload);
     const recordItem = detailBody.items.find((item: any) => item.item_type === 'record');
 
     const applied = await app.inject({
       method: 'POST',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
       payload: {
         item_actions: [{
           item_id: recordItem.id,
@@ -1928,23 +2042,64 @@ describe('V2 review inbox', () => {
   it('narrows batch source preview to remaining pending items after partial apply', async () => {
     const setup = await createApp({ compoundReview: true });
     app = setup.app;
-
-    const created = await app.inject({
-      method: 'POST',
-      url: '/api/v2/review-inbox/import',
-      payload: {
-        agent_id: 'review-import-partial-preview',
-        format: 'text',
-        content: '人在东京这边。先收一下 recall 那块',
-      },
+    const created = setup.reviewInbox.createBatch({
+      agent_id: 'review-import-partial-preview',
+      source_kind: 'import_preview',
+      source_preview: '人在东京这边。先收一下 recall 那块',
+      items: [
+        {
+          item_type: 'record',
+          payload: createReviewAssistRecordPayload({
+            candidate_id: 'partial_record_tokyo',
+            requested_kind: 'fact_slot',
+            normalized_kind: 'fact_slot',
+            content: '我住东京',
+            entity_key: 'user',
+            attribute_key: 'location',
+            subject_key: undefined,
+            source_excerpt: '人在东京这边',
+          }),
+          suggested_action: 'accept',
+          suggested_reason: 'explicit_fact_slot',
+        },
+        {
+          item_type: 'relation',
+          payload: createReviewAssistRelationPayload({
+            candidate_id: 'partial_relation_tokyo',
+            source_candidate_id: 'partial_record_tokyo',
+            subject_key: 'user',
+            predicate: 'lives_in',
+            object_key: 'tokyo',
+            source_excerpt: '人在东京这边',
+          }),
+          suggested_action: 'accept',
+          suggested_reason: 'candidate_relation',
+        },
+        {
+          item_type: 'record',
+          payload: {
+            candidate_id: 'partial_record_task',
+            selected: true,
+            requested_kind: 'task_state',
+            normalized_kind: 'task_state',
+            content: '当前任务是重构 Cortex recall',
+            source_type: 'user_explicit',
+            subject_key: 'cortex',
+            state_key: 'refactor_status',
+            status: 'active',
+            source_excerpt: '先收一下 recall 那块',
+            confidence: 0.8,
+            warnings: [],
+          },
+          suggested_action: 'accept',
+          suggested_reason: 'explicit_task_state',
+        },
+      ],
     });
-
-    expect(created.statusCode).toBe(201);
-    const createdBody = JSON.parse(created.payload);
 
     const detailBefore = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const beforeBody = JSON.parse(detailBefore.payload);
     expect(beforeBody.batch.source_preview).toBe('人在东京这边\n先收一下 recall 那块');
@@ -1955,7 +2110,7 @@ describe('V2 review inbox', () => {
 
     const applied = await app.inject({
       method: 'POST',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
       payload: {
         item_actions: acceptedItems.map((item: any) => ({
           item_id: item.id,
@@ -1979,7 +2134,7 @@ describe('V2 review inbox', () => {
 
     const detailAfter = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const afterBody = JSON.parse(detailAfter.payload);
     expect(afterBody.batch.status).toBe('partially_applied');
@@ -1990,23 +2145,45 @@ describe('V2 review inbox', () => {
   it('keeps failed review items actionable and allows retrying them in the same batch', async () => {
     const setup = await createApp({ reviewOnly: true });
     app = setup.app;
-
-    const created = await app.inject({
-      method: 'POST',
-      url: '/api/v2/review-inbox/import',
-      payload: {
-        agent_id: 'review-retryable-failure',
-        format: 'text',
-        content: '我住大阪',
-      },
+    const created = setup.reviewInbox.createBatch({
+      agent_id: 'review-retryable-failure',
+      source_kind: 'import_preview',
+      source_preview: '我住大阪',
+      items: [
+        {
+          item_type: 'record',
+          payload: createReviewAssistRecordPayload({
+            candidate_id: 'retry_record_osaka',
+            requested_kind: 'fact_slot',
+            normalized_kind: 'fact_slot',
+            content: '我住大阪',
+            entity_key: 'user',
+            attribute_key: 'location',
+            subject_key: undefined,
+            source_excerpt: '我住大阪',
+          }),
+          suggested_action: 'accept',
+          suggested_reason: 'explicit_fact_slot',
+        },
+        {
+          item_type: 'relation',
+          payload: createReviewAssistRelationPayload({
+            candidate_id: 'retry_relation_osaka',
+            source_candidate_id: 'retry_record_osaka',
+            subject_key: 'user',
+            predicate: 'lives_in',
+            object_key: 'osaka',
+            source_excerpt: '我住大阪',
+          }),
+          suggested_action: 'accept',
+          suggested_reason: 'candidate_relation',
+        },
+      ],
     });
-
-    expect(created.statusCode).toBe(201);
-    const createdBody = JSON.parse(created.payload);
 
     const detailBefore = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const beforeBody = JSON.parse(detailBefore.payload);
     const recordItem = beforeBody.items.find((item: any) => item.item_type === 'record');
@@ -2016,7 +2193,7 @@ describe('V2 review inbox', () => {
 
     const failedApply = await app.inject({
       method: 'POST',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
       payload: {
         item_actions: [{
           item_id: relationItem.id,
@@ -2050,7 +2227,7 @@ describe('V2 review inbox', () => {
 
     const detailAfterFailure = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const failureDetailBody = JSON.parse(detailAfterFailure.payload);
     expect(failureDetailBody.batch.status).toBe('partially_applied');
@@ -2069,7 +2246,7 @@ describe('V2 review inbox', () => {
 
     const retried = await app.inject({
       method: 'POST',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}/apply`,
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
       payload: {
         accept_all: true,
       },
@@ -2093,7 +2270,7 @@ describe('V2 review inbox', () => {
 
     const detailAfterRetry = await app.inject({
       method: 'GET',
-      url: `/api/v2/review-inbox/${createdBody.batch_id}`,
+      url: `/api/v2/review-inbox/${created.batch.id}`,
     });
     const retryDetailBody = JSON.parse(detailAfterRetry.payload);
     expect(retryDetailBody.items).toEqual(expect.arrayContaining([
@@ -2122,7 +2299,7 @@ describe('V2 review inbox', () => {
   });
 
   it('dismisses a review batch with reject_all without writing records', async () => {
-    const setup = await createApp({ reviewOnly: true });
+    const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
 
     const created = await app.inject({
@@ -2131,7 +2308,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-reject',
         format: 'text',
-        content: '后续交流中文就行',
+        content: '说话干脆一点',
       },
     });
     const createdBody = JSON.parse(created.payload);

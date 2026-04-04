@@ -10,7 +10,7 @@ import {
 import { normalizeManualInput } from './normalize.js';
 import { getRecordsCount } from './store.js';
 import type { CortexRelationsV2, V2Relation } from './relations.js';
-import type { CortexRecordsV2 } from './service.js';
+import type { CortexRecordsV2, PreviewImportCandidateDetail } from './service.js';
 import type {
   CortexRecord,
   EvidenceInput,
@@ -71,6 +71,30 @@ type PreviewRelationCandidate = {
 
 type PreviewCarryContext = {
   entity_key?: string;
+};
+
+type PreviewImportSegment = {
+  content: string;
+  requested_kind?: RecordKind;
+};
+
+type PreviewRecordDetailEntry = {
+  detail: PreviewImportCandidateDetail;
+  preview: PreviewRecordCandidate;
+  order: number;
+};
+
+export type ReviewInboxImportPreview = {
+  auto_commit_record_candidates: PreviewRecordCandidate[];
+  review_record_candidates: PreviewRecordCandidate[];
+  review_relation_candidates: PreviewRelationCandidate[];
+  warnings: string[];
+  stats: {
+    format: ImportFormat;
+    total_segments: number;
+    record_candidates: number;
+    relation_candidates: number;
+  };
 };
 
 export type ImportPreviewResponse = {
@@ -202,9 +226,9 @@ function splitPlainTextSegments(content: string): string[] {
   return segments;
 }
 
-function parseMemoryMdSegments(content: string): Array<{ content: string; requested_kind?: RecordKind }> {
+function parseMemoryMdSegments(content: string): PreviewImportSegment[] {
   const lines = content.replace(/\r\n?/g, '\n').split('\n');
-  const segments: Array<{ content: string; requested_kind?: RecordKind }> = [];
+  const segments: PreviewImportSegment[] = [];
   let currentKind: RecordKind | undefined;
   let buffer: string[] = [];
   let inFrontmatter = false;
@@ -423,6 +447,23 @@ function arbitratePreviewRecordCandidates(candidates: PreviewRecordCandidate[]):
     .map(entry => entry.candidate);
 }
 
+function arbitratePreviewRecordEntries(entries: PreviewRecordDetailEntry[]): PreviewRecordDetailEntry[] {
+  const ordered = new Map<string, PreviewRecordDetailEntry>();
+  const passthrough: PreviewRecordDetailEntry[] = [];
+
+  for (const entry of entries) {
+    const stableKey = previewRecordStableKey(entry.preview);
+    if (!stableKey) {
+      passthrough.push(entry);
+      continue;
+    }
+    ordered.set(stableKey, entry);
+  }
+
+  return [...passthrough, ...ordered.values()]
+    .sort((left, right) => left.order - right.order);
+}
+
 function updatePreviewCarryContext(
   carry: PreviewCarryContext,
   normalized: NormalizedRecordCandidate,
@@ -451,7 +492,7 @@ async function buildPreviewFromSegments(
   format: ImportFormat,
   segments: Array<{ content: string; requested_kind?: RecordKind }>,
 ): Promise<ImportPreviewResponse> {
-  const recordCandidates: PreviewRecordCandidate[] = [];
+  const entries: PreviewRecordDetailEntry[] = [];
   let carry: PreviewCarryContext = {};
 
   for (const segment of segments) {
@@ -467,16 +508,20 @@ async function buildPreviewFromSegments(
 
     for (const detail of candidateDetails) {
       carry = updatePreviewCarryContext(carry, detail.candidate);
-      recordCandidates.push(previewRecordFromNormalized(
-        detail.candidate,
-        recordCandidates.length,
-        detail.source_excerpt,
-        normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
-      ));
+      entries.push({
+        detail,
+        preview: previewRecordFromNormalized(
+          detail.candidate,
+          entries.length,
+          detail.source_excerpt,
+          normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
+        ),
+        order: entries.length,
+      });
     }
   }
 
-  const winningRecordCandidates = arbitratePreviewRecordCandidates(recordCandidates);
+  const winningRecordCandidates = arbitratePreviewRecordEntries(entries).map((entry) => entry.preview);
   const relationCandidates = dedupeRelationCandidates(
     winningRecordCandidates
       .map((candidate, index) => previewRelationFromRecord(candidate, index))
@@ -492,6 +537,76 @@ async function buildPreviewFromSegments(
       total_segments: segments.length,
       record_candidates: winningRecordCandidates.length,
       relation_candidates: relationCandidates.length,
+    },
+  };
+}
+
+export async function previewImportForReviewInbox(
+  recordsV2: CortexRecordsV2,
+  input: {
+    agent_id: string;
+    format: 'text' | 'memory_md';
+    content: string;
+  },
+): Promise<ReviewInboxImportPreview> {
+  ensureAgent(input.agent_id);
+
+  const segments: PreviewImportSegment[] = input.format === 'text'
+    ? splitPlainTextSegments(input.content).map((content) => ({ content, requested_kind: undefined }))
+    : parseMemoryMdSegments(input.content);
+
+  const entries: PreviewRecordDetailEntry[] = [];
+  let carry: PreviewCarryContext = {};
+
+  for (const segment of segments) {
+    const candidateDetails = await recordsV2.previewImportCandidateDetails({
+      agent_id: input.agent_id,
+      content: segment.content,
+      requested_kind: shouldApplyRequestedKindHint(segment.content, segment.requested_kind)
+        ? segment.requested_kind
+        : undefined,
+      source_type: 'user_confirmed',
+      carry_context: carry,
+    });
+
+    for (const detail of candidateDetails) {
+      carry = updatePreviewCarryContext(carry, detail.candidate);
+      entries.push({
+        detail,
+        preview: previewRecordFromNormalized(
+          detail.candidate,
+          entries.length,
+          detail.source_excerpt,
+          normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
+        ),
+        order: entries.length,
+      });
+    }
+  }
+
+  const winningEntries = arbitratePreviewRecordEntries(entries);
+  const autoCommitRecordCandidates = winningEntries
+    .filter((entry) => entry.detail.disposition !== 'review')
+    .map((entry) => entry.preview);
+  const reviewRecordCandidates = winningEntries
+    .filter((entry) => entry.detail.disposition === 'review')
+    .map((entry) => entry.preview);
+  const reviewRelationCandidates = dedupeRelationCandidates(
+    reviewRecordCandidates
+      .map((candidate, index) => previewRelationFromRecord(candidate, index))
+      .filter((item): item is PreviewRelationCandidate => !!item),
+  );
+
+  return {
+    auto_commit_record_candidates: autoCommitRecordCandidates,
+    review_record_candidates: reviewRecordCandidates,
+    review_relation_candidates: reviewRelationCandidates,
+    warnings: [],
+    stats: {
+      format: input.format,
+      total_segments: segments.length,
+      record_candidates: winningEntries.length,
+      relation_candidates: reviewRelationCandidates.length,
     },
   };
 }
