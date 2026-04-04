@@ -1332,7 +1332,35 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-length' }).items).toHaveLength(0);
   });
 
-  it('keeps a short selective follow-up as session_note when it drops every stable winner', async () => {
+  it('keeps multiple proposal survivors when a short follow-up drops only one profile rule from a prior assistant proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-keep-multi-proposal',
+      user_message: '别加三句话限制',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '之后请始终用中文回答，并把回答控制在三句话内，并不要复杂方案。' },
+        { role: 'user', content: '别加三句话限制' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(2);
+    expect(ingested.records.every((record) => record.written_kind === 'profile_rule')).toBe(true);
+    expect(ingested.records.every((record) => record.source_type === 'user_confirmed')).toBe(true);
+    expect(ingested.records.map((record) => record.content)).toEqual([
+      '请用中文回答',
+      '不要复杂方案',
+    ]);
+    expect(records.listRecords({ agent_id: 'ingest-selective-keep-multi-proposal' }).items.map((record) => record.content).sort()).toEqual([
+      '不要复杂方案',
+      '请用中文回答',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-multi-proposal' }).items).toHaveLength(0);
+  });
+
+  it('skips writes when a short selective follow-up drops every stable winner from a prior assistant proposal', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 
     const ingested = await records.ingest({
@@ -1346,10 +1374,8 @@ describe('V2 Import / Export', () => {
       ],
     });
 
-    expect(ingested.records).toHaveLength(1);
-    expect(ingested.records[0]?.written_kind).toBe('session_note');
-    expect(ingested.records[0]?.source_type).toBe('user_explicit');
-    expect(ingested.records[0]?.content).toBe('都不要');
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-selective-drop-all' }).items).toHaveLength(0);
     expect(relations.listCandidates({ agent_id: 'ingest-selective-drop-all' }).items).toHaveLength(0);
   });
 
@@ -1470,6 +1496,36 @@ describe('V2 Import / Export', () => {
       '请用中文回答',
     ]);
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-multi' }).items).toHaveLength(0);
+  });
+
+  it('deletes all active selectable profile rules when a short follow-up drops them all', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-drop-all',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-drop-all',
+      kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-drop-all',
+      kind: 'profile_rule',
+      content: '不要复杂方案',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-drop-all',
+      user_message: '都去掉',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-drop-all' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-drop-all' }).items).toHaveLength(0);
   });
 
   it('keeps ingest aligned with clause-level winners for compound user input', async () => {
