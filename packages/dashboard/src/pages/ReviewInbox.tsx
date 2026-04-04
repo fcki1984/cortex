@@ -46,6 +46,7 @@ type ReviewBatchDetail = {
 };
 
 type ReviewBatchApplyPayload = {
+  apply_suggested?: boolean;
   accept_all?: boolean;
   reject_all?: boolean;
   item_actions?: Array<{
@@ -129,6 +130,14 @@ function buildSuggestedRejectActions(items: ReviewItem[]) {
     }));
 }
 
+function buildSuggestedApplyAction(item: ReviewItem): { action: 'accept' | 'reject' | 'edit_then_accept' } | null {
+  if (item.suggested_action === 'edit') return null;
+  if (item.suggested_action === 'reject') return { action: 'reject' };
+  return {
+    action: item.item_type === 'record' ? 'edit_then_accept' : 'accept',
+  };
+}
+
 function getItemCandidateId(item: ReviewItem): string | null {
   return typeof item.payload.candidate_id === 'string' ? item.payload.candidate_id : null;
 }
@@ -190,7 +199,9 @@ function updateItemsFromApplyResult(
 
   return items.map((item) => {
     if (item.status === 'accepted' || item.status === 'rejected') return item;
-    const action = payload.reject_all ? { action: 'reject' as const } : actionMap.get(item.id);
+    const action = payload.reject_all
+      ? { action: 'reject' as const }
+      : actionMap.get(item.id) || (payload.apply_suggested ? buildSuggestedApplyAction(item) : null);
     if (!action) return item;
     if (failedIds.has(item.id)) {
       return {
@@ -545,6 +556,10 @@ export default function ReviewInbox() {
     () => buildSuggestedRejectActions(actionableItems),
     [actionableItems],
   );
+  const suggestedApplyCount = useMemo(
+    () => actionableItems.filter((item) => item.suggested_action === 'accept' || item.suggested_action === 'reject').length,
+    [actionableItems],
+  );
   const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
 
   useEffect(() => {
@@ -834,6 +849,16 @@ export default function ReviewInbox() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button
                     type="button"
+                    className="btn primary"
+                    disabled={applying || suggestedApplyCount === 0}
+                    onClick={() => void handleBatchApply({
+                      apply_suggested: true,
+                    })}
+                  >
+                    {applying ? t('reviewInbox.applying') : t('reviewInbox.actionApplySuggested')}
+                  </button>
+                  <button
+                    type="button"
                     className="btn"
                     disabled={applying || suggestedAcceptActions.length === 0}
                     onClick={() => void handleBatchApply({
@@ -854,7 +879,7 @@ export default function ReviewInbox() {
                   </button>
                   <button
                     type="button"
-                    className="btn primary"
+                    className="btn"
                     disabled={applying || actionableItems.length === 0}
                     onClick={() => void handleBatchApply({
                       item_actions: actionableItems.map((item) => buildAcceptAction(item, draftContent)),

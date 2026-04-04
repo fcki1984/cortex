@@ -297,6 +297,7 @@ export default {
     actionEditThenAccept: '编辑后接受',
     actionAcceptSuggestedOnly: '接受建议项',
     actionRejectSuggestedOnly: '拒绝建议项',
+    actionApplySuggested: '应用建议动作',
     actionAcceptAll: '全部接受',
     actionRejectAll: '全部拒绝',
     actionAcceptSuggested: '建议接受',

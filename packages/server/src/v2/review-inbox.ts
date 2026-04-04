@@ -237,6 +237,37 @@ function shallowMergePayload(
   };
 }
 
+function buildSuggestedApplyAction(item: ReviewItem): ReviewItemActionInput | null {
+  if (item.suggested_action === 'edit') return null;
+  if (item.suggested_action === 'reject') {
+    return {
+      item_id: item.id,
+      action: 'reject',
+    };
+  }
+
+  if (item.item_type !== 'record') {
+    return {
+      item_id: item.id,
+      action: 'accept',
+    };
+  }
+
+  const content = asString(item.suggested_rewrite) || asString(item.payload.content);
+  return content
+    ? {
+        item_id: item.id,
+        action: 'edit_then_accept',
+        payload_override: {
+          content,
+        },
+      }
+    : {
+        item_id: item.id,
+        action: 'accept',
+      };
+}
+
 function buildImportItems(preview: {
   record_candidates: Array<Record<string, unknown>>;
   relation_candidates: Array<Record<string, unknown>>;
@@ -745,6 +776,7 @@ export class CortexReviewInboxV2 {
 
   async applyBatch(input: {
     batch_id: string;
+    apply_suggested?: boolean;
     accept_all?: boolean;
     reject_all?: boolean;
     item_actions?: ReviewItemActionInput[];
@@ -764,8 +796,21 @@ export class CortexReviewInboxV2 {
     const batchDetail = this.getBatch(input.batch_id);
     if (!batchDetail) throw new Error('review batch not found');
     if (input.accept_all && input.reject_all) throw new Error('accept_all and reject_all cannot both be true');
+    if (
+      input.apply_suggested &&
+      (input.accept_all || input.reject_all || (input.item_actions || []).length > 0)
+    ) {
+      throw new Error('apply_suggested cannot be combined with other batch actions');
+    }
 
-    const actionMap = new Map((input.item_actions || []).map((item) => [item.item_id, item]));
+    const actionMap = new Map(
+      (input.apply_suggested
+        ? batchDetail.items
+            .map((item) => buildSuggestedApplyAction(item))
+            .filter((item): item is ReviewItemActionInput => Boolean(item))
+        : (input.item_actions || [])
+      ).map((item) => [item.item_id, item]),
+    );
     const rejected: Array<Record<string, unknown>> = [];
     const failed: Array<Record<string, unknown>> = [];
     const selectedRecordCandidates: any[] = [];

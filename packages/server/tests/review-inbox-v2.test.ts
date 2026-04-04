@@ -2168,6 +2168,151 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('applies accept and reject suggestions together while leaving edit items pending when apply_suggested is requested', async () => {
+    const setup = await createApp();
+    app = setup.app;
+    const created = setup.reviewInbox.createBatch({
+      agent_id: 'review-apply-suggested',
+      source_kind: 'live_ingest',
+      source_preview: '后续交流中文就行。这应该是助手推断。最近也许会考虑换方案',
+      items: [
+        {
+          item_type: 'record',
+          payload: createReviewAssistRecordPayload({
+            candidate_id: 'apply_suggested_accept',
+            content: '后续交流中文就行',
+            source_excerpt: '后续交流中文就行',
+          }),
+          suggested_action: 'accept',
+          suggested_reason: 'explicit_profile_rule',
+          suggested_rewrite: '请用中文回答',
+        },
+        {
+          item_type: 'record',
+          payload: createReviewAssistRecordPayload({
+            candidate_id: 'apply_suggested_reject',
+            content: '这应该是助手推断',
+            source_type: 'assistant_inferred',
+            source_excerpt: '这应该是助手推断',
+          }),
+          suggested_action: 'reject',
+          suggested_reason: 'assistant_only',
+          suggested_rewrite: null,
+        },
+        {
+          item_type: 'record',
+          payload: createReviewAssistRecordPayload({
+            candidate_id: 'apply_suggested_edit',
+            requested_kind: 'session_note',
+            normalized_kind: 'session_note',
+            content: '最近也许会考虑换方案',
+            source_excerpt: '最近也许会考虑换方案',
+            attribute_key: undefined,
+            subject_key: undefined,
+          }),
+          suggested_action: 'edit',
+          suggested_reason: 'needs_human_judgement',
+          suggested_rewrite: null,
+        },
+      ],
+    });
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
+      payload: {
+        apply_suggested: true,
+      },
+    });
+
+    expect(applied.statusCode).toBe(200);
+    const appliedBody = JSON.parse(applied.payload);
+    expect(appliedBody.summary).toEqual({
+      committed: 1,
+      rejected: 1,
+      failed: 0,
+    });
+    expect(appliedBody.batch_summary).toEqual({
+      total: 3,
+      pending: 1,
+      accepted: 1,
+      rejected: 1,
+      failed: 0,
+    });
+    expect(appliedBody.remaining_pending).toBe(1);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: expect.any(String),
+        payload: expect.objectContaining({ candidate_id: 'apply_suggested_accept' }),
+        status: 'accepted',
+      }),
+      expect.objectContaining({
+        id: expect.any(String),
+        payload: expect.objectContaining({ candidate_id: 'apply_suggested_reject' }),
+        status: 'rejected',
+      }),
+      expect.objectContaining({
+        id: expect.any(String),
+        payload: expect.objectContaining({ candidate_id: 'apply_suggested_edit' }),
+        status: 'pending',
+      }),
+    ]));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-apply-suggested',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]));
+  });
+
+  it('rejects ambiguous apply_suggested payloads that also request other batch actions', async () => {
+    const setup = await createApp();
+    app = setup.app;
+    const created = setup.reviewInbox.createBatch({
+      agent_id: 'review-apply-suggested-invalid',
+      source_kind: 'live_ingest',
+      source_preview: '后续交流中文就行',
+      items: [{
+        item_type: 'record',
+        payload: createReviewAssistRecordPayload({
+          candidate_id: 'apply_suggested_invalid',
+          content: '后续交流中文就行',
+          source_excerpt: '后续交流中文就行',
+        }),
+        suggested_action: 'accept',
+        suggested_reason: 'explicit_profile_rule',
+        suggested_rewrite: '请用中文回答',
+      }],
+    });
+
+    const applied = await app.inject({
+      method: 'POST',
+      url: `/api/v2/review-inbox/${created.batch.id}/apply`,
+      payload: {
+        apply_suggested: true,
+        accept_all: true,
+      },
+    });
+
+    expect(applied.statusCode).toBe(400);
+    expect(JSON.parse(applied.payload)).toEqual({
+      error: 'apply_suggested cannot be combined with other batch actions',
+    });
+  });
+
   it('narrows batch source preview to remaining pending items after partial apply', async () => {
     const setup = await createApp({ compoundReview: true });
     app = setup.app;

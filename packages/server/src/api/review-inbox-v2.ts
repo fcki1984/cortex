@@ -91,6 +91,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
   app.post('/api/v2/review-inbox/:id/apply', async (req, reply) => {
     const params = req.params as { id: string };
     const body = req.body as {
+      apply_suggested?: boolean;
       accept_all?: boolean;
       reject_all?: boolean;
       item_actions?: Array<{
@@ -103,6 +104,7 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
     try {
       return await cortex.reviewInboxV2.applyBatch({
         batch_id: params.id,
+        apply_suggested: body?.apply_suggested,
         accept_all: body?.accept_all,
         reject_all: body?.reject_all,
         item_actions: Array.isArray(body?.item_actions) ? body.item_actions : [],

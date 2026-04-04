@@ -667,6 +667,132 @@ describe('ReviewInbox page', () => {
     expect(screen.getByDisplayValue('最近也许会考虑换方案')).toBeTruthy();
   });
 
+  it('applies suggested actions in one step while keeping edit-only items pending', async () => {
+    const user = userEvent.setup();
+    const mixedBatchSummary = {
+      ...batchSummary,
+      id: 'batch_apply_suggested',
+      source_preview: '后续交流中文就行。这应该是助手推断。最近也许会考虑换方案',
+      summary: {
+        total: 3,
+        pending: 3,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      },
+    };
+    const mixedBatchDetail = {
+      batch: mixedBatchSummary,
+      summary: mixedBatchSummary.summary,
+      items: [
+        {
+          id: 'item_accept',
+          batch_id: 'batch_apply_suggested',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'accept',
+          suggested_reason: '语言偏好已经稳定，可直接接受。',
+          suggested_rewrite: '请用中文回答',
+          payload: {
+            candidate_id: 'candidate_accept',
+            content: '后续交流中文就行',
+            requested_kind: 'profile_rule',
+            normalized_kind: 'profile_rule',
+            attribute_key: 'language_preference',
+            source_excerpt: '后续交流中文就行',
+            warnings: [],
+            confidence: 0.83,
+          },
+        },
+        {
+          id: 'item_reject',
+          batch_id: 'batch_apply_suggested',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'reject',
+          suggested_reason: '这条候选主要来自助手推断，建议直接拒绝。',
+          suggested_rewrite: null,
+          payload: {
+            candidate_id: 'candidate_reject',
+            content: '这应该是助手推断',
+            requested_kind: 'profile_rule',
+            normalized_kind: 'profile_rule',
+            attribute_key: 'language_preference',
+            source_type: 'assistant_inferred',
+            source_excerpt: '这应该是助手推断',
+            warnings: [],
+            confidence: 0.59,
+          },
+        },
+        {
+          id: 'item_edit',
+          batch_id: 'batch_apply_suggested',
+          item_type: 'record',
+          status: 'pending',
+          suggested_action: 'edit',
+          suggested_reason: '这条内容还带不确定性，需要人工判断。',
+          suggested_rewrite: null,
+          payload: {
+            candidate_id: 'candidate_edit',
+            content: '最近也许会考虑换方案',
+            requested_kind: 'session_note',
+            normalized_kind: 'session_note',
+            source_excerpt: '最近也许会考虑换方案',
+            warnings: [],
+            confidence: 0.61,
+          },
+        },
+      ],
+    };
+
+    apiMocks.listReviewInboxBatchesV2.mockResolvedValueOnce({
+      items: [mixedBatchSummary],
+      total: 1,
+    });
+    apiMocks.getReviewInboxBatchV2.mockResolvedValueOnce(mixedBatchDetail);
+    apiMocks.applyReviewInboxBatchV2.mockResolvedValueOnce({
+      summary: {
+        committed: 1,
+        rejected: 1,
+        failed: 0,
+      },
+      batch_summary: {
+        total: 3,
+        pending: 1,
+        accepted: 1,
+        rejected: 1,
+        failed: 0,
+      },
+      committed: [{ candidate_id: 'candidate_accept' }],
+      rejected: [{ candidate_id: 'candidate_reject' }],
+      failed: [],
+      remaining_pending: 1,
+      batch: {
+        ...mixedBatchSummary,
+        status: 'partially_applied',
+        source_preview: '最近也许会考虑换方案',
+      },
+    });
+
+    renderPage();
+
+    await screen.findByDisplayValue('请用中文回答');
+    await user.click(screen.getByRole('button', { name: '应用建议动作' }));
+
+    await waitFor(() => {
+      expect(apiMocks.applyReviewInboxBatchV2).toHaveBeenCalledWith('batch_apply_suggested', {
+        apply_suggested: true,
+      });
+    });
+
+    expect(await screen.findByText('来源预览: 最近也许会考虑换方案')).toBeTruthy();
+    expect(screen.getAllByText('部分已处理')).toHaveLength(2);
+    expect(screen.getAllByText('待处理 1 / 共 3')).toHaveLength(2);
+    expect(screen.queryByText('语言偏好已经稳定，可直接接受。')).toBeNull();
+    expect(screen.queryByText('这条候选主要来自助手推断，建议直接拒绝。')).toBeNull();
+    expect(screen.getByDisplayValue('最近也许会考虑换方案')).toBeTruthy();
+  });
+
   it('advances to the next actionable batch after finishing the current batch', async () => {
     const user = userEvent.setup();
     const nextBatchSummary = {
