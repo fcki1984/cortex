@@ -1091,7 +1091,7 @@ describe('V2 Import / Export', () => {
         assistant_message: '记住了',
       });
 
-      if (sample.requested_kind === 'profile_rule' && sample.attribute_key === 'response_style') {
+      if (sample.disposition === 'review') {
         expect(ingested.records).toHaveLength(0);
         expect(ingested.review_record_candidates).toHaveLength(1);
         expect(ingested.review_record_candidates[0]).toEqual(expect.objectContaining({
@@ -1247,6 +1247,42 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-confirmed-assistant-proposal-ambiguous' }).items).toHaveLength(0);
   });
 
+  it('suppresses a short rejection of a prior review-only assistant proposal instead of writing a session_note', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-short-rejection-review-only-proposal',
+      user_message: '不要',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请简洁直接回答。' },
+        { role: 'user', content: '不要' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-short-rejection-review-only-proposal' }).items).toHaveLength(0);
+  });
+
+  it('suppresses a short rejection of a mixed prior assistant proposal instead of writing notes or review work', async () => {
+    const { records } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-short-rejection-mixed-proposal',
+      user_message: '别这样',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请用中文回答。请简洁直接回答。' },
+        { role: 'user', content: '别这样' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-short-rejection-mixed-proposal' }).items).toHaveLength(0);
+  });
+
   it('treats a short user rewrite as explicit durable when it disambiguates a prior assistant proposal', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 
@@ -1360,6 +1396,54 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-multi-proposal' }).items).toHaveLength(0);
   });
 
+  it('keeps only the task-state winner when a short follow-up selects the prior assistant proposed task', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-keep-task',
+      user_message: '只保留当前任务',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请用中文回答。当前任务是重构 Cortex recall。' },
+        { role: 'user', content: '只保留当前任务' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('task_state');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('当前任务是重构 Cortex recall');
+    expect(records.listRecords({ agent_id: 'ingest-selective-keep-task' }).items.map((record) => record.content)).toEqual([
+      '当前任务是重构 Cortex recall',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-keep-task' }).items).toHaveLength(0);
+  });
+
+  it('rewrites the prior assistant proposed current task even when the proposal also contains another durable', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-rewrite-assistant-proposal-task-mixed',
+      user_message: '改部署',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请用中文回答。当前任务是重构 Cortex recall。' },
+        { role: 'user', content: '改部署' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('task_state');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('当前任务是部署 Cortex');
+    expect(records.listRecords({ agent_id: 'ingest-rewrite-assistant-proposal-task-mixed' }).items.map((record) => record.content)).toEqual([
+      '当前任务是部署 Cortex',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal-task-mixed' }).items).toHaveLength(0);
+  });
+
   it('skips writes when a short selective follow-up drops every stable winner from a prior assistant proposal', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 
@@ -1404,6 +1488,26 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-language-rewrite' }).items).toHaveLength(0);
   });
 
+  it('suppresses a short rejection against a single active profile rule without writing a note', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-single-rejection-language',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-single-rejection-language',
+      user_message: '不要这个',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-single-rejection-language' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-single-rejection-language' }).items).toHaveLength(0);
+  });
+
   it('rewrites a short response-length follow-up against the current active truth without needing a prior assistant proposal', async () => {
     const { records, relations } = await createServices(createNoOpLLM());
 
@@ -1427,6 +1531,344 @@ describe('V2 Import / Export', () => {
       '请把回答控制在两句话内',
     ]);
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-length-rewrite' }).items).toHaveLength(0);
+  });
+
+  it('rewrites a compact location follow-up against a prior assistant proposal into the updated fact winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-rewrite-assistant-proposal-location-compact',
+      user_message: '改东京',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '我住大阪。' },
+        { role: 'user', content: '改东京' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('我住东京');
+    expect(records.listRecords({ agent_id: 'ingest-rewrite-assistant-proposal-location-compact' }).items.map((record) => record.content)).toEqual([
+      '我住东京',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal-location-compact' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
+  });
+
+  it('rewrites a compact organization follow-up against the current active truth into the updated fact winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-organization-rewrite-compact',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-organization-rewrite-compact',
+      user_message: '换 Anthropic',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('我在 Anthropic 工作');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-organization-rewrite-compact' }).items.map((record) => record.content)).toEqual([
+      '我在 Anthropic 工作',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-organization-rewrite-compact' }).items.map((item) => item.object_key)).toEqual([
+      'anthropic',
+    ]);
+  });
+
+  it('rewrites a contextual short location follow-up against the current active truth into the updated fact winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-location-rewrite-contextual',
+      kind: 'fact_slot',
+      content: '我住大阪',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-location-rewrite-contextual',
+      user_message: '还是东京吧',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('我住东京');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-location-rewrite-contextual' }).items.map((record) => record.content)).toEqual([
+      '我住东京',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-location-rewrite-contextual' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
+  });
+
+  it('suppresses a short rejection against a single active fact truth and clears its derived relation candidate', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-single-rejection-location',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-single-rejection-location' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-single-rejection-location',
+      user_message: '不要这个',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-single-rejection-location' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-single-rejection-location' }).items).toHaveLength(0);
+  });
+
+  it('suppresses a short rejection against a single active task state without writing a note', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-single-rejection-task',
+      kind: 'task_state',
+      content: '当前任务是重构 Cortex recall',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-single-rejection-task',
+      user_message: '不要这个',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-single-rejection-task' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-single-rejection-task' }).items).toHaveLength(0);
+  });
+
+  it('rewrites a compact task-state follow-up against the current active truth into the updated task winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-task-rewrite-compact',
+      kind: 'task_state',
+      content: '当前任务是重构 Cortex recall',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-task-rewrite-compact',
+      user_message: '改部署',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('task_state');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('当前任务是部署 Cortex');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-task-rewrite-compact' }).items.map((record) => record.content)).toEqual([
+      '当前任务是部署 Cortex',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-task-rewrite-compact' }).items).toHaveLength(0);
+  });
+
+  it('rewrites a contextual short task-state follow-up against the current active truth into the updated task winner', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-task-rewrite-contextual',
+      kind: 'task_state',
+      content: '当前任务是重构 Cortex recall',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-task-rewrite-contextual',
+      user_message: '还是部署吧',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('task_state');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('当前任务是部署 Cortex');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-task-rewrite-contextual' }).items.map((record) => record.content)).toEqual([
+      '当前任务是部署 Cortex',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-task-rewrite-contextual' }).items).toHaveLength(0);
+  });
+
+  it('rewrites bilingual location and Chinese organization compact follow-ups into deterministic fact winners', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const locationIngested = await records.ingest({
+      agent_id: 'ingest-rewrite-assistant-proposal-location-bilingual',
+      user_message: '改 Tokyo',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '我住大阪。' },
+        { role: 'user', content: '改 Tokyo' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(locationIngested.records).toHaveLength(1);
+    expect(locationIngested.records[0]?.written_kind).toBe('fact_slot');
+    expect(locationIngested.records[0]?.source_type).toBe('user_explicit');
+    expect(locationIngested.records[0]?.content).toBe('我住Tokyo');
+    expect(records.listRecords({ agent_id: 'ingest-rewrite-assistant-proposal-location-bilingual' }).items.map((record) => record.content)).toEqual([
+      '我住Tokyo',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-rewrite-assistant-proposal-location-bilingual' }).items.map((item) => item.object_key)).toEqual([
+      'tokyo',
+    ]);
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-organization-rewrite-zh',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const organizationIngested = await records.ingest({
+      agent_id: 'ingest-active-truth-organization-rewrite-zh',
+      user_message: '换 腾讯',
+      assistant_message: '收到',
+    });
+
+    expect(organizationIngested.records).toHaveLength(1);
+    expect(organizationIngested.records[0]?.written_kind).toBe('fact_slot');
+    expect(organizationIngested.records[0]?.source_type).toBe('user_explicit');
+    expect(organizationIngested.records[0]?.content).toBe('我在 腾讯 工作');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-organization-rewrite-zh' }).items.map((record) => record.content)).toEqual([
+      '我在 腾讯 工作',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-organization-rewrite-zh' }).items.map((item) => item.object_key)).toEqual([
+      '腾讯',
+    ]);
+  });
+
+  it('keeps only the selected active location fact when a short follow-up drops the current organization truth', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-fact',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-fact',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-fact',
+      user_message: '去掉工作单位',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('我住东京');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-fact' }).items.map((record) => record.content)).toEqual([
+      '我住东京',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-fact' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
+  });
+
+  it('keeps only the selected location fact from a prior assistant proposal when a short follow-up drops the organization part', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-fact-proposal',
+      user_message: '就住址，别记公司',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '我住东京。我在 OpenAI 工作。' },
+        { role: 'user', content: '就住址，别记公司' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('我住东京');
+    expect(records.listRecords({ agent_id: 'ingest-selective-fact-proposal' }).items.map((record) => record.content)).toEqual([
+      '我住东京',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-fact-proposal' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
+  });
+
+  it('keeps only the selected organization fact when a short follow-up drops the current location truth', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-org',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-org',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-org',
+      user_message: '就公司，别记住址',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('我在 OpenAI 工作');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-org' }).items.map((record) => record.content)).toEqual([
+      '我在 OpenAI 工作',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-org' }).items.map((item) => item.object_key)).toEqual([
+      'openai',
+    ]);
+  });
+
+  it('deletes all active selectable facts when a short follow-up drops them all', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-fact-drop-all',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-fact-drop-all',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-fact-drop-all',
+      user_message: '都不要',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-fact-drop-all' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-fact-drop-all' }).items).toHaveLength(0);
   });
 
   it('keeps only the selected active language rule when a short follow-up drops the current response-length truth', async () => {
@@ -1457,6 +1899,81 @@ describe('V2 Import / Export', () => {
       '请用中文回答',
     ]);
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-language' }).items).toHaveLength(0);
+  });
+
+  it('keeps only the current active task when a short follow-up selects it', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-task',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-task',
+      kind: 'task_state',
+      content: '当前任务是重构 Cortex recall',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-task',
+      user_message: '只保留当前任务',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('task_state');
+    expect(ingested.records[0]?.source_type).toBe('user_confirmed');
+    expect(ingested.records[0]?.content).toBe('当前任务是重构 Cortex recall');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-task' }).items.map((record) => record.content)).toEqual([
+      '当前任务是重构 Cortex recall',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-task' }).items).toHaveLength(0);
+  });
+
+  it('keeps mixed active survivors across profile rules and facts when a short follow-up selects both', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-mixed-keep',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-mixed-keep',
+      kind: 'profile_rule',
+      content: '请把回答控制在三句话内',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-mixed-keep',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-selective-mixed-keep',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-selective-mixed-keep',
+      user_message: '只保留中文和住址',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(2);
+    expect(ingested.records.map((record) => record.content)).toEqual([
+      '请用中文回答',
+      '我住东京',
+    ]);
+    expect(ingested.records.every((record) => record.source_type === 'user_confirmed')).toBe(true);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-selective-mixed-keep' }).items.map((record) => record.content).sort()).toEqual([
+      '我住东京',
+      '请用中文回答',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-selective-mixed-keep' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
   });
 
   it('keeps multiple active survivors when a short follow-up drops only one current profile rule', async () => {
@@ -1526,6 +2043,79 @@ describe('V2 Import / Export', () => {
     expect(ingested.records).toHaveLength(0);
     expect(records.listRecords({ agent_id: 'ingest-active-truth-drop-all' }).items).toHaveLength(0);
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-drop-all' }).items).toHaveLength(0);
+  });
+
+  it('deletes mixed active selectable profile rules and facts when a short follow-up drops them all', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-mixed-drop-all',
+      kind: 'profile_rule',
+      content: '请用中文回答',
+    });
+    await records.remember({
+      agent_id: 'ingest-active-truth-mixed-drop-all',
+      kind: 'fact_slot',
+      content: '我住东京',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-mixed-drop-all',
+      user_message: '都去掉',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-mixed-drop-all' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-mixed-drop-all' }).items).toHaveLength(0);
+  });
+
+  it('skips writes when a short drop-all follow-up rejects every mixed durable from a prior assistant proposal', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-mixed-proposal-drop-all',
+      user_message: '都去掉',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请用中文回答。我住东京。' },
+        { role: 'user', content: '都去掉' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-selective-mixed-proposal-drop-all' }).items).toHaveLength(0);
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-mixed-proposal-drop-all' }).items).toHaveLength(0);
+  });
+
+  it('keeps mixed survivors from a prior assistant proposal when a short follow-up selects both', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-selective-mixed-proposal-keep',
+      user_message: '只保留中文和住址',
+      assistant_message: '收到',
+      messages: [
+        { role: 'assistant', content: '请用中文回答。我住东京。我在 OpenAI 工作。' },
+        { role: 'user', content: '只保留中文和住址' },
+        { role: 'assistant', content: '收到' },
+      ],
+    });
+
+    expect(ingested.records).toHaveLength(2);
+    expect(ingested.records.map((record) => record.content)).toEqual([
+      '请用中文回答',
+      '我住东京',
+    ]);
+    expect(ingested.records.every((record) => record.source_type === 'user_confirmed')).toBe(true);
+    expect(records.listRecords({ agent_id: 'ingest-selective-mixed-proposal-keep' }).items.map((record) => record.content).sort()).toEqual([
+      '我住东京',
+      '请用中文回答',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-selective-mixed-proposal-keep' }).items.map((item) => item.object_key)).toEqual([
+      '东京',
+    ]);
   });
 
   it('keeps ingest aligned with clause-level winners for compound user input', async () => {

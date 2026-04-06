@@ -7,12 +7,18 @@ import type { EmbeddingProvider } from '../embedding/interface.js';
 import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
 import {
   canDeriveRelationCandidate,
+  inferShortUserFactSelection,
+  inferShortUserFactSlotRewrite,
   inferShortUserProposalSelection,
   inferShortUserProposalRewrite,
+  inferShortUserTaskSelection,
+  inferShortUserTaskStateRewrite,
   isShortUserProposalRejection,
+  isShortUserReplacementRequest,
   isShortUserConfirmation,
   isSpeculativeContent,
   isWeakConversationalProfileRule,
+  matchConversationalProfileRule,
   resolveAtomicContractDecision,
   shouldApplyRequestedKindHint,
   splitAssistantProposalClauses,
@@ -30,6 +36,7 @@ import {
   listRecords,
   migrateLegacyMemories,
   searchFts,
+  supersedeRecordById,
   searchVectors,
   upsertRecord,
   upsertRecordVector,
@@ -50,6 +57,7 @@ import type {
   RecordListOptions,
   RecordUpsertResult,
   SourceType,
+  TaskStateCandidate,
 } from './types.js';
 
 const log = createLogger('v2');
@@ -112,6 +120,31 @@ type ActiveDurableEntry = {
 
 export type PreviewImportCandidateDisposition = IngestDetailDisposition;
 
+export type IngestCommittedRecord = {
+  record_id: string;
+  requested_kind: RecordKind;
+  written_kind: RecordKind;
+  normalization: RecordUpsertResult['normalization'];
+  reason_code: RecordUpsertResult['reason_code'];
+  decision: RecordUpsertResult['decision'];
+  source_type: SourceType;
+  content: string;
+};
+
+export type LiveReviewFollowupResolution = {
+  records: IngestCommittedRecord[];
+  suppress_fallback_note: boolean;
+};
+
+export interface LiveReviewFollowupResolver {
+  resolveShortLiveFollowup(input: {
+    agent_id: string;
+    user_message: string;
+    session_id?: string;
+    kept_active_candidates?: NormalizedRecordCandidate[];
+  }): Promise<LiveReviewFollowupResolution | null>;
+}
+
 export type PreviewImportCandidateDetail = {
   candidate: NormalizedRecordCandidate;
   origins: CandidateOrigin[];
@@ -125,10 +158,20 @@ type ShortUserProposalArbitration =
   | { action: 'keep'; candidates: NormalizedRecordCandidate[] }
   | { action: 'drop_all' };
 
+type ShortUserActiveSelectionResolution = {
+  candidates: NormalizedRecordCandidate[];
+  delete_record_ids: string[];
+};
+
 const COLLOQUIAL_PROFILE_RULE_KEYS = new Set([
   'language_preference',
   'response_length',
   'solution_complexity',
+]);
+const WORKFLOW_TASK_STATE_KEYS = new Set([
+  'refactor_status',
+  'deployment_status',
+  'migration_status',
 ]);
 
 const SUBJECT_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
@@ -371,7 +414,9 @@ function isSharedContractAutoCommitSafeCandidate(normalized: NormalizedRecordCan
   );
 }
 
-function classifySharedDetailDisposition(detail: Pick<CollectedCandidateDetail, 'candidate' | 'origins'>): IngestDetailDisposition {
+function classifySharedDetailDisposition(
+  detail: Pick<CollectedCandidateDetail, 'candidate' | 'origins' | 'source_excerpt'>,
+): IngestDetailDisposition {
   if (detail.candidate.written_kind === 'session_note') return 'note';
   if (isSharedContractAutoCommitSafeCandidate(detail.candidate)) return 'auto_commit';
   if (
@@ -380,6 +425,17 @@ function classifySharedDetailDisposition(detail: Pick<CollectedCandidateDetail, 
     detail.candidate.candidate.subject_key === 'user' &&
     detail.candidate.candidate.attribute_key === 'response_style'
   ) {
+    const conversationalMatch = matchConversationalProfileRule(detail.source_excerpt);
+    if (conversationalMatch?.attribute_key === 'response_style') {
+      return conversationalMatch.disposition;
+    }
+    const shortSelection = inferShortUserProposalSelection(detail.source_excerpt);
+    if (
+      shortSelection?.keep_profile_rule_attributes.includes('response_style') &&
+      !shortSelection.drop_profile_rule_attributes.includes('response_style')
+    ) {
+      return 'auto_commit';
+    }
     return 'review';
   }
   if (detail.origins.includes('deterministic') || detail.origins.includes('fast')) return 'auto_commit';
@@ -545,6 +601,36 @@ function collectActiveDurableEntries(agentId: string): ActiveDurableEntry[] {
     .filter((entry): entry is ActiveDurableEntry => !!entry);
 }
 
+function supersedeWorkflowTaskStateSiblings(record: CortexRecord): string[] {
+  if (
+    record.kind !== 'task_state' ||
+    !WORKFLOW_TASK_STATE_KEYS.has(record.state_key)
+  ) {
+    return [];
+  }
+
+  const siblings = listRecords({
+    agent_id: record.agent_id,
+    kind: 'task_state',
+    include_inactive: false,
+    limit: Math.max(50, getRecordsCount(record.agent_id) + 10),
+    order_by: 'updated_at',
+    order_dir: 'desc',
+  }).items.filter((candidate): candidate is CortexRecord & { kind: 'task_state' } => (
+    candidate.kind === 'task_state' &&
+    candidate.id !== record.id &&
+    candidate.subject_key === record.subject_key &&
+    WORKFLOW_TASK_STATE_KEYS.has(candidate.state_key) &&
+    !candidate.valid_to
+  ));
+
+  for (const sibling of siblings) {
+    supersedeRecordById(sibling.id, record.id);
+  }
+
+  return siblings.map(sibling => sibling.id);
+}
+
 function resolveShortUserRewriteAgainstDurables(input: {
   agentId: string;
   userContent: string;
@@ -553,7 +639,9 @@ function resolveShortUserRewriteAgainstDurables(input: {
 }): NormalizedRecordCandidate | null {
   if (input.durables.length === 0) return null;
 
-  const rewrite = inferShortUserProposalRewrite(input.userContent);
+  const rewrite = inferShortUserProposalRewrite(input.userContent)
+    ?? inferShortUserFactRewriteAgainstDurables(input.userContent, input.durables)
+    ?? inferShortUserTaskStateRewriteAgainstDurables(input.userContent, input.durables);
   if (!rewrite) return null;
 
   const rewritten = normalizeManualInput(input.agentId, {
@@ -571,14 +659,85 @@ function resolveShortUserRewriteAgainstDurables(input: {
     stableContractKey(candidate) === rewrittenKey
   ));
 
-  return compatibleDurables.length === 1 ? rewritten : null;
+  if (compatibleDurables.length === 1) {
+    return rewritten;
+  }
+
+  return isCompactTaskStateRewriteCompatible(rewritten, input.durables) ? rewritten : null;
+}
+
+function inferShortUserFactRewriteAgainstDurables(
+  userContent: string,
+  durables: NormalizedRecordCandidate[],
+): { synthesized_content: string } | null {
+  const factDurables = durables
+    .map((candidate) => {
+      const record = candidate.candidate;
+      if (
+        record.kind !== 'fact_slot'
+        || record.entity_key !== 'user'
+        || (record.attribute_key !== 'location' && record.attribute_key !== 'organization')
+      ) {
+        return null;
+      }
+      return record.attribute_key;
+    })
+    .filter((attribute): attribute is 'location' | 'organization' => !!attribute);
+
+  if (factDurables.length !== 1) return null;
+  return inferShortUserFactSlotRewrite(factDurables[0], userContent);
+}
+
+function inferShortUserTaskStateRewriteAgainstDurables(
+  userContent: string,
+  durables: NormalizedRecordCandidate[],
+): { synthesized_content: string } | null {
+  const taskDurables = durables.filter((candidate): candidate is NormalizedRecordCandidate & { candidate: TaskStateCandidate } => (
+    candidate.candidate.kind === 'task_state'
+    && candidate.candidate.subject_key === 'cortex'
+  ));
+  if (taskDurables.length !== 1) return null;
+
+  const [durable] = taskDurables;
+  if (!durable) {
+    return null;
+  }
+
+  return inferShortUserTaskStateRewrite(durable.candidate.subject_key, userContent);
+}
+
+function isCompactTaskStateRewriteCompatible(
+  rewritten: NormalizedRecordCandidate,
+  durables: NormalizedRecordCandidate[],
+): boolean {
+  if (
+    rewritten.written_kind !== 'task_state' ||
+    rewritten.candidate.kind !== 'task_state'
+  ) {
+    return false;
+  }
+
+  const rewrittenSubjectKey = rewritten.candidate.subject_key;
+  const compatibleTaskDurables = durables.filter((candidate): candidate is NormalizedRecordCandidate & {
+    written_kind: 'task_state';
+    candidate: TaskStateCandidate;
+  } => (
+    candidate.written_kind === 'task_state'
+    && candidate.candidate.kind === 'task_state'
+    && candidate.candidate.subject_key === rewrittenSubjectKey
+  ));
+  if (compatibleTaskDurables.length !== 1) {
+    return false;
+  }
+
+  return true;
 }
 
 function resolveShortUserSelectionAgainstActiveDurables(input: {
   userContent: string;
   sessionId?: string;
   activeDurables: ActiveDurableEntry[];
-}): { candidates: NormalizedRecordCandidate[]; delete_record_ids: string[] } | null {
+}): ShortUserActiveSelectionResolution | null {
   if (input.activeDurables.length === 0) return null;
 
   const selection = inferShortUserProposalSelection(input.userContent);
@@ -605,7 +764,7 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
 
   if (keepSet.size > 0) {
     survivors = survivors.filter(item => keepSet.has(item.attribute));
-    if (survivors.length === 0) return null;
+    if (survivors.length === 0 && dropSet.size === 0) return null;
   }
 
   if (dropSet.size > 0) {
@@ -616,6 +775,16 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
         delete_record_ids: selectable
           .filter(item => dropSet.has(item.attribute))
           .map(item => item.entry.record.id),
+      };
+    }
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const deleteRecordIds = selectable
+        .filter(item => dropSet.has(item.attribute))
+        .map(item => item.entry.record.id);
+      if (deleteRecordIds.length === 0) return null;
+      return {
+        candidates: [],
+        delete_record_ids: deleteRecordIds,
       };
     }
   }
@@ -630,7 +799,7 @@ function resolveShortUserSelectionAgainstActiveDurables(input: {
       .filter(item => dropSet.has(item.attribute))
       .map(item => item.entry.record.id);
 
-  if (deleteRecordIds.length === 0) return null;
+  if (deleteRecordIds.length === 0 && keepSet.size === 0) return null;
 
   const selectedCandidates = sortSelectableProfileRuleEntries(survivors)
     .map((survivor) => activeRecordToNormalizedCandidate(
@@ -654,6 +823,7 @@ function sortSelectableProfileRuleEntries<T extends { attribute: string }>(entri
     ['language_preference', 0],
     ['response_length', 1],
     ['solution_complexity', 2],
+    ['response_style', 3],
   ]);
   return entries
     .slice()
@@ -672,11 +842,54 @@ function selectableProposalProfileRuleAttribute(candidate: NormalizedRecordCandi
       record.attribute_key === 'language_preference'
       || record.attribute_key === 'response_length'
       || record.attribute_key === 'solution_complexity'
+      || record.attribute_key === 'response_style'
     )
   ) {
     return record.attribute_key;
   }
   return null;
+}
+
+function selectableFactSlotAttribute(candidate: NormalizedRecordCandidate): string | null {
+  const record = candidate.candidate;
+  if (
+    record.kind === 'fact_slot' &&
+    record.entity_key === 'user' &&
+    (record.attribute_key === 'location' || record.attribute_key === 'organization')
+  ) {
+    return record.attribute_key;
+  }
+  return null;
+}
+
+function selectableWorkflowTaskStateKey(candidate: NormalizedRecordCandidate): string | null {
+  const record = candidate.candidate;
+  if (
+    record.kind === 'task_state' &&
+    record.subject_key === 'cortex' &&
+    WORKFLOW_TASK_STATE_KEYS.has(record.state_key)
+  ) {
+    return record.state_key;
+  }
+  return null;
+}
+
+function isShortUserSelectableDurable(candidate: NormalizedRecordCandidate): boolean {
+  return !!selectableProposalProfileRuleAttribute(candidate)
+    || !!selectableFactSlotAttribute(candidate)
+    || !!selectableWorkflowTaskStateKey(candidate);
+}
+
+function sortSelectableFactEntries<T extends { attribute: string }>(entries: T[]): T[] {
+  const attributeOrder = new Map([
+    ['location', 0],
+    ['organization', 1],
+  ]);
+  return entries
+    .slice()
+    .sort((left, right) => (
+      (attributeOrder.get(left.attribute) ?? 99) - (attributeOrder.get(right.attribute) ?? 99)
+    ));
 }
 
 function arbitrateShortUserProposalSelection(
@@ -689,11 +902,13 @@ function arbitrateShortUserProposalSelection(
   if (!selection) return null;
   if (selection.drop_all) return { action: 'drop_all' };
 
-  const selectable = proposalDurables.map(candidate => ({
-    candidate,
-    attribute: selectableProposalProfileRuleAttribute(candidate),
-  }));
-  if (selectable.some(entry => !entry.attribute)) return null;
+  const selectable = proposalDurables
+    .map(candidate => ({
+      candidate,
+      attribute: selectableProposalProfileRuleAttribute(candidate),
+    }))
+    .filter((entry): entry is { candidate: NormalizedRecordCandidate; attribute: string } => !!entry.attribute);
+  if (selectable.length === 0) return null;
 
   const keepSet = new Set(selection.keep_profile_rule_attributes);
   const dropSet = new Set(selection.drop_profile_rule_attributes);
@@ -701,22 +916,307 @@ function arbitrateShortUserProposalSelection(
 
   if (keepSet.size > 0) {
     survivors = survivors.filter(entry => entry.attribute && keepSet.has(entry.attribute));
-    if (survivors.length === 0) return null;
+    if (survivors.length === 0 && dropSet.size === 0) return null;
   }
 
   if (dropSet.size > 0) {
     survivors = survivors.filter(entry => entry.attribute && !dropSet.has(entry.attribute));
     if (survivors.length === 0 && keepSet.size === 0) return { action: 'drop_all' };
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const hasExplicitDrop = selectable.some(entry => entry.attribute && dropSet.has(entry.attribute));
+      if (!hasExplicitDrop) return null;
+      return { action: 'drop_all' };
+    }
   }
 
   if (survivors.length === 0) return null;
 
   return {
     action: 'keep',
-    candidates: sortSelectableProfileRuleEntries(
-      survivors.filter((entry): entry is { candidate: NormalizedRecordCandidate; attribute: string } => !!entry.attribute),
-    ).map(entry => entry.candidate),
+    candidates: sortSelectableProfileRuleEntries(survivors).map(entry => entry.candidate),
   };
+}
+
+function resolveShortUserFactSelectionAgainstActiveDurables(input: {
+  userContent: string;
+  sessionId?: string;
+  activeDurables: ActiveDurableEntry[];
+}): ShortUserActiveSelectionResolution | null {
+  if (input.activeDurables.length === 0) return null;
+
+  const selection = inferShortUserFactSelection(input.userContent);
+  if (!selection) return null;
+
+  const selectable = input.activeDurables
+    .map((entry) => ({
+      entry,
+      attribute: selectableFactSlotAttribute(entry.candidate),
+    }))
+    .filter((entry): entry is { entry: ActiveDurableEntry; attribute: string } => !!entry.attribute);
+  if (selectable.length === 0) return null;
+  if (selection.drop_all) {
+    return {
+      candidates: [],
+      delete_record_ids: selectable.map(item => item.entry.record.id),
+    };
+  }
+
+  const keepSet = new Set(selection.keep_fact_attributes);
+  const dropSet = new Set(selection.drop_fact_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter(item => keepSet.has(item.attribute as 'location' | 'organization'));
+    if (survivors.length === 0 && dropSet.size === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter(item => !dropSet.has(item.attribute as 'location' | 'organization'));
+    if (survivors.length === 0 && keepSet.size === 0) {
+      return {
+        candidates: [],
+        delete_record_ids: selectable
+          .filter(item => dropSet.has(item.attribute as 'location' | 'organization'))
+          .map(item => item.entry.record.id),
+      };
+    }
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const deleteRecordIds = selectable
+        .filter(item => dropSet.has(item.attribute as 'location' | 'organization'))
+        .map(item => item.entry.record.id);
+      if (deleteRecordIds.length === 0) return null;
+      return {
+        candidates: [],
+        delete_record_ids: deleteRecordIds,
+      };
+    }
+  }
+
+  if (survivors.length === 0) return null;
+
+  const deleteRecordIds = keepSet.size > 0
+    ? selectable
+      .filter(item => !survivors.some(survivor => survivor.entry.record.id === item.entry.record.id))
+      .map(item => item.entry.record.id)
+    : selectable
+      .filter(item => dropSet.has(item.attribute as 'location' | 'organization'))
+      .map(item => item.entry.record.id);
+
+  if (deleteRecordIds.length === 0 && keepSet.size === 0) return null;
+
+  const selectedCandidates = sortSelectableFactEntries(survivors)
+    .map((survivor) => activeRecordToNormalizedCandidate(
+      survivor.entry.record,
+      'user_confirmed',
+      input.sessionId,
+    ))
+    .filter((candidate): candidate is NormalizedRecordCandidate => (
+      !!candidate && candidate.written_kind !== 'session_note'
+    ));
+  if (selectedCandidates.length !== survivors.length) return null;
+
+  return {
+    candidates: selectedCandidates,
+    delete_record_ids: deleteRecordIds,
+  };
+}
+
+function resolveShortUserRejectionAgainstSingleActiveDurable(input: {
+  userContent: string;
+  activeDurables: ActiveDurableEntry[];
+}): ShortUserActiveSelectionResolution | null {
+  if (!isShortUserProposalRejection(input.userContent)) return null;
+  if (isShortUserReplacementRequest(input.userContent)) return null;
+  if (input.activeDurables.length !== 1) return null;
+
+  const [active] = input.activeDurables;
+  if (!active) return null;
+
+  if (!isShortUserSelectableDurable(active.candidate)) return null;
+
+  return {
+    candidates: [],
+    delete_record_ids: [active.record.id],
+  };
+}
+
+function arbitrateShortUserProposalFactSelection(
+  userContent: string,
+  proposalDurables: NormalizedRecordCandidate[],
+): ShortUserProposalArbitration | null {
+  if (proposalDurables.length === 0) return null;
+
+  const selection = inferShortUserFactSelection(userContent);
+  if (!selection) return null;
+  if (selection.drop_all) return { action: 'drop_all' };
+
+  const selectable = proposalDurables
+    .map(candidate => ({
+      candidate,
+      attribute: selectableFactSlotAttribute(candidate),
+    }))
+    .filter((entry): entry is { candidate: NormalizedRecordCandidate; attribute: string } => !!entry.attribute);
+  if (selectable.length === 0) return null;
+
+  const keepSet = new Set(selection.keep_fact_attributes);
+  const dropSet = new Set(selection.drop_fact_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter(entry => entry.attribute && keepSet.has(entry.attribute as 'location' | 'organization'));
+    if (survivors.length === 0 && dropSet.size === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter(entry => entry.attribute && !dropSet.has(entry.attribute as 'location' | 'organization'));
+    if (survivors.length === 0 && keepSet.size === 0) return { action: 'drop_all' };
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const hasExplicitDrop = selectable.some(entry => entry.attribute && dropSet.has(entry.attribute as 'location' | 'organization'));
+      if (!hasExplicitDrop) return null;
+      return { action: 'drop_all' };
+    }
+  }
+
+  if (survivors.length === 0) return null;
+
+  return {
+    action: 'keep',
+    candidates: sortSelectableFactEntries(survivors).map(entry => entry.candidate),
+  };
+}
+
+function arbitrateShortUserProposalTaskSelection(
+  userContent: string,
+  proposalDurables: NormalizedRecordCandidate[],
+): ShortUserProposalArbitration | null {
+  if (proposalDurables.length === 0) return null;
+
+  const selection = inferShortUserTaskSelection(userContent);
+  if (!selection?.keep_current_task) return null;
+
+  const selectable = proposalDurables
+    .map(candidate => ({
+      candidate,
+      stateKey: selectableWorkflowTaskStateKey(candidate),
+    }))
+    .filter((entry): entry is { candidate: NormalizedRecordCandidate; stateKey: string } => !!entry.stateKey);
+  if (selectable.length !== 1) return null;
+
+  return {
+    action: 'keep',
+    candidates: [selectable[0].candidate],
+  };
+}
+
+function resolveShortUserTaskSelectionAgainstActiveDurables(input: {
+  userContent: string;
+  sessionId?: string;
+  activeDurables: ActiveDurableEntry[];
+}): ShortUserActiveSelectionResolution | null {
+  if (input.activeDurables.length === 0) return null;
+
+  const selection = inferShortUserTaskSelection(input.userContent);
+  if (!selection?.keep_current_task) return null;
+
+  const selectableTasks = input.activeDurables
+    .map((entry) => ({
+      entry,
+      stateKey: selectableWorkflowTaskStateKey(entry.candidate),
+    }))
+    .filter((entry): entry is { entry: ActiveDurableEntry; stateKey: string } => !!entry.stateKey);
+  if (selectableTasks.length !== 1) return null;
+
+  const [survivor] = selectableTasks;
+  if (!survivor) return null;
+
+  const deleteRecordIds = input.activeDurables
+    .filter((entry) => isShortUserSelectableDurable(entry.candidate) && entry.record.id !== survivor.entry.record.id)
+    .map(entry => entry.record.id);
+  const selectedCandidate = activeRecordToNormalizedCandidate(
+    survivor.entry.record,
+    'user_confirmed',
+    input.sessionId,
+  );
+  if (!selectedCandidate || selectedCandidate.written_kind === 'session_note') return null;
+
+  return {
+    candidates: [selectedCandidate],
+    delete_record_ids: deleteRecordIds,
+  };
+}
+
+function mergeDeterministicCandidates(
+  candidates: NormalizedRecordCandidate[],
+): NormalizedRecordCandidate[] {
+  const seen = new Set<string>();
+  const merged: NormalizedRecordCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = dedupeKey(candidate);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(candidate);
+  }
+  return merged;
+}
+
+function mergeShortUserActiveSelectionResolutions(
+  ...selections: Array<ShortUserActiveSelectionResolution | null>
+): ShortUserActiveSelectionResolution | null {
+  const resolved = selections.filter((selection): selection is ShortUserActiveSelectionResolution => !!selection);
+  if (resolved.length === 0) return null;
+
+  return {
+    candidates: mergeDeterministicCandidates(resolved.flatMap(selection => selection.candidates)),
+    delete_record_ids: Array.from(new Set(resolved.flatMap(selection => selection.delete_record_ids))),
+  };
+}
+
+function mergeShortUserProposalArbitrations(
+  ...arbitrations: Array<ShortUserProposalArbitration | null>
+): ShortUserProposalArbitration | null {
+  const resolved = arbitrations.filter((arbitration): arbitration is ShortUserProposalArbitration => !!arbitration);
+  if (resolved.length === 0) return null;
+
+  const keptCandidates = mergeDeterministicCandidates(
+    resolved.flatMap(arbitration => arbitration.action === 'keep' ? arbitration.candidates : []),
+  );
+  if (keptCandidates.length > 0) {
+    return {
+      action: 'keep',
+      candidates: keptCandidates,
+    };
+  }
+
+  return resolved.some(arbitration => arbitration.action === 'drop_all')
+    ? { action: 'drop_all' }
+    : null;
+}
+
+function hasExplicitShortDirectiveSelectionIntent(userContent: string): boolean {
+  const trimmed = userContent.trim();
+  if (!trimmed || trimmed.length > 24) return false;
+
+  const proposalSelection = inferShortUserProposalSelection(trimmed);
+  const factSelection = inferShortUserFactSelection(trimmed);
+  const taskSelection = inferShortUserTaskSelection(trimmed);
+
+  if (proposalSelection?.drop_all || factSelection?.drop_all) return true;
+  if ((proposalSelection?.drop_profile_rule_attributes.length || 0) > 0) return true;
+  if ((factSelection?.drop_fact_attributes.length || 0) > 0) return true;
+  if (taskSelection?.keep_current_task) return true;
+
+  if (/^(?:只(?:保留|留)?|只要|保留|留)/.test(trimmed)) {
+    return Boolean(proposalSelection || factSelection || taskSelection);
+  }
+
+  if (
+    /^(?:就)(?:当前)?任务(?:(?:就)?(?:行|即可|就好|就可以))?$/i.test(trimmed) ||
+    /^(?:就)(?:公司|单位|组织|住址|地址|所在地|住的地方)$/i.test(trimmed)
+  ) {
+    return Boolean(factSelection || taskSelection);
+  }
+
+  return false;
 }
 
 function dropRedundantSessionNotes(
@@ -1201,11 +1701,16 @@ function formatRuleLabel(record: CortexRecord): string {
 
 export class CortexRecordsV2 {
   private readonly relations = new CortexRelationsV2();
+  private liveReviewFollowupResolver: LiveReviewFollowupResolver | null = null;
 
   constructor(
     private llm: LLMProvider,
     private embeddingProvider: EmbeddingProvider,
   ) {}
+
+  setLiveReviewFollowupResolver(resolver: LiveReviewFollowupResolver | null): void {
+    this.liveReviewFollowupResolver = resolver;
+  }
 
   private createDerivedRelationCandidatesIfNeeded(record: CortexRecord): void {
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return;
@@ -1482,6 +1987,7 @@ export class CortexRecordsV2 {
         disposition: classifySharedDetailDisposition({
           candidate: hintedFallback,
           origins: ['fallback'],
+          source_excerpt: content,
         }),
       }];
     }
@@ -1498,6 +2004,7 @@ export class CortexRecordsV2 {
         disposition: classifySharedDetailDisposition({
           candidate: hintedFallback,
           origins: ['fallback'],
+          source_excerpt: content,
         }),
       }];
     }
@@ -1578,13 +2085,20 @@ export class CortexRecordsV2 {
       ...normalized.candidate,
       evidence,
     }, normalized);
+    const supersededWorkflowTaskStateIds = supersedeWorkflowTaskStateSiblings(result.record);
     if (evidence.length > 0) {
       insertEvidence(result.record.id, normalized.candidate.agent_id, normalized.candidate.source_type, evidence);
+    }
+    if (result.previous_record_id) {
+      this.relations.refreshDerivedCandidates(result.previous_record_id);
     }
     if (opts.deriveRelationCandidates !== false) {
       this.createDerivedRelationCandidatesIfNeeded(result.record);
     }
     await this.indexRecord(result.record);
+    for (const supersededId of supersededWorkflowTaskStateIds) {
+      this.relations.refreshDerivedCandidates(supersededId);
+    }
     return result;
   }
 
@@ -1595,16 +2109,7 @@ export class CortexRecordsV2 {
     agent_id?: string;
     session_id?: string;
   }): Promise<{
-    records: Array<{
-      record_id: string;
-      requested_kind: RecordKind;
-      written_kind: RecordKind;
-      normalization: RecordUpsertResult['normalization'];
-      reason_code: RecordUpsertResult['reason_code'];
-      decision: RecordUpsertResult['decision'];
-      source_type: SourceType;
-      content: string;
-    }>;
+    records: IngestCommittedRecord[];
     conversation_ref_id?: string;
     review_record_candidates: Array<Record<string, unknown>>;
     skipped: boolean;
@@ -1646,9 +2151,13 @@ export class CortexRecordsV2 {
     const activeDurableEntries = collectActiveDurableEntries(agentId);
     const activeDurables = activeDurableEntries.map(entry => entry.candidate);
     let activeSelectionDeleteIds: string[] = [];
+    const explicitShortDirectiveSelection = hasExplicitShortDirectiveSelectionIntent(user);
     const forceVisibleFingerprints = new Set<string>();
     let skipActiveTruthResolution = false;
     let skipFallbackNote = false;
+    let handledShortDirectiveResolution = false;
+    let appliedExplicitActiveSelection = false;
+    let keptActiveSelectionCandidates: NormalizedRecordCandidate[] = [];
     let confirmationProposal: ExchangeMessage | null = null;
     if (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')) {
       if (priorAssistantProposal && isShortUserConfirmation(user)) {
@@ -1660,6 +2169,7 @@ export class CortexRecordsV2 {
             origins: ['deterministic'],
             source_excerpt: user,
           }));
+          handledShortDirectiveResolution = true;
         } else {
           confirmationProposal = null;
         }
@@ -1682,8 +2192,13 @@ export class CortexRecordsV2 {
           source_excerpt: user,
         }];
         proposalEvidence = priorAssistantProposal;
+        handledShortDirectiveResolution = true;
       } else {
-        const selective = arbitrateShortUserProposalSelection(user, priorAssistantProposalDurables);
+        const selective = mergeShortUserProposalArbitrations(
+          arbitrateShortUserProposalSelection(user, priorAssistantProposalDurables),
+          arbitrateShortUserProposalFactSelection(user, priorAssistantProposalDurables),
+          arbitrateShortUserProposalTaskSelection(user, priorAssistantProposalDurables),
+        );
         if (selective?.action === 'keep') {
           normalizedCandidates = selective.candidates;
           candidateDetails = selective.candidates.map((candidate) => ({
@@ -1692,26 +2207,37 @@ export class CortexRecordsV2 {
             source_excerpt: user,
           }));
           proposalEvidence = priorAssistantProposal;
+          handledShortDirectiveResolution = true;
         } else if (selective?.action === 'drop_all') {
           normalizedCandidates = [];
           candidateDetails = [];
           proposalEvidence = priorAssistantProposal;
           skipActiveTruthResolution = true;
           skipFallbackNote = true;
+          handledShortDirectiveResolution = true;
         } else if (normalizedCandidates.length === 0 && isShortUserProposalRejection(user)) {
-          const rejected = normalizeManualInput(agentId, {
-            kind: 'session_note',
-            content: user,
-            source_type: 'user_explicit',
-            session_id: req.session_id,
-          });
-          normalizedCandidates = [rejected];
-          candidateDetails = [{
-            candidate: rejected,
-            origins: ['deterministic'],
-            source_excerpt: user,
-          }];
           proposalEvidence = priorAssistantProposal;
+          if (priorAssistantProposalDurables.length > 0 && !isShortUserReplacementRequest(user)) {
+            normalizedCandidates = [];
+            candidateDetails = [];
+            skipActiveTruthResolution = true;
+            skipFallbackNote = true;
+            handledShortDirectiveResolution = true;
+          } else {
+            const rejected = normalizeManualInput(agentId, {
+              kind: 'session_note',
+              content: user,
+              source_type: 'user_explicit',
+              session_id: req.session_id,
+            });
+            normalizedCandidates = [rejected];
+            candidateDetails = [{
+              candidate: rejected,
+              origins: ['deterministic'],
+              source_excerpt: user,
+            }];
+            handledShortDirectiveResolution = true;
+          }
         }
       }
     }
@@ -1730,15 +2256,39 @@ export class CortexRecordsV2 {
           origins: ['deterministic'],
           source_excerpt: user,
         }];
+        handledShortDirectiveResolution = true;
       }
     }
 
-    if (!skipActiveTruthResolution && (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note'))) {
-      const selectedActive = resolveShortUserSelectionAgainstActiveDurables({
-        userContent: user,
-        sessionId: req.session_id,
-        activeDurables: activeDurableEntries,
-      });
+    if (
+      !skipActiveTruthResolution &&
+      (
+        explicitShortDirectiveSelection ||
+        normalizedCandidates.length === 0 ||
+        normalizedCandidates.every(candidate => candidate.written_kind === 'session_note')
+      )
+    ) {
+      const selectedActive = mergeShortUserActiveSelectionResolutions(
+        resolveShortUserRejectionAgainstSingleActiveDurable({
+          userContent: user,
+          activeDurables: activeDurableEntries,
+        }),
+        resolveShortUserSelectionAgainstActiveDurables({
+          userContent: user,
+          sessionId: req.session_id,
+          activeDurables: activeDurableEntries,
+        }),
+        resolveShortUserTaskSelectionAgainstActiveDurables({
+          userContent: user,
+          sessionId: req.session_id,
+          activeDurables: activeDurableEntries,
+        }),
+        resolveShortUserFactSelectionAgainstActiveDurables({
+          userContent: user,
+          sessionId: req.session_id,
+          activeDurables: activeDurableEntries,
+        }),
+      );
       if (selectedActive) {
         normalizedCandidates = selectedActive.candidates;
         candidateDetails = selectedActive.candidates.map((candidate) => ({
@@ -1746,14 +2296,42 @@ export class CortexRecordsV2 {
           origins: ['deterministic'] as CandidateOrigin[],
           source_excerpt: user,
         }));
-        activeSelectionDeleteIds = selectedActive.delete_record_ids;
+        activeSelectionDeleteIds = Array.from(new Set([
+          ...activeSelectionDeleteIds,
+          ...selectedActive.delete_record_ids,
+        ]));
         for (const candidate of selectedActive.candidates) {
           const fingerprint = normalizedCandidateFingerprint(candidate);
           if (fingerprint) forceVisibleFingerprints.add(fingerprint);
         }
+        keptActiveSelectionCandidates = selectedActive.candidates;
         if (selectedActive.candidates.length === 0 && selectedActive.delete_record_ids.length > 0) {
           skipFallbackNote = true;
         }
+        appliedExplicitActiveSelection = true;
+        handledShortDirectiveResolution = true;
+      }
+    }
+
+    let pendingReviewResolution: LiveReviewFollowupResolution | null = null;
+    if (this.liveReviewFollowupResolver) {
+      pendingReviewResolution = await this.liveReviewFollowupResolver.resolveShortLiveFollowup({
+        agent_id: agentId,
+        user_message: user,
+        session_id: req.session_id,
+        kept_active_candidates: keptActiveSelectionCandidates,
+      });
+      if (pendingReviewResolution) {
+        if (
+          candidateDetails.length === 0
+          || candidateDetails.every((detail) => detail.candidate.written_kind === 'session_note')
+          || (explicitShortDirectiveSelection && !appliedExplicitActiveSelection)
+        ) {
+          normalizedCandidates = [];
+          candidateDetails = [];
+        }
+        skipFallbackNote = skipFallbackNote || pendingReviewResolution.suppress_fallback_note;
+        handledShortDirectiveResolution = true;
       }
     }
 
@@ -1792,16 +2370,7 @@ export class CortexRecordsV2 {
       ...(assistant ? [{ role: 'assistant' as const, content: assistant, conversation_ref_id: conversationRefId }] : []),
     ];
 
-    const results: Array<{
-      record_id: string;
-      requested_kind: RecordKind;
-      written_kind: RecordKind;
-      normalization: RecordUpsertResult['normalization'];
-      reason_code: RecordUpsertResult['reason_code'];
-      decision: RecordUpsertResult['decision'];
-      source_type: SourceType;
-      content: string;
-    }> = [];
+    const results: IngestCommittedRecord[] = [];
     const reviewRecordCandidates: Array<Record<string, unknown>> = [];
 
     const autoCommitDetails = suppressNoOpAutoCommitDetails(
@@ -1845,8 +2414,12 @@ export class CortexRecordsV2 {
       ));
     }
 
+    const combinedResults = pendingReviewResolution
+      ? [...results, ...pendingReviewResolution.records]
+      : results;
+
     return {
-      records: results,
+      records: combinedResults,
       conversation_ref_id: conversationRefId,
       review_record_candidates: reviewRecordCandidates,
       skipped: false,
@@ -2134,6 +2707,7 @@ export class CortexRecordsV2 {
   }
 
   async deleteRecord(id: string) {
+    this.relations.deletePendingCandidatesForSourceRecord(id);
     return deleteRecord(id);
   }
 }

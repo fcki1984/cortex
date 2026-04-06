@@ -2,6 +2,17 @@ import { ensureAgent } from '../db/index.js';
 import { getDb } from '../db/connection.js';
 import { generateId } from '../utils/helpers.js';
 import {
+  inferShortUserFactSlotRewrite,
+  inferShortUserProfileRuleAttributeRewrite,
+  inferShortUserFactSelection,
+  inferShortUserProposalSelection,
+  inferShortUserTaskStateRewrite,
+  inferShortUserTaskSelection,
+  isShortUserConfirmation,
+  isShortUserProposalRejection,
+  isShortUserReplacementRequest,
+} from './contract.js';
+import {
   confirmImport,
   previewImportForReviewInbox,
   type ImportFormat,
@@ -12,8 +23,12 @@ import {
   buildRecordReviewAssist,
   buildRelationReviewAssist,
 } from './review-assist.js';
-import type { CortexRecordsV2 } from './service.js';
-import type { CortexRecord } from './types.js';
+import type {
+  CortexRecordsV2,
+  IngestCommittedRecord,
+  LiveReviewFollowupResolution,
+} from './service.js';
+import type { CortexRecord, NormalizedRecordCandidate } from './types.js';
 
 export type ReviewSourceKind = 'live_ingest' | 'import_preview';
 export type ReviewBatchStatus = 'pending' | 'partially_applied' | 'completed' | 'dismissed';
@@ -51,6 +66,23 @@ type ReviewItemRow = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type PendingLiveReviewRecordRow = {
+  item_id: string;
+  batch_id: string;
+  payload_json: string;
+  suggested_rewrite: string | null;
+};
+
+type PendingLiveReviewItemRow = ReviewItemRow & {
+  source_kind: ReviewSourceKind;
+  agent_id: string;
+};
+
+type PendingLiveSelectionResolution = {
+  accept_items: ReviewItem[];
+  reject_items: ReviewItem[];
 };
 
 type ReviewBatchItemInput = {
@@ -276,6 +308,468 @@ function buildSuggestedApplyAction(item: ReviewItem): ReviewItemActionInput | nu
       };
 }
 
+function toIngestCommittedRecord(item: Record<string, unknown>): IngestCommittedRecord | null {
+  const record = (item.record && typeof item.record === 'object')
+    ? item.record as Record<string, unknown>
+    : null;
+  const recordId = asString(record?.id);
+  const requestedKind = asString(item.requested_kind) || asString(record?.requested_kind);
+  const writtenKind = asString(item.written_kind) || asString(record?.written_kind) || asString(record?.kind);
+  const normalization = asString(item.normalization) || asString(record?.normalization);
+  const decision = asString(item.decision);
+  const sourceType = asString(record?.source_type);
+  const content = asString(record?.content);
+  if (
+    !recordId ||
+    !requestedKind ||
+    !writtenKind ||
+    !normalization ||
+    !decision ||
+    !sourceType ||
+    !content
+  ) {
+    return null;
+  }
+
+  return {
+    record_id: recordId,
+    requested_kind: requestedKind as IngestCommittedRecord['requested_kind'],
+    written_kind: writtenKind as IngestCommittedRecord['written_kind'],
+    normalization: normalization as IngestCommittedRecord['normalization'],
+    reason_code: null,
+    decision: decision as IngestCommittedRecord['decision'],
+    source_type: sourceType as IngestCommittedRecord['source_type'],
+    content,
+  };
+}
+
+function selectablePendingProfileRuleAttribute(item: ReviewItem): 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style' | null {
+  if (item.item_type !== 'record' || item.suggested_action !== 'accept') return null;
+  const normalizedKind = asString(item.payload.normalized_kind);
+  const subjectKey = asString(item.payload.subject_key);
+  const attributeKey = asString(item.payload.attribute_key);
+  if (normalizedKind !== 'profile_rule' || subjectKey !== 'user') return null;
+  return attributeKey === 'language_preference' || attributeKey === 'response_length' || attributeKey === 'solution_complexity' || attributeKey === 'response_style'
+    ? attributeKey
+    : null;
+}
+
+function selectablePendingFactAttribute(item: ReviewItem): 'location' | 'organization' | null {
+  if (item.item_type !== 'record' || item.suggested_action !== 'accept') return null;
+  const normalizedKind = asString(item.payload.normalized_kind);
+  const entityKey = asString(item.payload.entity_key);
+  const attributeKey = asString(item.payload.attribute_key);
+  if (normalizedKind !== 'fact_slot' || entityKey !== 'user') return null;
+  return attributeKey === 'location' || attributeKey === 'organization'
+    ? attributeKey
+    : null;
+}
+
+function selectablePendingTaskStateKey(item: ReviewItem): 'refactor_status' | 'deployment_status' | 'migration_status' | null {
+  if (item.item_type !== 'record' || item.suggested_action !== 'accept') return null;
+  const normalizedKind = asString(item.payload.normalized_kind);
+  const subjectKey = asString(item.payload.subject_key);
+  const stateKey = asString(item.payload.state_key);
+  if (normalizedKind !== 'task_state' || subjectKey !== 'cortex') return null;
+  return stateKey === 'refactor_status' || stateKey === 'deployment_status' || stateKey === 'migration_status'
+    ? stateKey
+    : null;
+}
+
+function selectableActiveProfileRuleAttribute(
+  candidate: NormalizedRecordCandidate,
+): 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style' | null {
+  const record = candidate.candidate;
+  if (
+    record.kind !== 'profile_rule'
+    || record.owner_scope !== 'user'
+    || record.subject_key !== 'user'
+  ) {
+    return null;
+  }
+  return (
+    record.attribute_key === 'language_preference'
+    || record.attribute_key === 'response_length'
+    || record.attribute_key === 'solution_complexity'
+    || record.attribute_key === 'response_style'
+  )
+    ? record.attribute_key
+    : null;
+}
+
+function selectableActiveFactAttribute(candidate: NormalizedRecordCandidate): 'location' | 'organization' | null {
+  const record = candidate.candidate;
+  if (record.kind !== 'fact_slot' || record.entity_key !== 'user') return null;
+  return record.attribute_key === 'location' || record.attribute_key === 'organization'
+    ? record.attribute_key
+    : null;
+}
+
+function selectableActiveTaskStateKey(
+  candidate: NormalizedRecordCandidate,
+): 'refactor_status' | 'deployment_status' | 'migration_status' | null {
+  const record = candidate.candidate;
+  if (record.kind !== 'task_state' || record.subject_key !== 'cortex') return null;
+  return (
+    record.state_key === 'refactor_status'
+    || record.state_key === 'deployment_status'
+    || record.state_key === 'migration_status'
+  )
+    ? record.state_key
+    : null;
+}
+
+function isPendingLiveSelectableItem(item: ReviewItem): boolean {
+  return !!selectablePendingProfileRuleAttribute(item)
+    || !!selectablePendingFactAttribute(item)
+    || !!selectablePendingTaskStateKey(item);
+}
+
+function pendingLiveAcceptContent(item: ReviewItem): string | null {
+  return asString(item.suggested_rewrite) || asString(item.payload.content);
+}
+
+function pendingLiveRewriteContent(item: ReviewItem, userMessage: string): string | null {
+  if (item.item_type !== 'record' || item.suggested_action !== 'accept') return null;
+
+  const normalizedKind = asString(item.payload.normalized_kind);
+  if (normalizedKind === 'profile_rule') {
+    const attributeKey = asString(item.payload.attribute_key);
+    if (!attributeKey) return null;
+    return inferShortUserProfileRuleAttributeRewrite(attributeKey, userMessage)?.synthesized_content ?? null;
+  }
+
+  if (normalizedKind === 'fact_slot') {
+    const attributeKey = asString(item.payload.attribute_key);
+    if (attributeKey !== 'location' && attributeKey !== 'organization') return null;
+    return inferShortUserFactSlotRewrite(attributeKey, userMessage)?.synthesized_content ?? null;
+  }
+
+  if (normalizedKind === 'task_state') {
+    const subjectKey = asString(item.payload.subject_key);
+    if (!subjectKey) return null;
+    return inferShortUserTaskStateRewrite(subjectKey, userMessage)?.synthesized_content ?? null;
+  }
+
+  return null;
+}
+
+function pendingLiveSelectiveRewriteContent(item: ReviewItem, userMessage: string): string | null {
+  if (item.item_type !== 'record' || item.suggested_action !== 'accept') return null;
+
+  const normalizedKind = asString(item.payload.normalized_kind);
+  if (normalizedKind === 'profile_rule') {
+    const attributeKey = asString(item.payload.attribute_key);
+    if (!attributeKey) return null;
+    return inferShortUserProfileRuleAttributeRewrite(attributeKey, userMessage)?.synthesized_content ?? null;
+  }
+
+  if (!isShortUserReplacementRequest(userMessage)) {
+    return null;
+  }
+
+  return pendingLiveRewriteContent(item, userMessage);
+}
+
+function resolvePendingProfileRuleSelection(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+): PendingLiveSelectionResolution | null {
+  const selection = inferShortUserProposalSelection(userMessage);
+  if (!selection || selection.drop_all) return null;
+
+  const selectable = pendingItems
+    .map((pending) => ({
+      pending,
+      attribute: selectablePendingProfileRuleAttribute(pending.item),
+    }))
+    .filter((entry): entry is {
+      pending: { batch_id: string; item: ReviewItem };
+      attribute: 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style';
+    } => !!entry.attribute);
+  if (selectable.length === 0) return null;
+
+  const keepSet = new Set(selection.keep_profile_rule_attributes);
+  const dropSet = new Set(selection.drop_profile_rule_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter((entry) => keepSet.has(entry.attribute));
+    if (survivors.length === 0 && dropSet.size === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter((entry) => !dropSet.has(entry.attribute));
+    if (survivors.length === 0 && keepSet.size === 0) {
+      return {
+        accept_items: [],
+        reject_items: selectable
+          .filter((entry) => dropSet.has(entry.attribute))
+          .map((entry) => entry.pending.item),
+      };
+    }
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const rejected = selectable
+        .filter((entry) => dropSet.has(entry.attribute))
+        .map((entry) => entry.pending.item);
+      if (rejected.length === 0) return null;
+      return {
+        accept_items: [],
+        reject_items: rejected,
+      };
+    }
+  }
+
+  if (survivors.length === 0) return null;
+
+  const rejected = keepSet.size > 0
+    ? selectable
+      .filter((entry) => !survivors.some((survivor) => survivor.pending.item.id === entry.pending.item.id))
+      .map((entry) => entry.pending.item)
+    : selectable
+      .filter((entry) => dropSet.has(entry.attribute))
+      .map((entry) => entry.pending.item);
+
+  return {
+    accept_items: survivors.map((entry) => entry.pending.item),
+    reject_items: rejected,
+  };
+}
+
+function resolvePendingProfileRuleSelectionSatisfiedByActiveSurvivors(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+  keptActiveCandidates: NormalizedRecordCandidate[],
+): PendingLiveSelectionResolution | null {
+  if (keptActiveCandidates.length === 0) return null;
+
+  const selection = inferShortUserProposalSelection(userMessage);
+  if (!selection || selection.drop_all) return null;
+
+  const keepSet = new Set(selection.keep_profile_rule_attributes);
+  const dropSet = new Set(selection.drop_profile_rule_attributes);
+  if (keepSet.size === 0 && dropSet.size === 0) return null;
+
+  const activeKeepSet = new Set(
+    keptActiveCandidates
+      .map((candidate) => selectableActiveProfileRuleAttribute(candidate))
+      .filter((attribute): attribute is 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style' => !!attribute),
+  );
+  if (keepSet.size > 0 && !Array.from(activeKeepSet).some((attribute) => keepSet.has(attribute))) {
+    return null;
+  }
+
+  const rejected = keepSet.size > 0
+    ? pendingItems
+      .map((pending) => pending.item)
+      .filter((item) => isPendingLiveSelectableItem(item))
+    : pendingItems
+      .map((pending) => ({
+        pending,
+        attribute: selectablePendingProfileRuleAttribute(pending.item),
+      }))
+      .filter((entry): entry is {
+        pending: { batch_id: string; item: ReviewItem };
+        attribute: 'language_preference' | 'response_length' | 'solution_complexity' | 'response_style';
+      } => !!entry.attribute)
+      .filter((entry) => dropSet.has(entry.attribute))
+      .map((entry) => entry.pending.item);
+
+  if (rejected.length === 0) return null;
+  return {
+    accept_items: [],
+    reject_items: rejected,
+  };
+}
+
+function resolvePendingFactSelection(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+): PendingLiveSelectionResolution | null {
+  const selection = inferShortUserFactSelection(userMessage);
+  if (!selection || selection.drop_all) return null;
+
+  const selectable = pendingItems
+    .map((pending) => ({
+      pending,
+      attribute: selectablePendingFactAttribute(pending.item),
+    }))
+    .filter((entry): entry is {
+      pending: { batch_id: string; item: ReviewItem };
+      attribute: 'location' | 'organization';
+    } => !!entry.attribute);
+  if (selectable.length === 0) return null;
+
+  const keepSet = new Set(selection.keep_fact_attributes);
+  const dropSet = new Set(selection.drop_fact_attributes);
+  let survivors = selectable;
+
+  if (keepSet.size > 0) {
+    survivors = survivors.filter((entry) => keepSet.has(entry.attribute));
+    if (survivors.length === 0 && dropSet.size === 0) return null;
+  }
+
+  if (dropSet.size > 0) {
+    survivors = survivors.filter((entry) => !dropSet.has(entry.attribute));
+    if (survivors.length === 0 && keepSet.size === 0) {
+      return {
+        accept_items: [],
+        reject_items: selectable
+          .filter((entry) => dropSet.has(entry.attribute))
+          .map((entry) => entry.pending.item),
+      };
+    }
+    if (survivors.length === 0 && keepSet.size > 0) {
+      const rejected = selectable
+        .filter((entry) => dropSet.has(entry.attribute))
+        .map((entry) => entry.pending.item);
+      if (rejected.length === 0) return null;
+      return {
+        accept_items: [],
+        reject_items: rejected,
+      };
+    }
+  }
+
+  if (survivors.length === 0) return null;
+
+  const rejected = keepSet.size > 0
+    ? selectable
+      .filter((entry) => !survivors.some((survivor) => survivor.pending.item.id === entry.pending.item.id))
+      .map((entry) => entry.pending.item)
+    : selectable
+      .filter((entry) => dropSet.has(entry.attribute))
+      .map((entry) => entry.pending.item);
+
+  return {
+    accept_items: survivors.map((entry) => entry.pending.item),
+    reject_items: rejected,
+  };
+}
+
+function resolvePendingFactSelectionSatisfiedByActiveSurvivors(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+  keptActiveCandidates: NormalizedRecordCandidate[],
+): PendingLiveSelectionResolution | null {
+  if (keptActiveCandidates.length === 0) return null;
+
+  const selection = inferShortUserFactSelection(userMessage);
+  if (!selection || selection.drop_all) return null;
+
+  const keepSet = new Set(selection.keep_fact_attributes);
+  const dropSet = new Set(selection.drop_fact_attributes);
+  if (keepSet.size === 0 && dropSet.size === 0) return null;
+
+  const activeKeepSet = new Set(
+    keptActiveCandidates
+      .map((candidate) => selectableActiveFactAttribute(candidate))
+      .filter((attribute): attribute is 'location' | 'organization' => !!attribute),
+  );
+  if (keepSet.size > 0 && !Array.from(activeKeepSet).some((attribute) => keepSet.has(attribute))) {
+    return null;
+  }
+
+  const rejected = keepSet.size > 0
+    ? pendingItems
+      .map((pending) => pending.item)
+      .filter((item) => isPendingLiveSelectableItem(item))
+    : pendingItems
+      .map((pending) => ({
+        pending,
+        attribute: selectablePendingFactAttribute(pending.item),
+      }))
+      .filter((entry): entry is {
+        pending: { batch_id: string; item: ReviewItem };
+        attribute: 'location' | 'organization';
+      } => !!entry.attribute)
+      .filter((entry) => dropSet.has(entry.attribute))
+      .map((entry) => entry.pending.item);
+
+  if (rejected.length === 0) return null;
+  return {
+    accept_items: [],
+    reject_items: rejected,
+  };
+}
+
+function resolvePendingTaskSelection(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+): PendingLiveSelectionResolution | null {
+  const selection = inferShortUserTaskSelection(userMessage);
+  if (!selection?.keep_current_task) return null;
+
+  const selectableTasks = pendingItems
+    .map((pending) => ({
+      pending,
+      stateKey: selectablePendingTaskStateKey(pending.item),
+    }))
+    .filter((entry): entry is {
+      pending: { batch_id: string; item: ReviewItem };
+      stateKey: 'refactor_status' | 'deployment_status' | 'migration_status';
+    } => !!entry.stateKey);
+  if (selectableTasks.length !== 1) return null;
+
+  const [survivor] = selectableTasks;
+  if (!survivor) return null;
+
+  return {
+    accept_items: [survivor.pending.item],
+    reject_items: pendingItems
+      .map((pending) => pending.item)
+      .filter((item) => isPendingLiveSelectableItem(item) && item.id !== survivor.pending.item.id),
+  };
+}
+
+function resolvePendingTaskSelectionSatisfiedByActiveSurvivor(
+  userMessage: string,
+  pendingItems: Array<{ batch_id: string; item: ReviewItem }>,
+  keptActiveCandidates: NormalizedRecordCandidate[],
+): PendingLiveSelectionResolution | null {
+  const selection = inferShortUserTaskSelection(userMessage);
+  if (!selection?.keep_current_task) return null;
+
+  const hasActiveTaskSurvivor = keptActiveCandidates.some((candidate) => !!selectableActiveTaskStateKey(candidate));
+  if (!hasActiveTaskSurvivor) return null;
+
+  const rejected = pendingItems
+    .map((pending) => pending.item)
+    .filter((item) => isPendingLiveSelectableItem(item));
+  if (rejected.length === 0) return null;
+
+  return {
+    accept_items: [],
+    reject_items: rejected,
+  };
+}
+
+function mergePendingLiveSelectionResolutions(
+  ...selections: Array<PendingLiveSelectionResolution | null>
+): PendingLiveSelectionResolution | null {
+  const resolved = selections.filter((selection): selection is PendingLiveSelectionResolution => !!selection);
+  if (resolved.length === 0) return null;
+
+  const accepted = new Map<string, ReviewItem>();
+  const rejected = new Map<string, ReviewItem>();
+
+  for (const selection of resolved) {
+    for (const item of selection.accept_items) {
+      accepted.set(item.id, item);
+      rejected.delete(item.id);
+    }
+    for (const item of selection.reject_items) {
+      if (!accepted.has(item.id)) rejected.set(item.id, item);
+    }
+  }
+
+  if (accepted.size === 0 && rejected.size === 0) return null;
+  return {
+    accept_items: Array.from(accepted.values()),
+    reject_items: Array.from(rejected.values()),
+  };
+}
+
 function buildImportItems(preview: {
   record_candidates: Array<Record<string, unknown>>;
   relation_candidates: Array<Record<string, unknown>>;
@@ -484,6 +978,332 @@ export class CortexReviewInboxV2 {
     return fingerprints;
   }
 
+  private listActiveTruthByStableKey(agentId: string): Map<string, CortexRecord> {
+    const records = this.recordsV2.listRecords({
+      agent_id: agentId,
+      include_inactive: false,
+      limit: 1000,
+      order_by: 'updated_at',
+      order_dir: 'desc',
+    }).items;
+
+    const activeByKey = new Map<string, CortexRecord>();
+    for (const record of records) {
+      const stableKey = activeRecordStableKey(record);
+      if (!stableKey || activeByKey.has(stableKey)) continue;
+      activeByKey.set(stableKey, record);
+    }
+
+    return activeByKey;
+  }
+
+  private listPendingLiveRecordRows(agentId: string): PendingLiveReviewRecordRow[] {
+    const db = getDb();
+    return db.prepare(`
+      SELECT
+        review_items_v2.id as item_id,
+        review_items_v2.batch_id,
+        review_items_v2.payload_json,
+        review_items_v2.suggested_rewrite
+      FROM review_items_v2
+      INNER JOIN review_batches_v2 ON review_batches_v2.id = review_items_v2.batch_id
+      WHERE review_batches_v2.agent_id = ?
+        AND review_batches_v2.source_kind = 'live_ingest'
+        AND review_batches_v2.status IN ('pending', 'partially_applied')
+        AND review_items_v2.item_type = 'record'
+        AND review_items_v2.status = 'pending'
+    `).all(agentId) as PendingLiveReviewRecordRow[];
+  }
+
+  private listPendingLiveReviewItems(agentId: string): Array<{ batch_id: string; item: ReviewItem }> {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT
+        review_items_v2.id,
+        review_items_v2.batch_id,
+        review_items_v2.item_type,
+        review_items_v2.status,
+        review_items_v2.suggested_action,
+        review_items_v2.suggested_reason,
+        review_items_v2.suggested_rewrite,
+        review_items_v2.payload_json,
+        review_items_v2.committed_record_id,
+        review_items_v2.committed_relation_id,
+        review_items_v2.error_message,
+        review_items_v2.created_at,
+        review_items_v2.updated_at,
+        review_batches_v2.source_kind,
+        review_batches_v2.agent_id
+      FROM review_items_v2
+      INNER JOIN review_batches_v2 ON review_batches_v2.id = review_items_v2.batch_id
+      WHERE review_batches_v2.agent_id = ?
+        AND review_batches_v2.source_kind = 'live_ingest'
+        AND review_batches_v2.status IN ('pending', 'partially_applied')
+        AND review_items_v2.item_type = 'record'
+        AND review_items_v2.status = 'pending'
+      ORDER BY review_batches_v2.created_at ASC, review_batches_v2.id ASC, review_items_v2.created_at ASC, review_items_v2.id ASC
+    `).all(agentId) as PendingLiveReviewItemRow[];
+
+    return rows.map((row) => ({
+      batch_id: row.batch_id,
+      item: inflateItem(row),
+    }));
+  }
+
+  private supersedePendingLiveItems(agentId: string, items: ReviewBatchItemInput[]): void {
+    const nextFingerprintsByKey = new Map<string, string>();
+    for (const item of items) {
+      if (item.item_type !== 'record') continue;
+      const stableKey = recordPayloadStableKey(item.payload);
+      const fingerprint = reviewRecordFingerprint(item);
+      if (!stableKey || !fingerprint) continue;
+      nextFingerprintsByKey.set(stableKey, fingerprint);
+    }
+
+    if (nextFingerprintsByKey.size === 0) return;
+
+    const touchedBatchIds = new Set<string>();
+    for (const row of this.listPendingLiveRecordRows(agentId)) {
+      const payload = parseJsonObject(row.payload_json);
+      const stableKey = recordPayloadStableKey(payload);
+      if (!stableKey) continue;
+
+      const nextFingerprint = nextFingerprintsByKey.get(stableKey);
+      if (!nextFingerprint) continue;
+
+      const currentFingerprint = recordFingerprint(
+        stableKey,
+        asString(row.suggested_rewrite) || asString(payload.content),
+      );
+      if (!currentFingerprint || currentFingerprint === nextFingerprint) continue;
+
+      this.updateItemOutcome({
+        item_id: row.item_id,
+        status: 'rejected',
+        error_message: 'superseded_by_newer_review_candidate',
+      });
+      touchedBatchIds.add(row.batch_id);
+    }
+
+    for (const batchId of touchedBatchIds) {
+      this.updateBatchStatus(batchId);
+    }
+  }
+
+  reconcileLiveBatchesAgainstActiveTruth(agentId: string): void {
+    const activeByKey = this.listActiveTruthByStableKey(agentId);
+    if (activeByKey.size === 0) return;
+
+    const touchedBatchIds = new Set<string>();
+
+    for (const row of this.listPendingLiveRecordRows(agentId)) {
+      const payload = parseJsonObject(row.payload_json);
+      const stableKey = recordPayloadStableKey(payload);
+      if (!stableKey) continue;
+
+      const activeRecord = activeByKey.get(stableKey);
+      if (!activeRecord) continue;
+
+      const reviewContent = asString(row.suggested_rewrite) || asString(payload.content);
+      const activeContent = asString(activeRecord.content);
+      if (!reviewContent || !activeContent) continue;
+
+      if (reviewContent === activeContent) {
+        this.updateItemOutcome({
+          item_id: row.item_id,
+          status: 'accepted',
+          committed_record_id: activeRecord.id,
+        });
+      } else {
+        this.updateItemOutcome({
+          item_id: row.item_id,
+          status: 'rejected',
+          committed_record_id: activeRecord.id,
+          error_message: 'superseded_by_active_truth',
+        });
+      }
+      touchedBatchIds.add(row.batch_id);
+    }
+
+    for (const batchId of touchedBatchIds) {
+      this.updateBatchStatus(batchId);
+    }
+  }
+
+  async resolveShortLiveFollowup(input: {
+    agent_id: string;
+    user_message: string;
+    session_id?: string;
+    kept_active_candidates?: NormalizedRecordCandidate[];
+  }): Promise<LiveReviewFollowupResolution | null> {
+    const userMessage = input.user_message.trim();
+    if (!userMessage) return null;
+
+    const pendingItems = this.listPendingLiveReviewItems(input.agent_id);
+    if (pendingItems.length === 0) return null;
+
+    if (inferShortUserProposalSelection(userMessage)?.drop_all) {
+      const itemActionsByBatch = new Map<string, ReviewItemActionInput[]>();
+      for (const pending of pendingItems) {
+        const current = itemActionsByBatch.get(pending.batch_id) || [];
+        current.push({
+          item_id: pending.item.id,
+          action: 'reject',
+        });
+        itemActionsByBatch.set(pending.batch_id, current);
+      }
+      for (const [batch_id, item_actions] of itemActionsByBatch.entries()) {
+        await this.applyBatch({ batch_id, item_actions });
+      }
+      return {
+        records: [],
+        suppress_fallback_note: true,
+      };
+    }
+
+    const selective = mergePendingLiveSelectionResolutions(
+      resolvePendingProfileRuleSelection(userMessage, pendingItems),
+      resolvePendingFactSelection(userMessage, pendingItems),
+      resolvePendingTaskSelection(userMessage, pendingItems),
+    );
+    const selectiveBackfilledByActive = mergePendingLiveSelectionResolutions(
+      resolvePendingProfileRuleSelectionSatisfiedByActiveSurvivors(
+        userMessage,
+        pendingItems,
+        input.kept_active_candidates || [],
+      ),
+      resolvePendingFactSelectionSatisfiedByActiveSurvivors(
+        userMessage,
+        pendingItems,
+        input.kept_active_candidates || [],
+      ),
+      resolvePendingTaskSelectionSatisfiedByActiveSurvivor(
+        userMessage,
+        pendingItems,
+        input.kept_active_candidates || [],
+      ),
+    );
+    const resolvedSelective = mergePendingLiveSelectionResolutions(
+      selective,
+      selectiveBackfilledByActive,
+    );
+    if (resolvedSelective) {
+      const acceptedById = new Set(resolvedSelective.accept_items.map((item) => item.id));
+      const rejectedById = new Set(resolvedSelective.reject_items.map((item) => item.id));
+      const itemActionsByBatch = new Map<string, ReviewItemActionInput[]>();
+
+      for (const pending of pendingItems) {
+        const actions = itemActionsByBatch.get(pending.batch_id) || [];
+        if (acceptedById.has(pending.item.id)) {
+          const content = pendingLiveSelectiveRewriteContent(pending.item, userMessage)
+            || pendingLiveAcceptContent(pending.item);
+          if (!content) return null;
+          actions.push({
+            item_id: pending.item.id,
+            action: 'edit_then_accept',
+            payload_override: {
+              content,
+              source_type: 'user_confirmed',
+              ...(input.session_id ? { session_id: input.session_id } : {}),
+            },
+          });
+        } else if (rejectedById.has(pending.item.id)) {
+          actions.push({
+            item_id: pending.item.id,
+            action: 'reject',
+          });
+        }
+        if (actions.length > 0) itemActionsByBatch.set(pending.batch_id, actions);
+      }
+
+      const records: IngestCommittedRecord[] = [];
+      for (const [batch_id, item_actions] of itemActionsByBatch.entries()) {
+        const applyResult = await this.applyBatch({ batch_id, item_actions });
+        records.push(
+          ...applyResult.committed
+            .map((item) => toIngestCommittedRecord(item))
+            .filter((item): item is IngestCommittedRecord => Boolean(item)),
+        );
+      }
+
+      return {
+        records,
+        suppress_fallback_note: true,
+      };
+    }
+
+    if (pendingItems.length !== 1) return null;
+
+    const [pending] = pendingItems;
+    if (!pending) return null;
+
+    if (isShortUserConfirmation(userMessage)) {
+      if (pending.item.suggested_action !== 'accept') return null;
+
+      const content = asString(pending.item.suggested_rewrite) || asString(pending.item.payload.content);
+      if (!content) return null;
+
+      const applyResult = await this.applyBatch({
+        batch_id: pending.batch_id,
+        item_actions: [{
+          item_id: pending.item.id,
+          action: 'edit_then_accept',
+          payload_override: {
+            content,
+            source_type: 'user_confirmed',
+            ...(input.session_id ? { session_id: input.session_id } : {}),
+          },
+        }],
+      });
+
+      return {
+        records: applyResult.committed
+          .map((item) => toIngestCommittedRecord(item))
+          .filter((item): item is IngestCommittedRecord => Boolean(item)),
+        suppress_fallback_note: true,
+      };
+    }
+
+    const rewrittenContent = pendingLiveRewriteContent(pending.item, userMessage);
+    if (rewrittenContent) {
+      const applyResult = await this.applyBatch({
+        batch_id: pending.batch_id,
+        item_actions: [{
+          item_id: pending.item.id,
+          action: 'edit_then_accept',
+          payload_override: {
+            content: rewrittenContent,
+            source_type: 'user_confirmed',
+            ...(input.session_id ? { session_id: input.session_id } : {}),
+          },
+        }],
+      });
+
+      return {
+        records: applyResult.committed
+          .map((item) => toIngestCommittedRecord(item))
+          .filter((item): item is IngestCommittedRecord => Boolean(item)),
+        suppress_fallback_note: true,
+      };
+    }
+
+    if (isShortUserProposalRejection(userMessage) && !isShortUserReplacementRequest(userMessage)) {
+      await this.applyBatch({
+        batch_id: pending.batch_id,
+        item_actions: [{
+          item_id: pending.item.id,
+          action: 'reject',
+        }],
+      });
+      return {
+        records: [],
+        suppress_fallback_note: true,
+      };
+    }
+
+    return null;
+  }
+
   private suppressRedundantItems(agentId: string, items: ReviewBatchItemInput[]): ReviewBatchItemInput[] {
     if (items.length === 0) return [];
 
@@ -620,6 +1440,7 @@ export class CortexReviewInboxV2 {
         suggested_rewrite: suggestion.suggested_rewrite,
       };
     }));
+    this.supersedePendingLiveItems(input.agent_id, itemInputs);
 
     if (itemInputs.length === 0) {
       return {
@@ -666,6 +1487,7 @@ export class CortexReviewInboxV2 {
         relation_candidates: [],
       });
       autoCommittedCount = autoCommitResult.summary.committed;
+      this.reconcileLiveBatchesAgainstActiveTruth(input.agent_id);
 
       const failedAutoCandidateIds = new Set(
         autoCommitResult.failed
@@ -723,6 +1545,9 @@ export class CortexReviewInboxV2 {
     sync: ReviewBatchSync;
   } {
     const db = getDb();
+    if (opts.agent_id && (!opts.source_kind || opts.source_kind === 'live_ingest')) {
+      this.reconcileLiveBatchesAgainstActiveTruth(opts.agent_id);
+    }
     const conditions: string[] = ['EXISTS (SELECT 1 FROM agents WHERE agents.id = review_batches_v2.agent_id)'];
     const params: unknown[] = [];
 
@@ -787,13 +1612,23 @@ export class CortexReviewInboxV2 {
 
   getBatch(id: string): { batch: ReviewBatch; items: ReviewItem[]; summary: ReviewBatchSummary } | null {
     const db = getDb();
-    const row = db.prepare(`
+    let row = db.prepare(`
       SELECT *
       FROM review_batches_v2
       WHERE id = ?
         AND EXISTS (SELECT 1 FROM agents WHERE agents.id = review_batches_v2.agent_id)
     `).get(id) as ReviewBatchRow | undefined;
     if (!row) return null;
+    if (row.source_kind === 'live_ingest' && (row.status === 'pending' || row.status === 'partially_applied')) {
+      this.reconcileLiveBatchesAgainstActiveTruth(row.agent_id);
+      row = db.prepare(`
+        SELECT *
+        FROM review_batches_v2
+        WHERE id = ?
+          AND EXISTS (SELECT 1 FROM agents WHERE agents.id = review_batches_v2.agent_id)
+      `).get(id) as ReviewBatchRow | undefined;
+      if (!row) return null;
+    }
     const items = this.listItemsByBatchId(id);
     return {
       batch: inflateBatch(row),
@@ -928,6 +1763,8 @@ export class CortexReviewInboxV2 {
         failed.push(item);
       }
     }
+
+    this.reconcileLiveBatchesAgainstActiveTruth(batchDetail.batch.agent_id);
 
     const batch = this.updateBatchStatus(input.batch_id);
     const refreshed = this.getBatch(input.batch_id);

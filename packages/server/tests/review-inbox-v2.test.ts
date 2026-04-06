@@ -9,6 +9,7 @@ import { registerAgentRoutes } from '../src/api/agents.js';
 import { registerImportExportRoutes } from '../src/api/import-export.js';
 import { registerV2IngestRoutes } from '../src/api/ingest-v2.js';
 import { registerV2RecordRoutes } from '../src/api/records-v2.js';
+import { registerV2RelationsRoutes } from '../src/api/relations-v2.js';
 import { registerV2ReviewInboxRoutes } from '../src/api/review-inbox-v2.js';
 import { CortexReviewInboxV2 } from '../src/v2/review-inbox.js';
 import {
@@ -52,6 +53,7 @@ async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boole
   await records.initialize();
   const relations = new CortexRelationsV2();
   const reviewInbox = new CortexReviewInboxV2(records, relations);
+  records.setLiveReviewFollowupResolver(reviewInbox);
 
   const app = Fastify();
   const cortex = {
@@ -67,6 +69,7 @@ async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boole
 
   registerV2RecordRoutes(app, cortex);
   registerV2IngestRoutes(app, cortex);
+  registerV2RelationsRoutes(app, cortex);
   registerImportExportRoutes(app, cortex);
   registerV2ReviewInboxRoutes(app, cortex);
   registerAgentRoutes(app);
@@ -178,6 +181,1538 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('auto-resolves pending live review items when later truth writes confirm the same stable key', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-reconcile-match',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.auto_committed_count).toBe(0);
+    expect(initialBody.review_pending_count).toBe(1);
+    expect(initialBody.review_batch_id).toBeTruthy();
+
+    const batchId = initialBody.review_batch_id as string;
+
+    const resolved = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-reconcile-match',
+        kind: 'profile_rule',
+        content: '请简洁直接回答',
+        attribute_key: 'response_style',
+        subject_key: 'user',
+        source_type: 'user_confirmed',
+      },
+    });
+
+    expect(resolved.statusCode).toBe(201);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batchId}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('completed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 1,
+      rejected: 0,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        status: 'accepted',
+      }),
+    ]);
+
+    const pending = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-live-reconcile-match&status=pending',
+    });
+    expect(pending.statusCode).toBe(200);
+    expect(JSON.parse(pending.payload).items).toHaveLength(0);
+  });
+
+  it('rejects pending live review items when newer truth supersedes the same stable key', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-reconcile-conflict',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.review_batch_id).toBeTruthy();
+    const batchId = initialBody.review_batch_id as string;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-reconcile-conflict',
+        kind: 'profile_rule',
+        content: '请详细回答',
+        attribute_key: 'response_style',
+        subject_key: 'user',
+        source_type: 'user_confirmed',
+      },
+    });
+
+    expect(seeded.statusCode).toBe(201);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batchId}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('dismissed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 0,
+      rejected: 1,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+      }),
+    ]);
+  });
+
+  it('auto-accepts a single pending live review item when a later short confirmation arrives', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-confirm',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.review_batch_id).toBeTruthy();
+
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-confirm',
+        user_message: '可以',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(confirmed.statusCode).toBe(201);
+    const confirmedBody = JSON.parse(confirmed.payload);
+    expect(confirmedBody.auto_committed_count).toBe(1);
+    expect(confirmedBody.review_pending_count).toBe(0);
+    expect(confirmedBody.review_batch_id || null).toBe(null);
+    expect(confirmedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请简洁直接回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${initialBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('completed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 1,
+      rejected: 0,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        status: 'accepted',
+      }),
+    ]);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-confirm',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]);
+  });
+
+  it('auto-rejects a single pending live review item when a later short rejection arrives', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-reject',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.review_batch_id).toBeTruthy();
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-reject',
+        user_message: '不要这个',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(rejected.statusCode).toBe(201);
+    const rejectedBody = JSON.parse(rejected.payload);
+    expect(rejectedBody.auto_committed_count).toBe(0);
+    expect(rejectedBody.review_pending_count).toBe(0);
+    expect(rejectedBody.review_batch_id || null).toBe(null);
+    expect(rejectedBody.records).toHaveLength(0);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${initialBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('dismissed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 0,
+      rejected: 1,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+      }),
+    ]);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-reject',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toHaveLength(0);
+  });
+
+  it('auto-rewrites a single pending live fact review item when a later short follow-up changes the value', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-rewrite-fact',
+      source_preview: '我住东京',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_rewrite_location',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我住东京',
+          source_excerpt: '我住东京',
+          subject_key: undefined,
+          entity_key: 'user',
+          attribute_key: 'location',
+        }),
+      ],
+    });
+
+    expect(created.summary.pending).toBe(1);
+
+    const rewritten = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-rewrite-fact',
+        user_message: '换大阪',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(rewritten.statusCode).toBe(201);
+    const rewrittenBody = JSON.parse(rewritten.payload);
+    expect(rewrittenBody.auto_committed_count).toBe(1);
+    expect(rewrittenBody.review_pending_count).toBe(0);
+    expect(rewrittenBody.review_batch_id || null).toBe(null);
+    expect(rewrittenBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        source_type: 'user_confirmed',
+        content: '我住大阪',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('completed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 1,
+      rejected: 0,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({
+        status: 'accepted',
+      }),
+    ]);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-rewrite-fact',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: '我住大阪',
+      }),
+    ]);
+  });
+
+  it('does not auto-accept a single pending live response-style review item with a mismatched short rewrite', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-rewrite-response-style-mismatch',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.review_pending_count).toBe(1);
+    expect(typeof initialBody.review_batch_id).toBe('string');
+
+    const mismatch = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-rewrite-response-style-mismatch',
+        user_message: '改英文',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(mismatch.statusCode).toBe(201);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${initialBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'pending',
+      }),
+      summary: expect.objectContaining({
+        pending: 1,
+        accepted: 0,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'pending',
+          payload: expect.objectContaining({
+            normalized_kind: 'profile_rule',
+            attribute_key: 'response_style',
+            content: '请简洁直接回答',
+          }),
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-rewrite-response-style-mismatch',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请用英文回答',
+      }),
+    ]));
+  });
+
+  it('auto-accepts a single pending live response-style review item when a later short follow-up restates the same style explicitly', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-rewrite-response-style-match',
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(initial.statusCode).toBe(201);
+    const initialBody = JSON.parse(initial.payload);
+    expect(initialBody.review_pending_count).toBe(1);
+    expect(typeof initialBody.review_batch_id).toBe('string');
+
+    const matched = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-rewrite-response-style-match',
+        user_message: '简洁直接一点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(matched.statusCode).toBe(201);
+    const matchedBody = JSON.parse(matched.payload);
+    expect(matchedBody.auto_committed_count).toBe(1);
+    expect(matchedBody.review_pending_count).toBe(0);
+    expect(matchedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '请简洁直接回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${initialBody.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+      }),
+    }));
+  });
+
+  it('dismisses multiple pending live review items when a later short drop-all arrives', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-drop-all',
+      source_preview: '后续交流中文就行\n回答控制在三句话内',
+      items: [
+        createReviewAssistRecordPayload({
+          content: '后续交流中文就行',
+          source_excerpt: '后续交流中文就行',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_drop_all_length',
+          content: '回答控制在三句话内',
+          source_excerpt: '回答控制在三句话内',
+        }),
+      ],
+    });
+
+    expect(created.summary.pending).toBe(2);
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-drop-all',
+        user_message: '都去掉',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(rejected.statusCode).toBe(201);
+    const rejectedBody = JSON.parse(rejected.payload);
+    expect(rejectedBody.auto_committed_count).toBe(0);
+    expect(rejectedBody.review_pending_count).toBe(0);
+    expect(rejectedBody.review_batch_id || null).toBe(null);
+    expect(rejectedBody.records).toHaveLength(0);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    const detailBody = JSON.parse(detail.payload);
+    expect(detailBody.batch.status).toBe('dismissed');
+    expect(detailBody.summary).toEqual(expect.objectContaining({
+      pending: 0,
+      accepted: 0,
+      rejected: 2,
+    }));
+    expect(detailBody.items).toEqual([
+      expect.objectContaining({ status: 'rejected' }),
+      expect.objectContaining({ status: 'rejected' }),
+    ]);
+  });
+
+  it('auto-applies mixed pending live review survivors across batches when a later short follow-up selects both profile rules and facts', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const ruleBatch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-selective-mixed',
+      source_preview: '后续交流中文就行\n回答控制在三句话内',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_keep_language',
+          content: '后续交流中文就行',
+          source_excerpt: '后续交流中文就行',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_drop_length',
+          content: '回答控制在三句话内',
+          source_excerpt: '回答控制在三句话内',
+          attribute_key: 'response_length',
+        }),
+      ],
+    });
+    const factBatch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-selective-mixed',
+      source_preview: '我住东京\n我在 OpenAI 工作',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_keep_location',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我住东京',
+          source_excerpt: '我住东京',
+          subject_key: undefined,
+          entity_key: 'user',
+          attribute_key: 'location',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_drop_organization',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我在 OpenAI 工作',
+          source_excerpt: '我在 OpenAI 工作',
+          subject_key: undefined,
+          entity_key: 'user',
+          attribute_key: 'organization',
+        }),
+      ],
+    });
+
+    expect(ruleBatch.summary.pending).toBe(2);
+    expect(factBatch.summary.pending).toBe(2);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-selective-mixed',
+        user_message: '只保留中文和住址',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(2);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toHaveLength(2);
+    expect(selectedBody.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        source_type: 'user_confirmed',
+        content: '我住东京',
+      }),
+    ]));
+
+    const ruleDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${ruleBatch.batch.id}`,
+    });
+
+    expect(ruleDetail.statusCode).toBe(200);
+    expect(JSON.parse(ruleDetail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'accepted',
+        }),
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const factDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${factBatch.batch.id}`,
+    });
+
+    expect(factDetail.statusCode).toBe(200);
+    expect(JSON.parse(factDetail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'accepted',
+        }),
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-selective-mixed',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items.map((item: any) => item.content).sort()).toEqual([
+      '我住东京',
+      '请用中文回答',
+    ]);
+  });
+
+  it('resolves mixed active and pending fact follow-up state in one ingest when keep-drop spans both sides', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-mixed-active-pending-facts',
+        kind: 'fact_slot',
+        content: '我住东京',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-mixed-active-pending-facts',
+      source_preview: '我在 OpenAI 工作',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_keep_pending_organization',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我在 OpenAI 工作',
+          source_excerpt: '我在 OpenAI 工作',
+          subject_key: undefined,
+          entity_key: 'user',
+          attribute_key: 'organization',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-mixed-active-pending-facts',
+        user_message: '就公司，别记住址',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        source_type: 'user_confirmed',
+        content: '我在 OpenAI 工作',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+        rejected: 0,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'accepted',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-mixed-active-pending-facts',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'organization',
+        content: '我在 OpenAI 工作',
+      }),
+    ]);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=review-live-followup-mixed-active-pending-facts&status=pending',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items).toEqual([
+      expect.objectContaining({
+        predicate: 'works_at',
+        object_key: 'openai',
+      }),
+    ]);
+  });
+
+  it('rewrites the selected pending live profile rule survivor when a later short follow-up changes its value', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-selective-rewrite-language',
+      source_preview: '后续交流中文就行\n三句话内就行',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_keep_rewrite_language',
+          content: '后续交流中文就行',
+          source_excerpt: '后续交流中文就行',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_drop_rewrite_length',
+          content: '三句话内就行',
+          source_excerpt: '三句话内就行',
+          attribute_key: 'response_length',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(2);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-selective-rewrite-language',
+        user_message: '只保留英文',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: 'Please answer in English',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'accepted',
+        }),
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-selective-rewrite-language',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: 'Please answer in English',
+      }),
+    ]);
+  });
+
+  it('keeps only the pending live response-style survivor when a short follow-up selects that attribute explicitly', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-selective-response-style',
+      source_preview: '后续交流中文就行\n说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_drop_language_for_style',
+          content: '后续交流中文就行',
+          source_excerpt: '后续交流中文就行',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_keep_response_style',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(2);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-selective-response-style',
+        user_message: '只保留回答风格',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请简洁直接回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'completed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 1,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+        expect.objectContaining({
+          status: 'accepted',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-selective-response-style',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]);
+  });
+
+  it('keeps the active language truth and rejects pending response-style review noise when a short follow-up selects only Chinese', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-language',
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-keep-active-language',
+      source_preview: '说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_response_style_when_keep_language',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-language',
+        user_message: '只保留中文',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请用中文回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-keep-active-language',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
+  });
+
+  it('keeps the active language truth and rejects pending fact review noise when a short follow-up selects only Chinese', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-language-reject-pending-fact',
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-keep-active-language-reject-pending-fact',
+      source_preview: '我在 OpenAI 工作',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_fact_when_keep_language',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我在 OpenAI 工作',
+          source_excerpt: '我在 OpenAI 工作',
+          entity_key: 'user',
+          attribute_key: 'organization',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-language-reject-pending-fact',
+        user_message: '只保留中文',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请用中文回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-keep-active-language-reject-pending-fact',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
+  });
+
+  it('keeps the active language truth and clears cross-bucket pending fact plus response-style noise when a short follow-up selects only Chinese', async () => {
+    const setup = await createApp();
+    app = setup.app;
+    const agentId = 'review-live-followup-cross-bucket-language';
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: agentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: agentId,
+      source_preview: '我在 OpenAI 工作\n说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_organization_when_keep_language_cross_bucket',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我在 OpenAI 工作',
+          source_excerpt: '我在 OpenAI 工作',
+          entity_key: 'user',
+          attribute_key: 'organization',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_response_style_when_keep_language_cross_bucket',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(2);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: agentId,
+        user_message: '只保留中文，别记公司',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请用中文回答',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 2,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: `/api/v2/records?agent_id=${agentId}`,
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
+  });
+
+  it('keeps the active language truth and clears cross-bucket pending noise across multiple live batches when a short follow-up selects only Chinese', async () => {
+    const setup = await createApp();
+    app = setup.app;
+    const agentId = 'review-live-followup-cross-bucket-language-multi';
+
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: agentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const factBatch = setup.reviewInbox.createLiveBatch({
+      agent_id: agentId,
+      source_preview: '我在 OpenAI 工作',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_organization_when_keep_language_cross_batch',
+          requested_kind: 'fact_slot',
+          normalized_kind: 'fact_slot',
+          content: '我在 OpenAI 工作',
+          source_excerpt: '我在 OpenAI 工作',
+          entity_key: 'user',
+          attribute_key: 'organization',
+        }),
+      ],
+    });
+    expect(factBatch.summary.pending).toBe(1);
+
+    const styleBatch = setup.reviewInbox.createLiveBatch({
+      agent_id: agentId,
+      source_preview: '说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_response_style_when_keep_language_cross_batch',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+    expect(styleBatch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: agentId,
+        user_message: '只保留中文，别记公司',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请用中文回答',
+      }),
+    ]);
+
+    const factDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${factBatch.batch?.id}`,
+    });
+    expect(factDetail.statusCode).toBe(200);
+    expect(JSON.parse(factDetail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+    }));
+
+    const styleDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${styleBatch.batch?.id}`,
+    });
+    expect(styleDetail.statusCode).toBe(200);
+    expect(JSON.parse(styleDetail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: `/api/v2/records?agent_id=${agentId}`,
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
+  });
+
+  it('keeps the active current task and rejects pending review noise when a short follow-up selects only the current task', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-task',
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededTask = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-task',
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seededTask.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-keep-active-task',
+      source_preview: '说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_response_style_when_keep_task',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-task',
+        user_message: '只保留当前任务',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_confirmed',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-keep-active-task',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
+  it('keeps the active location truth and rejects pending response-style review noise when a short follow-up selects only the address', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-location',
+        kind: 'fact_slot',
+        content: '我住东京',
+        source_type: 'user_confirmed',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const batch = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-followup-keep-active-location',
+      source_preview: '说话干脆一点',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_reject_pending_response_style_when_keep_location',
+          content: '请简洁直接回答',
+          source_excerpt: '说话干脆一点',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(batch.summary.pending).toBe(1);
+
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-live-followup-keep-active-location',
+        user_message: '只保留住址',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(selected.statusCode).toBe(201);
+    const selectedBody = JSON.parse(selected.payload);
+    expect(selectedBody.auto_committed_count).toBe(1);
+    expect(selectedBody.review_pending_count).toBe(0);
+    expect(selectedBody.review_batch_id || null).toBe(null);
+    expect(selectedBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        source_type: 'user_confirmed',
+        content: '我住东京',
+      }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${batch.batch?.id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+        }),
+      ],
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-live-followup-keep-active-location',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: '我住东京',
+      }),
+    ]);
+  });
+
   it('suppresses canonical no-op auto-commit ingest work when the same truth is already active', async () => {
     const setup = await createApp();
     app = setup.app;
@@ -225,7 +1760,7 @@ describe('V2 review inbox', () => {
     ]);
   });
 
-  it('routes deterministic response-style profile rules into review instead of auto-committing them', async () => {
+  it('auto-commits deterministic response-style profile rules without creating a review batch', async () => {
     const setup = await createApp();
     app = setup.app;
 
@@ -241,31 +1776,102 @@ describe('V2 review inbox', () => {
 
     expect(response.statusCode).toBe(201);
     const body = JSON.parse(response.payload);
-    expect(body.auto_committed_count).toBe(0);
-    expect(body.review_pending_count).toBe(1);
-    expect(typeof body.review_batch_id).toBe('string');
-    expect(body.records).toHaveLength(0);
-
-    const detail = await app.inject({
-      method: 'GET',
-      url: `/api/v2/review-inbox/${body.review_batch_id}`,
-    });
-
-    expect(detail.statusCode).toBe(200);
-    const detailBody = JSON.parse(detail.payload);
-    expect(detailBody.batch.source_preview).toBe('回答简洁直接');
-    expect(detailBody.items).toEqual([
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toEqual([
       expect.objectContaining({
-        suggested_action: 'accept',
-        suggested_rewrite: '请简洁直接回答',
-        payload: expect.objectContaining({
-          normalized_kind: 'profile_rule',
-          attribute_key: 'response_style',
-          content: '请简洁直接回答',
-          source_excerpt: '回答简洁直接',
-        }),
+        written_kind: 'profile_rule',
+        content: '请简洁直接回答',
       }),
     ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-response-style-deterministic',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
+  it('auto-commits explicit response-style imports without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-explicit-response-style',
+        format: 'text',
+        content: '回答风格简洁直接',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
+    expect(createdBody.summary).toEqual({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-explicit-response-style',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]));
+  });
+
+  it('auto-commits explicit colloquial response-style imports without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-explicit-colloquial-response-style',
+        format: 'text',
+        content: '简洁直接一点',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
+    expect(createdBody.summary).toEqual({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-explicit-colloquial-response-style',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]));
   });
 
   it('suppresses repeated live review-only inputs when the canonical rewrite already exists as active truth', async () => {
@@ -438,6 +2044,80 @@ describe('V2 review inbox', () => {
     expect(JSON.parse(inbox.payload).items).toHaveLength(1);
   });
 
+  it('supersedes older pending live review items when a newer candidate uses the same stable key', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const first = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-pending-supersede',
+      source_preview: '先回答简洁一些',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_response_style_old',
+          content: '请简洁直接回答',
+          source_excerpt: '先回答简洁一些',
+          owner_scope: 'user',
+          subject_key: 'user',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(first.summary.pending).toBe(1);
+    expect(first.batch?.status).toBe('pending');
+
+    const second = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-pending-supersede',
+      source_preview: '改成详细一些',
+      items: [
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_response_style_new',
+          content: '请详细回答',
+          source_excerpt: '改成详细一些',
+          owner_scope: 'user',
+          subject_key: 'user',
+          attribute_key: 'response_style',
+        }),
+      ],
+    });
+
+    expect(second.summary.pending).toBe(1);
+    expect(second.batch?.status).toBe('pending');
+
+    const oldDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${first.batch?.id}`,
+    });
+    expect(oldDetail.statusCode).toBe(200);
+    expect(JSON.parse(oldDetail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'dismissed',
+      }),
+      summary: expect.objectContaining({
+        pending: 0,
+        accepted: 0,
+        rejected: 1,
+      }),
+      items: [
+        expect.objectContaining({
+          status: 'rejected',
+          error_message: 'superseded_by_newer_review_candidate',
+        }),
+      ],
+    }));
+
+    const pending = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-live-pending-supersede&status=pending',
+    });
+    expect(pending.statusCode).toBe(200);
+    expect(JSON.parse(pending.payload).items).toEqual([
+      expect.objectContaining({
+        id: second.batch?.id,
+      }),
+    ]);
+  });
+
   it('accepts response-style review batches through the canonical suggested rewrite', async () => {
     const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
@@ -447,7 +2127,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-response-style-apply',
-        user_message: '回答简洁直接',
+        user_message: '说话干脆一点',
         assistant_message: '收到',
       },
     });
@@ -1712,6 +3392,71 @@ describe('V2 review inbox', () => {
     }));
   });
 
+  it('persists canonical rewrites for narrow cortex workflow task live review items', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = setup.reviewInbox.createLiveBatch({
+      agent_id: 'review-live-task-workflow',
+      source_preview: '先做部署\n先迁移一下',
+      items: [
+        createReviewAssistRecordPayload({
+          requested_kind: 'task_state',
+          normalized_kind: 'task_state',
+          content: '先做部署',
+          source_excerpt: '先做部署',
+          subject_key: 'cortex',
+          attribute_key: undefined,
+          state_key: 'deployment_status',
+        }),
+        createReviewAssistRecordPayload({
+          candidate_id: 'review_record_task_migration',
+          requested_kind: 'task_state',
+          normalized_kind: 'task_state',
+          content: '先迁移一下',
+          source_excerpt: '先迁移一下',
+          subject_key: 'cortex',
+          attribute_key: undefined,
+          state_key: 'migration_status',
+        }),
+      ],
+    });
+
+    expect(created.summary.pending).toBe(2);
+    expect(created.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '当前任务是部署 Cortex',
+      }),
+      expect.objectContaining({
+        suggested_action: 'accept',
+        suggested_rewrite: '当前任务是迁移 Cortex',
+      }),
+    ]));
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${created.batch?.id}`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        suggested_rewrite: '当前任务是部署 Cortex',
+        payload: expect.objectContaining({
+          state_key: 'deployment_status',
+          source_excerpt: '先做部署',
+        }),
+      }),
+      expect.objectContaining({
+        suggested_rewrite: '当前任务是迁移 Cortex',
+        payload: expect.objectContaining({
+          state_key: 'migration_status',
+          source_excerpt: '先迁移一下',
+        }),
+      }),
+    ]));
+  });
+
   it('does not persist suggested rewrites for warned review items', async () => {
     const setup = await createApp();
     app = setup.app;
@@ -2197,6 +3942,41 @@ describe('V2 review inbox', () => {
         content: '当前任务是重构 Cortex recall',
       }),
     ]));
+  });
+
+  it('auto-commits narrow cortex deployment imports without creating review batches', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-deployment-short',
+        format: 'text',
+        content: '先做部署',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-deployment-short',
+    });
+
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
   });
 
   it('commits explicit payload overrides through review batch apply', async () => {

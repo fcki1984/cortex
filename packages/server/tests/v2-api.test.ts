@@ -266,7 +266,7 @@ describe('API V2 Integration', () => {
 
       expect(ingested.statusCode).toBe(201);
       const ingestedBody = JSON.parse(ingested.payload);
-      if (sample.requested_kind === 'profile_rule' && sample.attribute_key === 'response_style') {
+      if (sample.disposition === 'review') {
         expect(ingestedBody.auto_committed_count).toBe(0);
         expect(ingestedBody.review_pending_count).toBe(1);
         expect(ingestedBody.review_batch_id).toBeTruthy();
@@ -681,6 +681,39 @@ describe('API V2 Integration', () => {
     expect(constraintBody.record.kind).toBe('profile_rule');
     expect(constraintBody.record.attribute_key).toBe('solution_complexity');
     expect(constraintBody.normalization).toBe('durable');
+  });
+
+  it('admits narrow cortex deployment task statements as durable task_state writes', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '先做部署',
+        agent_id: 'api-task-state-deployment-short',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const body = JSON.parse(created.payload);
+    expect(body.record.kind).toBe('task_state');
+    expect(body.record.subject_key).toBe('cortex');
+    expect(body.record.state_key).toBe('deployment_status');
+    expect(body.record.content).toBe('当前任务是部署 Cortex');
+    expect(body.normalization).toBe('durable');
+
+    const recalled = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'What is the current task?', agent_id: 'api-task-state-deployment-short' },
+    });
+    expect(recalled.statusCode).toBe(200);
+    expect(JSON.parse(recalled.payload).task_state).toEqual([
+      expect.objectContaining({
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
   });
 
   it('rejects compound manual writes on the public records API', async () => {
@@ -1838,6 +1871,49 @@ describe('API V2 Integration', () => {
     ]);
   });
 
+  it('keeps explicit colloquial response-style inputs aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-explicit-colloquial-response-style-preview',
+        format: 'text',
+        content: '简洁直接一点',
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toHaveLength(1);
+    expect(previewBody.record_candidates[0]).toEqual(expect.objectContaining({
+      normalized_kind: 'profile_rule',
+      attribute_key: 'response_style',
+      content: '请简洁直接回答',
+    }));
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '简洁直接一点',
+        assistant_message: '记住了',
+        agent_id: 'api-explicit-colloquial-response-style-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(1);
+    expect(ingestBody.review_pending_count).toBe(0);
+    expect(ingestBody.review_batch_id || null).toBe(null);
+    expect(ingestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '请简洁直接回答',
+      }),
+    ]);
+  });
+
   it('returns narrowed review metadata for mixed auto-commit plus review ingest results', async () => {
     const originalRecordsV2 = cortex.recordsV2;
     cortex.recordsV2 = new CortexRecordsV2(createReviewInboxResponseStyleMockLLM(), cortex.embeddingProvider);
@@ -2270,6 +2346,80 @@ describe('API V2 Integration', () => {
     expect(body.records[0]?.content).toContain('中文回答');
   });
 
+  it('suppresses a short rejection of a prior review-only assistant proposal through /api/v2/ingest', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '不要',
+        assistant_message: '收到',
+        agent_id: 'api-user-short-rejection-review-only-proposal',
+        messages: [
+          { role: 'assistant', content: '请简洁直接回答。' },
+          { role: 'user', content: '不要' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-short-rejection-review-only-proposal',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+
+    const review = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=api-user-short-rejection-review-only-proposal',
+    });
+    expect(review.statusCode).toBe(200);
+    expect(JSON.parse(review.payload).items).toHaveLength(0);
+  });
+
+  it('suppresses a short rejection of a mixed prior assistant proposal through /api/v2/ingest', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '别这样',
+        assistant_message: '收到',
+        agent_id: 'api-user-short-rejection-mixed-proposal',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。请简洁直接回答。' },
+          { role: 'user', content: '别这样' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-short-rejection-mixed-proposal',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+
+    const review = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=api-user-short-rejection-mixed-proposal',
+    });
+    expect(review.statusCode).toBe(200);
+    expect(JSON.parse(review.payload).items).toHaveLength(0);
+  });
+
   it('commits an explicit durable when a short user rewrite disambiguates a prior assistant proposal', async () => {
     const ingested = await app.inject({
       method: 'POST',
@@ -2319,6 +2469,35 @@ describe('API V2 Integration', () => {
     expect(body.records[0]?.content).not.toContain('三句话');
   });
 
+  it('commits only the selected response-style durable when a short follow-up keeps that part of a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留回答风格',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-assistant-proposal-response-style',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。请简洁直接回答。' },
+          { role: 'user', content: '只保留回答风格' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请简洁直接回答',
+      }),
+    ]);
+  });
+
   it('commits multiple durable survivors through /api/v2/ingest when a short follow-up drops one profile rule from a prior assistant proposal', async () => {
     const ingested = await app.inject({
       method: 'POST',
@@ -2356,6 +2535,90 @@ describe('API V2 Integration', () => {
     expect(listedBody.items.map((item: any) => item.content).sort()).toEqual([
       '不要复杂方案',
       '请用中文回答',
+    ]);
+  });
+
+  it('commits only the assistant proposed task-state winner through /api/v2/ingest when a short follow-up keeps the current task', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留当前任务',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-assistant-proposal-task',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。当前任务是重构 Cortex recall。' },
+          { role: 'user', content: '只保留当前任务' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_confirmed',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-assistant-proposal-task',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
+  it('rewrites the assistant proposed current task through /api/v2/ingest even when the prior proposal also contains another durable', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '改部署',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-assistant-proposal-task-mixed',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。当前任务是重构 Cortex recall。' },
+          { role: 'user', content: '改部署' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-assistant-proposal-task-mixed',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
     ]);
   });
 
@@ -2478,6 +2741,42 @@ describe('API V2 Integration', () => {
     expect(listedBody.items.map((item: any) => item.content)).toEqual(['Please answer in English']);
   });
 
+  it('suppresses a short rejection against a single active profile rule through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-single-active-rejection-language',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '不要这个',
+        assistant_message: '收到',
+        agent_id: 'api-user-single-active-rejection-language',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-single-active-rejection-language',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
   it('rewrites a short response-length follow-up against the current active truth through /api/v2/ingest', async () => {
     const seeded = await app.inject({
       method: 'POST',
@@ -2516,6 +2815,676 @@ describe('API V2 Integration', () => {
     expect(listed.statusCode).toBe(200);
     const listedBody = JSON.parse(listed.payload);
     expect(listedBody.items.map((item: any) => item.content)).toEqual(['请把回答控制在两句话内']);
+  });
+
+  it('keeps only the current active task through /api/v2/ingest when a short follow-up selects it', async () => {
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-selective-active-task',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededTask = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        agent_id: 'api-user-selective-active-task',
+      },
+    });
+    expect(seededTask.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留当前任务',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-task',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_confirmed',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-task',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
+  it('rewrites a compact location follow-up against a prior assistant proposal through /api/v2/ingest', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '改东京',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-assistant-proposal-location-compact',
+        messages: [
+          { role: 'assistant', content: '我住大阪。' },
+          { role: 'user', content: '改东京' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toBe('我住东京');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-assistant-proposal-location-compact',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我住东京']);
+  });
+
+  it('rewrites a compact organization follow-up against the current active truth through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-rewrite-active-organization-compact',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '换 Anthropic',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-active-organization-compact',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toBe('我在 Anthropic 工作');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-active-organization-compact',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我在 Anthropic 工作']);
+  });
+
+  it('rewrites a contextual short organization follow-up against the current active truth through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-rewrite-active-organization-contextual',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '还是 Anthropic 吧',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-active-organization-contextual',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toBe('我在 Anthropic 工作');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-active-organization-contextual',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我在 Anthropic 工作']);
+  });
+
+  it('suppresses a short rejection against a single active fact truth through /api/v2/ingest and clears candidates', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-single-active-rejection-location',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const beforeCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-single-active-rejection-location',
+    });
+    expect(beforeCandidates.statusCode).toBe(200);
+    expect(JSON.parse(beforeCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '不要这个',
+        assistant_message: '收到',
+        agent_id: 'api-user-single-active-rejection-location',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-single-active-rejection-location',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+
+    const afterCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-single-active-rejection-location',
+    });
+    expect(afterCandidates.statusCode).toBe(200);
+    expect(JSON.parse(afterCandidates.payload).items).toHaveLength(0);
+  });
+
+  it('suppresses a short rejection against a single active task state through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        agent_id: 'api-user-single-active-rejection-task',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '不要这个',
+        assistant_message: '收到',
+        agent_id: 'api-user-single-active-rejection-task',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-single-active-rejection-task',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
+  it('rewrites a compact task-state follow-up against the current active truth through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        agent_id: 'api-user-rewrite-active-task-compact',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '改部署',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-active-task-compact',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('task_state');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toBe('当前任务是部署 Cortex');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-active-task-compact',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items.map((item: any) => item.content)).toEqual(['当前任务是部署 Cortex']);
+  });
+
+  it('rewrites a contextual short task-state follow-up against the current active truth through /api/v2/ingest', async () => {
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+        agent_id: 'api-user-rewrite-active-task-contextual',
+      },
+    });
+    expect(seeded.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '还是部署吧',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-active-task-contextual',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('task_state');
+    expect(body.records[0]?.source_type).toBe('user_explicit');
+    expect(body.records[0]?.content).toBe('当前任务是部署 Cortex');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-active-task-contextual',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items.map((item: any) => item.content)).toEqual(['当前任务是部署 Cortex']);
+  });
+
+  it('auto-commits narrow cortex migration task statements through /api/v2/ingest', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '先迁移一下',
+        assistant_message: '收到',
+        agent_id: 'api-user-direct-task-migration',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-direct-task-migration',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+  });
+
+  it('rewrites bilingual location and Chinese organization compact follow-ups through /api/v2/ingest', async () => {
+    const locationIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '改 Tokyo',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-assistant-proposal-location-bilingual',
+        messages: [
+          { role: 'assistant', content: '我住大阪。' },
+          { role: 'user', content: '改 Tokyo' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(locationIngested.statusCode).toBe(201);
+    const locationBody = JSON.parse(locationIngested.payload);
+    expect(locationBody.auto_committed_count).toBe(1);
+    expect(locationBody.review_pending_count).toBe(0);
+    expect(locationBody.records).toHaveLength(1);
+    expect(locationBody.records[0]?.written_kind).toBe('fact_slot');
+    expect(locationBody.records[0]?.source_type).toBe('user_explicit');
+    expect(locationBody.records[0]?.content).toBe('我住Tokyo');
+
+    const listedLocation = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-assistant-proposal-location-bilingual',
+    });
+    expect(listedLocation.statusCode).toBe(200);
+    expect(JSON.parse(listedLocation.payload).items.map((item: any) => item.content)).toEqual(['我住Tokyo']);
+
+    const locationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-rewrite-assistant-proposal-location-bilingual',
+    });
+    expect(locationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(locationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['tokyo']);
+
+    const seededOrganization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-rewrite-active-organization-zh',
+      },
+    });
+    expect(seededOrganization.statusCode).toBe(201);
+
+    const organizationIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '换 腾讯',
+        assistant_message: '收到',
+        agent_id: 'api-user-rewrite-active-organization-zh',
+      },
+    });
+
+    expect(organizationIngested.statusCode).toBe(201);
+    const organizationBody = JSON.parse(organizationIngested.payload);
+    expect(organizationBody.auto_committed_count).toBe(1);
+    expect(organizationBody.review_pending_count).toBe(0);
+    expect(organizationBody.records).toHaveLength(1);
+    expect(organizationBody.records[0]?.written_kind).toBe('fact_slot');
+    expect(organizationBody.records[0]?.source_type).toBe('user_explicit');
+    expect(organizationBody.records[0]?.content).toBe('我在 腾讯 工作');
+
+    const listedOrganization = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-rewrite-active-organization-zh',
+    });
+    expect(listedOrganization.statusCode).toBe(200);
+    expect(JSON.parse(listedOrganization.payload).items.map((item: any) => item.content)).toEqual(['我在 腾讯 工作']);
+
+    const organizationCandidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-rewrite-active-organization-zh',
+    });
+    expect(organizationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(organizationCandidates.payload).items.map((item: any) => item.object_key)).toEqual(['腾讯']);
+  });
+
+  it('keeps only the selected active location fact through /api/v2/ingest when a short follow-up drops the organization truth', async () => {
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-selective-active-fact',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const seededOrganization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-selective-active-fact',
+      },
+    });
+    expect(seededOrganization.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '去掉工作单位',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-fact',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toBe('我住东京');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-fact',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我住东京']);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-active-fact',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+  });
+
+  it('keeps only the selected location fact from a prior assistant proposal through /api/v2/ingest', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '就住址，别记公司',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-fact-proposal',
+        messages: [
+          { role: 'assistant', content: '我住东京。我在 OpenAI 工作。' },
+          { role: 'user', content: '就住址，别记公司' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toBe('我住东京');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-fact-proposal',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我住东京']);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-fact-proposal',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+  });
+
+  it('keeps only the selected active organization fact through /api/v2/ingest when a short follow-up drops the location truth', async () => {
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-selective-active-org',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const seededOrganization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-selective-active-org',
+      },
+    });
+    expect(seededOrganization.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '就公司，别记住址',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-org',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.written_kind).toBe('fact_slot');
+    expect(body.records[0]?.source_type).toBe('user_confirmed');
+    expect(body.records[0]?.content).toBe('我在 OpenAI 工作');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-org',
+    });
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items.map((item: any) => item.content)).toEqual(['我在 OpenAI 工作']);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-active-org',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items.map((item: any) => item.object_key)).toEqual(['openai']);
+  });
+
+  it('deletes all active selectable facts through /api/v2/ingest when a short follow-up drops them all', async () => {
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-selective-active-fact-drop-all',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const seededOrganization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-selective-active-fact-drop-all',
+      },
+    });
+    expect(seededOrganization.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '都不要',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-fact-drop-all',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-fact-drop-all',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-active-fact-drop-all',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items).toHaveLength(0);
   });
 
   it('keeps only the remaining active language rule through /api/v2/ingest when a short follow-up drops the response-length truth', async () => {
@@ -2567,6 +3536,145 @@ describe('API V2 Integration', () => {
     expect(listed.statusCode).toBe(200);
     const listedBody = JSON.parse(listed.payload);
     expect(listedBody.items.map((item: any) => item.content)).toEqual(['请用中文回答']);
+  });
+
+  it('keeps mixed active survivors through /api/v2/ingest when a short follow-up selects both profile rules and facts', async () => {
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-selective-active-mixed-keep',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededLength = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请把回答控制在三句话内',
+        agent_id: 'api-user-selective-active-mixed-keep',
+      },
+    });
+    expect(seededLength.statusCode).toBe(201);
+
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-selective-active-mixed-keep',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const seededOrganization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+        agent_id: 'api-user-selective-active-mixed-keep',
+      },
+    });
+    expect(seededOrganization.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留中文和住址',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-mixed-keep',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((item: any) => item.content)).toEqual([
+      '请用中文回答',
+      '我住东京',
+    ]);
+    expect(body.records.every((item: any) => item.source_type === 'user_confirmed')).toBe(true);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-mixed-keep',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items.map((item: any) => item.content).sort()).toEqual([
+      '我住东京',
+      '请用中文回答',
+    ]);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-active-mixed-keep',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
+  });
+
+  it('keeps only the current active response-style truth through /api/v2/ingest when a short follow-up selects it', async () => {
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-selective-active-response-style',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededStyle = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请简洁直接回答',
+        agent_id: 'api-user-selective-active-response-style',
+      },
+    });
+    expect(seededStyle.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留回答风格',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-response-style',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        source_type: 'user_confirmed',
+        content: '请简洁直接回答',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-response-style',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items.map((item: any) => item.content)).toEqual([
+      '请简洁直接回答',
+    ]);
   });
 
   it('keeps multiple active survivors through /api/v2/ingest when a short follow-up drops only one current profile rule', async () => {
@@ -2694,6 +3802,135 @@ describe('API V2 Integration', () => {
     expect(listed.statusCode).toBe(200);
     const listedBody = JSON.parse(listed.payload);
     expect(listedBody.items).toHaveLength(0);
+  });
+
+  it('deletes mixed active selectable profile rules and facts through /api/v2/ingest when a short follow-up drops them all', async () => {
+    const seededLanguage = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: 'api-user-selective-active-mixed-drop-all',
+      },
+    });
+    expect(seededLanguage.statusCode).toBe(201);
+
+    const seededLocation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/records',
+      payload: {
+        kind: 'fact_slot',
+        content: '我住东京',
+        agent_id: 'api-user-selective-active-mixed-drop-all',
+      },
+    });
+    expect(seededLocation.statusCode).toBe(201);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '都去掉',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-active-mixed-drop-all',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-active-mixed-drop-all',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-active-mixed-drop-all',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items).toHaveLength(0);
+  });
+
+  it('skips writes through /api/v2/ingest when a short drop-all follow-up rejects every mixed durable from a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '都去掉',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-mixed-proposal-drop-all',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。我住东京。' },
+          { role: 'user', content: '都去掉' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(0);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-mixed-proposal-drop-all',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toHaveLength(0);
+  });
+
+  it('keeps mixed survivors through /api/v2/ingest when a short follow-up selects both from a prior assistant proposal', async () => {
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '只保留中文和住址',
+        assistant_message: '收到',
+        agent_id: 'api-user-selective-mixed-proposal-keep',
+        messages: [
+          { role: 'assistant', content: '请用中文回答。我住东京。我在 OpenAI 工作。' },
+          { role: 'user', content: '只保留中文和住址' },
+          { role: 'assistant', content: '收到' },
+        ],
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const body = JSON.parse(ingested.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((item: any) => item.content)).toEqual([
+      '请用中文回答',
+      '我住东京',
+    ]);
+    expect(body.records.every((item: any) => item.source_type === 'user_confirmed')).toBe(true);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-user-selective-mixed-proposal-keep',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items.map((item: any) => item.content).sort()).toEqual([
+      '我住东京',
+      '请用中文回答',
+    ]);
+
+    const candidates = await app.inject({
+      method: 'GET',
+      url: '/api/v2/relation-candidates?agent_id=api-user-selective-mixed-proposal-keep',
+    });
+    expect(candidates.statusCode).toBe(200);
+    expect(JSON.parse(candidates.payload).items.map((item: any) => item.object_key)).toEqual(['东京']);
   });
 
   it('previews MEMORY.md sections with v2 kind hints', async () => {

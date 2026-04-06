@@ -50,6 +50,10 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
           items: result.review_record_candidates,
         })
       : null;
+    cortex.reviewInboxV2.reconcileLiveBatchesAgainstActiveTruth(body.agent_id || 'default');
+    const refreshedReviewBatch = reviewBatch?.batch?.id
+      ? cortex.reviewInboxV2.getBatch(reviewBatch.batch.id)
+      : null;
 
     if (cortex.config.sieve.extractionLogging) {
       insertExtractionLog(body.agent_id || 'default', body.session_id, {
@@ -79,10 +83,10 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
       records: result.records,
       conversation_ref_id: result.conversation_ref_id,
       skipped: result.skipped,
-      review_batch_id: reviewBatch?.batch?.id || null,
-      review_pending_count: reviewBatch?.summary.pending || 0,
-      review_source_preview: reviewBatch?.batch?.source_preview || null,
-      review_summary: reviewBatch?.summary || null,
+      review_batch_id: refreshedReviewBatch?.batch.id || reviewBatch?.batch?.id || null,
+      review_pending_count: refreshedReviewBatch?.summary.pending || reviewBatch?.summary.pending || 0,
+      review_source_preview: refreshedReviewBatch?.batch.source_preview || reviewBatch?.batch?.source_preview || null,
+      review_summary: refreshedReviewBatch?.summary || reviewBatch?.summary || null,
       auto_committed_count: result.records.length,
     };
   });

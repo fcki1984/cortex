@@ -62,6 +62,7 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       status: body.status,
       session_id: body.session_id,
     });
+    cortex.reviewInboxV2.reconcileLiveBatchesAgainstActiveTruth(result.record.agent_id);
     reply.code(201);
     return {
       record: result.record,
@@ -88,15 +89,20 @@ export function registerV2RecordRoutes(app: FastifyInstance, cortex: CortexApp):
       reply.code(404);
       return { error: 'Record not found' };
     }
+    cortex.reviewInboxV2.reconcileLiveBatchesAgainstActiveTruth(record.agent_id);
     return record;
   });
 
   app.delete('/api/v2/records/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const existing = cortex.recordsV2.getRecord(id);
     const ok = await cortex.recordsV2.deleteRecord(id);
     if (!ok) {
       reply.code(404);
       return { error: 'Record not found' };
+    }
+    if (existing) {
+      cortex.reviewInboxV2.reconcileLiveBatchesAgainstActiveTruth(existing.agent_id);
     }
     return { ok: true, id };
   });

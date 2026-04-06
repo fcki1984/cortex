@@ -292,6 +292,35 @@ describe('review assist', () => {
     expect(result.suggested_rewrite).toBe('当前任务是重构 Cortex recall');
   });
 
+  it('supports narrow cortex deployment and migration task rewrites', () => {
+    const deployment = buildRecordReviewAssist(createReviewAssistRecordPayload({
+      requested_kind: 'task_state',
+      normalized_kind: 'task_state',
+      subject_key: 'cortex',
+      attribute_key: undefined,
+      state_key: 'deployment_status',
+      status: 'active',
+      content: '先做部署',
+      source_excerpt: '先做部署',
+    }));
+
+    const migration = buildRecordReviewAssist(createReviewAssistRecordPayload({
+      requested_kind: 'task_state',
+      normalized_kind: 'task_state',
+      subject_key: 'cortex',
+      attribute_key: undefined,
+      state_key: 'migration_status',
+      status: 'active',
+      content: '先迁移一下',
+      source_excerpt: '先迁移一下',
+    }));
+
+    expect(deployment.suggested_action).toBe('accept');
+    expect(deployment.suggested_rewrite).toBe('当前任务是部署 Cortex');
+    expect(migration.suggested_action).toBe('accept');
+    expect(migration.suggested_rewrite).toBe('当前任务是迁移 Cortex');
+  });
+
   it('falls back to the normalized durable content for deep-only location review items', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
       requested_kind: 'fact_slot',

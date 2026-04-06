@@ -4,6 +4,7 @@ export type V2ContractCanonicalCase = {
   input: string;
   requested_kind: RecordKind;
   written_kind: RecordKind;
+  disposition?: 'auto_commit' | 'review';
   attribute_key?: string;
   state_key?: string;
   relation_predicate?: string | null;
@@ -38,6 +39,16 @@ export type ShortUserProposalSelection = {
   drop_all: boolean;
 };
 
+export type ShortUserFactSelection = {
+  keep_fact_attributes: Array<'location' | 'organization'>;
+  drop_fact_attributes: Array<'location' | 'organization'>;
+  drop_all: boolean;
+};
+
+export type ShortUserTaskSelection = {
+  keep_current_task: boolean;
+};
+
 export type ConversationalProfileRuleDisposition = 'auto_commit' | 'review';
 
 export type ConversationalProfileRuleMatch = {
@@ -61,12 +72,22 @@ type InternalProfileRuleAliasSpec = V2ContractProfileRuleAliasSet & {
 
 function matchesCanonicalResponseStyle(content: string): boolean {
   return (
+    matchesExplicitCanonicalResponseStyle(content) ||
+    /(?:说话|表达).*(?:干脆|直接|简洁|简短|精简)/i.test(content) ||
+    /(?:干脆|直接|简洁|简短|精简).*(?:说话|表达)/i.test(content)
+  );
+}
+
+function matchesExplicitCanonicalResponseStyle(content: string): boolean {
+  return (
     (
       /(?:直接|干脆)/i.test(content) &&
-      /(?:回答|回复|说话|表达|风格|answer|reply|response|style)/i.test(content)
+      /(?:回答|回复|风格|answer|reply|response|style)/i.test(content)
     ) ||
-    /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|说话|表达|风格)?/i.test(content) ||
-    /(?:回答|回复|说话|表达|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
+    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:简洁|简短|精简).*(?:直接|干脆)(?:一点|一些|些)?$/i.test(content.trim()) ||
+    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:直接|干脆).*(?:简洁|简短|精简)(?:一点|一些|些)?$/i.test(content.trim()) ||
+    /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|风格)?/i.test(content) ||
+    /(?:回答|回复|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
     (
       /(?:answer|reply|response|style)/i.test(content) &&
       /(?:concise|brief)/i.test(content) &&
@@ -89,6 +110,25 @@ export function matchesConversationalLocationFact(content: string): boolean {
 
 export function matchesColloquialRecallRefactorTask(content: string): boolean {
   return /(?:先(?:收|看|处理|搞)(?:一下|下)?|先把).{0,12}\brecall\b.{0,8}(?:那块|这块|这边)?/i.test(content);
+}
+
+export function matchesColloquialCortexWorkflowTask(
+  content: string,
+  stateKey: 'deployment_status' | 'migration_status',
+): boolean {
+  if (stateKey === 'deployment_status') {
+    return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:部署|deploy(?:ment)?)(?:一下|下)?$/i.test(content.trim());
+  }
+
+  return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:迁移|migrate|migration)(?:一下|下)?$/i.test(content.trim());
+}
+
+export function matchesImplicitCortexTaskSubject(content: string): boolean {
+  return (
+    matchesColloquialRecallRefactorTask(content) ||
+    matchesColloquialCortexWorkflowTask(content, 'deployment_status') ||
+    matchesColloquialCortexWorkflowTask(content, 'migration_status')
+  );
 }
 
 const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
@@ -226,12 +266,28 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
   {
     attribute_key: 'response_style',
     canonical_content: '请简洁直接回答',
-    disposition: 'review',
+    disposition: 'auto_commit',
     strong_inputs: [
       '请简洁直接回答',
       '回答简洁直接',
       '回答风格简洁直接',
       '回复风格简洁直接',
+      '简洁直接一点',
+    ],
+    weak_inputs: [
+      '尽量简洁直接',
+      '尽量说话干脆一点',
+      '最好简洁直接一点',
+      '优先简洁直接回答',
+    ],
+    matches_conversational: (content: string) => matchesExplicitCanonicalResponseStyle(content),
+    matches_attribute: (content: string) => matchesResponseStyleAttribute(content),
+  },
+  {
+    attribute_key: 'response_style',
+    canonical_content: '请简洁直接回答',
+    disposition: 'review',
+    strong_inputs: [
       '说话干脆一点',
     ],
     weak_inputs: [
@@ -240,7 +296,10 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '最好简洁直接一点',
       '优先简洁直接回答',
     ],
-    matches_conversational: (content: string) => matchesCanonicalResponseStyle(content),
+    matches_conversational: (content: string) => (
+      !matchesExplicitCanonicalResponseStyle(content) &&
+      matchesCanonicalResponseStyle(content)
+    ),
     matches_attribute: (content: string) => matchesResponseStyleAttribute(content),
   },
 ];
@@ -260,6 +319,9 @@ const PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = V2_CONTRACT_PROF
     input,
     requested_kind: 'profile_rule' as const,
     written_kind: 'profile_rule' as const,
+    disposition: attribute_key === 'response_style' && input === '说话干脆一点'
+      ? 'review'
+      : 'auto_commit',
     attribute_key,
     relation_predicate: null,
     output: `profile_rule(subject_key=user, attribute_key=${attribute_key})`,
@@ -271,6 +333,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '我住大阪',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'location',
     relation_predicate: 'lives_in',
     output: 'fact_slot(entity_key=user, attribute_key=location)',
@@ -279,6 +342,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '我在 OpenAI 工作',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'organization',
     relation_predicate: 'works_at',
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
@@ -287,6 +351,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '现在住东京',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'location',
     relation_predicate: 'lives_in',
     output: 'fact_slot(entity_key=user, attribute_key=location)',
@@ -295,6 +360,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '目前位于东京',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'location',
     relation_predicate: 'lives_in',
     output: 'fact_slot(entity_key=user, attribute_key=location)',
@@ -303,6 +369,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '人在东京这边',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'location',
     relation_predicate: 'lives_in',
     output: 'fact_slot(entity_key=user, attribute_key=location)',
@@ -311,6 +378,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '现在在 OpenAI 工作',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'organization',
     relation_predicate: 'works_at',
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
@@ -319,6 +387,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '目前任职于 OpenAI',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
+    disposition: 'auto_commit',
     attribute_key: 'organization',
     relation_predicate: 'works_at',
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
@@ -327,6 +396,7 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '当前任务是重构 Cortex recall',
     requested_kind: 'task_state',
     written_kind: 'task_state',
+    disposition: 'auto_commit',
     state_key: 'refactor_status',
     relation_predicate: null,
     output: 'task_state(subject_key=cortex, state_key=refactor_status)',
@@ -370,8 +440,17 @@ const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|�
 const SHORT_USER_LANGUAGE_COMPACT_REWRITE_RE = /^(?:改|换)\s*(中文|英文|日文|english|chinese|japanese)$/i;
 const SHORT_USER_RESPONSE_LENGTH_REWRITE_RE = /(?:改成|换成|改为|换为|控制在|限制在)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)/i;
 const SHORT_USER_RESPONSE_LENGTH_COMPACT_REWRITE_RE = /^(?:改|换)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)$/i;
-const SHORT_USER_DISAGREEMENT_PREFIX_RE = /^(?:不(?:是)?|别|先别|不要|不用)[，,、 ]*/i;
+const SHORT_USER_LOCATION_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改到|换到|改|换)\s*((?:[\u4e00-\u9fff]{1,12})|(?:[A-Za-z][A-Za-z0-9_\-]{0,47}))$/iu;
+const SHORT_USER_ORGANIZATION_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改|换)\s*((?:[A-Za-z][A-Za-z0-9_.\- ]{0,48})|(?:[\u4e00-\u9fff]{1,24}))$/iu;
+const SHORT_USER_LOCATION_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?((?:[\u4e00-\u9fff]{1,12})|(?:[A-Za-z][A-Za-z0-9_\-]{0,47}))(?:吧)?$/iu;
+const SHORT_USER_ORGANIZATION_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?((?:[A-Za-z][A-Za-z0-9_.\- ]{0,48})|(?:[\u4e00-\u9fff]{1,24}))(?:吧)?$/iu;
+const SHORT_USER_TASK_STATE_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改|换)\s*(重构|部署|迁移|refactor|rewrite|deploy(?:ment)?|migrat(?:e|ion))$/i;
+const SHORT_USER_TASK_STATE_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?(重构|部署|迁移|refactor|rewrite|deploy(?:ment)?|migrat(?:e|ion))(?:吧)?$/i;
+const SHORT_USER_REPLACEMENT_REQUEST_RE = /(?:^|[，,、 ])(?:换一个|换种)(?:[，,、 ]|$)/i;
+const SHORT_USER_DISAGREEMENT_PREFIX_RE = /^(?:先别|不要|不用|不是|别|不)[，,、 ]*/i;
 const SHORT_USER_DROP_ALL_RE = /^(?:都不要|全都不要|都别要|都别加|都去掉|都删掉)$/i;
+const SHORT_USER_CONTEXTUAL_VALUE_STOPWORD_RE = /^(?:这个|那个|这样|那样|这里|那里|这边|那边|这样子|那样子|可以|行|好的?|收到|算了|不用|不行)$/i;
+const SHORT_USER_CONTEXTUAL_VALUE_SUFFIX_RE = /(?:吧|呀|啊|呢|啦|嘛|哦|喔|噢)+$/u;
 const ASSISTANT_PROPOSAL_CONJUNCTION_RE = /[，,]\s*(?:并(?:且)?|以及|and\b)\s*/i;
 const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   location: 'lives_in',
@@ -521,29 +600,74 @@ function canonicalFactSlotContent(attributeKey: string, content: string, entityK
 
   const value = extractFactRelationObjectValue(attributeKey, content)?.trim();
   if (!value) return null;
-  const locale = detectContentLocale(content);
+  const locale = detectContentLocale(content) === 'en' ? 'en' : 'zh';
+  return synthesizeCanonicalFactSlotContent(attributeKey, value, locale);
+}
+
+function synthesizeCanonicalFactSlotContent(
+  attributeKey: string,
+  value: string,
+  locale: 'zh' | 'en' = 'zh',
+): string | null {
+  const normalizedValue = value.trim().replace(/\s+/g, ' ');
+  if (!normalizedValue) return null;
 
   if (attributeKey === 'location') {
-    return locale === 'en' ? `I live in ${value}` : `我住${value}`;
+    return locale === 'en' ? `I live in ${normalizedValue}` : `我住${normalizedValue}`;
   }
 
   if (attributeKey === 'organization') {
-    return locale === 'en' ? `I work at ${value}` : `我在 ${value} 工作`;
+    return locale === 'en' ? `I work at ${normalizedValue}` : `我在 ${normalizedValue} 工作`;
   }
 
   return null;
 }
 
-function canonicalTaskStateContent(stateKey: string, content: string, subjectKey?: string | null): string | null {
+function synthesizeCanonicalTaskStateContent(stateKey: string, subjectKey?: string | null): string | null {
   if (subjectKey && subjectKey !== 'cortex') return null;
-  if (stateKey !== 'refactor_status') return null;
-  if (
-    !matchesColloquialRecallRefactorTask(content) &&
-    (!/cortex/i.test(content) || !/recall/i.test(content) || !/(?:重构|refactor)/i.test(content))
-  ) {
-    return null;
+
+  switch (stateKey) {
+    case 'refactor_status':
+      return '当前任务是重构 Cortex recall';
+    case 'deployment_status':
+      return '当前任务是部署 Cortex';
+    case 'migration_status':
+      return '当前任务是迁移 Cortex';
+    default:
+      return null;
   }
-  return '当前任务是重构 Cortex recall';
+}
+
+function canonicalTaskStateContent(stateKey: string, content: string, subjectKey?: string | null): string | null {
+  const canonical = synthesizeCanonicalTaskStateContent(stateKey, subjectKey);
+  if (!canonical) return null;
+
+  switch (stateKey) {
+    case 'refactor_status':
+      if (
+        !matchesColloquialRecallRefactorTask(content) &&
+        (!/cortex/i.test(content) || !/recall/i.test(content) || !/(?:重构|refactor)/i.test(content))
+      ) {
+        return null;
+      }
+      return canonical;
+    case 'deployment_status':
+      return (
+        matchesColloquialCortexWorkflowTask(content, 'deployment_status') ||
+        (/cortex/i.test(content) && /(?:部署|deploy|deployment)/i.test(content))
+      )
+        ? canonical
+        : null;
+    case 'migration_status':
+      return (
+        matchesColloquialCortexWorkflowTask(content, 'migration_status') ||
+        (/cortex/i.test(content) && /(?:迁移|migrate|migration)/i.test(content))
+      )
+        ? canonical
+        : null;
+    default:
+      return null;
+  }
 }
 
 export function canonicalizeDurableContent(input: CanonicalRecordContentInput): string | null {
@@ -573,6 +697,15 @@ function stripShortUserDisagreementPrefix(content: string): string {
   return content.replace(SHORT_USER_DISAGREEMENT_PREFIX_RE, '').trim();
 }
 
+function normalizeShortUserContextualValue(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.replace(SHORT_USER_CONTEXTUAL_VALUE_SUFFIX_RE, '').trim();
+  if (!normalized || SHORT_USER_CONTEXTUAL_VALUE_STOPWORD_RE.test(normalized)) return null;
+  return normalized;
+}
+
 function mentionsLanguagePreference(content: string): boolean {
   return /(中文|英文|日文|english|chinese|japanese)/i.test(content);
 }
@@ -585,6 +718,18 @@ function mentionsSolutionComplexity(content: string): boolean {
   return !!findProfileRuleAliasSpec('solution_complexity')?.matches_conversational(content);
 }
 
+function mentionsResponseStyle(content: string): boolean {
+  return /(?:回答|回复|说话|表达).{0,4}(?:风格|方式)|(?:风格|方式).{0,4}(?:回答|回复|说话|表达)/i.test(content);
+}
+
+function mentionsLocationFact(content: string): boolean {
+  return /(?:住址|地址|所在地|居住地|住的地方)/i.test(content);
+}
+
+function mentionsOrganizationFact(content: string): boolean {
+  return /(?:工作单位|公司|单位|组织|employer|company|organization)/i.test(content);
+}
+
 function dropsLanguagePreference(content: string): boolean {
   return /(?:别|不要|别用|取消|去掉|删掉).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content);
 }
@@ -595,6 +740,18 @@ function dropsResponseLength(content: string): boolean {
 
 function dropsSolutionComplexity(content: string): boolean {
   return /(?:别|不要|取消|去掉|删掉).{0,10}(?:简单|轻量|复杂方案|复杂限制)/i.test(content);
+}
+
+function dropsResponseStyle(content: string): boolean {
+  return /(?:别|不要|取消|去掉|删掉).{0,10}(?:回答|回复|说话|表达).{0,4}(?:风格|方式)|(?:别|不要|取消|去掉|删掉).{0,10}(?:风格|方式).{0,4}(?:回答|回复|说话|表达)/i.test(content);
+}
+
+function dropsLocationFact(content: string): boolean {
+  return /(?:别|不要|取消|去掉|删掉|别记|不记).{0,8}(?:住址|地址|所在地|居住地|住的地方)/i.test(content);
+}
+
+function dropsOrganizationFact(content: string): boolean {
+  return /(?:别|不要|取消|去掉|删掉|别记|不记).{0,8}(?:工作单位|公司|单位|组织|employer|company|organization)/i.test(content);
 }
 
 export function inferShortUserProposalRewrite(content: string): ShortUserProposalRewrite | null {
@@ -639,6 +796,100 @@ export function inferShortUserProposalRewrite(content: string): ShortUserProposa
   return null;
 }
 
+export function inferShortUserProfileRuleAttributeRewrite(attributeKey: string, content: string): ShortUserProposalRewrite | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+
+  if (attributeKey === 'language_preference') {
+    const label = canonicalLanguageLabel(trimmed);
+    return label ? { synthesized_content: `请用${label}回答` } : null;
+  }
+
+  if (attributeKey === 'response_length') {
+    const phrase = extractSentenceCountConstraint(trimmed);
+    return phrase ? { synthesized_content: `请把回答控制在${phrase}内` } : null;
+  }
+
+  if (
+    attributeKey === 'solution_complexity'
+    && (
+      findProfileRuleAliasSpec('solution_complexity')?.matches_conversational(trimmed)
+      || findProfileRuleAliasSpec('solution_complexity')?.matches_attribute(trimmed)
+    )
+  ) {
+    return {
+      synthesized_content: /[A-Za-z]/.test(trimmed)
+        ? 'Please avoid complex solutions'
+        : '不要复杂方案',
+    };
+  }
+
+  if (attributeKey === 'response_style' && matchesExplicitCanonicalResponseStyle(trimmed)) {
+    return {
+      synthesized_content: /[A-Za-z]/.test(trimmed)
+        ? 'Please keep responses concise and direct'
+        : '请简洁直接回答',
+    };
+  }
+
+  return null;
+}
+
+export function inferShortUserFactSlotRewrite(attributeKey: string, content: string): ShortUserProposalRewrite | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+  if (SHORT_USER_REJECTION_RE.test(trimmed) || SHORT_USER_DROP_ALL_RE.test(trimmed)) return null;
+  const normalized = stripShortUserDisagreementPrefix(trimmed) || trimmed;
+
+  if (attributeKey === 'location') {
+    const value = normalizeShortUserContextualValue((
+      normalized.match(SHORT_USER_LOCATION_COMPACT_REWRITE_RE)?.[1]
+      || normalized.match(SHORT_USER_LOCATION_CONTEXTUAL_REWRITE_RE)?.[1]
+    ));
+    if (!value) return null;
+    const synthesized = value ? synthesizeCanonicalFactSlotContent(attributeKey, value, 'zh') : null;
+    return synthesized ? { synthesized_content: synthesized } : null;
+  }
+
+  if (attributeKey === 'organization') {
+    const value = normalizeShortUserContextualValue((
+      normalized.match(SHORT_USER_ORGANIZATION_COMPACT_REWRITE_RE)?.[1]
+      || normalized.match(SHORT_USER_ORGANIZATION_CONTEXTUAL_REWRITE_RE)?.[1]
+    ));
+    if (!value) return null;
+    const synthesized = value ? synthesizeCanonicalFactSlotContent(attributeKey, value, 'zh') : null;
+    return synthesized ? { synthesized_content: synthesized } : null;
+  }
+
+  return null;
+}
+
+export function inferShortUserTaskStateRewrite(subjectKey: string, content: string): ShortUserProposalRewrite | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+  if (subjectKey !== 'cortex') return null;
+
+  const normalized = stripShortUserDisagreementPrefix(trimmed) || trimmed;
+  const stateRaw = (
+    normalized.match(SHORT_USER_TASK_STATE_COMPACT_REWRITE_RE)?.[1]
+    || normalized.match(SHORT_USER_TASK_STATE_CONTEXTUAL_REWRITE_RE)?.[1]
+  )?.trim().toLowerCase();
+  if (!stateRaw) return null;
+
+  let stateKey: string | null = null;
+  if (stateRaw === '重构' || stateRaw === 'refactor' || stateRaw === 'rewrite') {
+    stateKey = 'refactor_status';
+  } else if (stateRaw === '部署' || stateRaw.startsWith('deploy')) {
+    stateKey = 'deployment_status';
+  } else if (stateRaw === '迁移' || stateRaw.startsWith('migrat')) {
+    stateKey = 'migration_status';
+  }
+  if (!stateKey) return null;
+
+  const synthesized = synthesizeCanonicalTaskStateContent(stateKey, subjectKey);
+  return synthesized ? { synthesized_content: synthesized } : null;
+}
+
 export function inferShortUserProposalSelection(content: string): ShortUserProposalSelection | null {
   const trimmed = content.trim();
   if (!trimmed || trimmed.length > 24) return null;
@@ -671,6 +922,12 @@ export function inferShortUserProposalSelection(content: string): ShortUserPropo
     keep.add('solution_complexity');
   }
 
+  if (dropsResponseStyle(trimmed)) {
+    drop.add('response_style');
+  } else if (mentionsResponseStyle(trimmed)) {
+    keep.add('response_style');
+  }
+
   if (keep.size === 0 && drop.size === 0) return null;
 
   return {
@@ -678,6 +935,63 @@ export function inferShortUserProposalSelection(content: string): ShortUserPropo
     drop_profile_rule_attributes: Array.from(drop),
     drop_all: false,
   };
+}
+
+export function inferShortUserFactSelection(content: string): ShortUserFactSelection | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+  if (SHORT_USER_DROP_ALL_RE.test(trimmed)) {
+    return {
+      keep_fact_attributes: [],
+      drop_fact_attributes: [],
+      drop_all: true,
+    };
+  }
+
+  const keep = new Set<'location' | 'organization'>();
+  const drop = new Set<'location' | 'organization'>();
+
+  if (dropsLocationFact(trimmed)) {
+    drop.add('location');
+  } else if (mentionsLocationFact(trimmed)) {
+    keep.add('location');
+  }
+
+  if (dropsOrganizationFact(trimmed)) {
+    drop.add('organization');
+  } else if (mentionsOrganizationFact(trimmed)) {
+    keep.add('organization');
+  }
+
+  if (keep.size === 0 && drop.size === 0) return null;
+
+  return {
+    keep_fact_attributes: Array.from(keep),
+    drop_fact_attributes: Array.from(drop),
+    drop_all: false,
+  };
+}
+
+export function inferShortUserTaskSelection(content: string): ShortUserTaskSelection | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return null;
+  if (SHORT_USER_DROP_ALL_RE.test(trimmed)) return null;
+
+  if (
+    /^(?:只|就)?(?:保留|留)(?:当前)?任务$/i.test(trimmed) ||
+    /^(?:只要|就要|就)(?:当前)?任务(?:(?:就)?(?:行|即可|就好|就可以))?$/i.test(trimmed) ||
+    /^(?:当前)?任务(?:(?:就)?(?:行|即可|就好|就可以))$/i.test(trimmed)
+  ) {
+    return { keep_current_task: true };
+  }
+
+  return null;
+}
+
+export function isShortUserReplacementRequest(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 24) return false;
+  return SHORT_USER_REPLACEMENT_REQUEST_RE.test(trimmed);
 }
 
 export function isShortUserProposalRejection(content: string): boolean {

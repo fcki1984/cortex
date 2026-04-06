@@ -118,6 +118,10 @@ function derivePredicate(record: CortexRecord): string | null {
   }
 }
 
+function isActiveFactRecord(record: CortexRecord): record is Extract<CortexRecord, { kind: 'fact_slot' }> {
+  return record.kind === 'fact_slot' && record.is_active === 1 && !record.valid_to;
+}
+
 function defaultEvidenceId(recordId: string): number | null {
   const evidence = listEvidence(recordId);
   return evidence.find(item => item.role === 'user')?.id ?? evidence[0]?.id ?? null;
@@ -483,9 +487,19 @@ export class CortexRelationsV2 {
     return result.changes;
   }
 
+  deletePendingCandidatesForSourceRecord(sourceRecordId: string): number {
+    const db = getDb();
+    const result = db.prepare(`
+      DELETE FROM relation_candidates_v2
+      WHERE source_record_id = ?
+        AND status = 'pending'
+    `).run(sourceRecordId);
+    return result.changes;
+  }
+
   createDerivedCandidates(recordId: string): V2RelationCandidate[] {
     const record = getRecordById(recordId);
-    if (!record || record.kind !== 'fact_slot') return [];
+    if (!record || !isActiveFactRecord(record)) return [];
     if (record.source_type !== 'user_explicit' && record.source_type !== 'user_confirmed') return [];
 
     const subjectKey = deriveSubjectKey(record);
@@ -511,8 +525,7 @@ export class CortexRelationsV2 {
   }
 
   refreshDerivedCandidates(recordId: string): V2RelationCandidate[] {
-    const db = getDb();
-    db.prepare("DELETE FROM relation_candidates_v2 WHERE source_record_id = ? AND status = 'pending'").run(recordId);
+    this.deletePendingCandidatesForSourceRecord(recordId);
     return this.createDerivedCandidates(recordId);
   }
 }

@@ -509,7 +509,13 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('回答风格简洁直接')).toEqual(expect.objectContaining({
       attribute_key: 'response_style',
       canonical_content: '请简洁直接回答',
-      disposition: 'review',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('简洁直接一点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
     }));
 
     expect(matchConversationalProfileRule!('中文就行吧')).toBe(null);
@@ -624,6 +630,16 @@ describe('V2 shared atomic contract', () => {
       drop_profile_rule_attributes: [],
       drop_all: false,
     });
+    expect(inferShortUserProposalSelection!('只保留回答风格')).toEqual({
+      keep_profile_rule_attributes: ['response_style'],
+      drop_profile_rule_attributes: [],
+      drop_all: false,
+    });
+    expect(inferShortUserProposalSelection!('不要回答风格')).toEqual({
+      keep_profile_rule_attributes: [],
+      drop_profile_rule_attributes: ['response_style'],
+      drop_all: false,
+    });
   });
 
   it('extends short proposal rewrites to support compact response-length updates', async () => {
@@ -636,5 +652,98 @@ describe('V2 shared atomic contract', () => {
     expect(inferShortUserProposalRewrite!('改两句')).toEqual({
       synthesized_content: '请把回答控制在两句话内',
     });
+  });
+
+  it('extends attribute-aware short rewrites to support explicit response-style restatements', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserProfileRuleAttributeRewrite = (contractModule as Record<string, unknown>).inferShortUserProfileRuleAttributeRewrite as
+      | ((attributeKey: string, input: string) => { synthesized_content: string } | null)
+      | undefined;
+
+    expect(typeof inferShortUserProfileRuleAttributeRewrite).toBe('function');
+    expect(inferShortUserProfileRuleAttributeRewrite!('response_style', '简洁直接一点')).toEqual({
+      synthesized_content: '请简洁直接回答',
+    });
+  });
+
+  it('extends short fact rewrites to support bilingual locations and Chinese organization names', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserFactSlotRewrite = (contractModule as Record<string, unknown>).inferShortUserFactSlotRewrite as
+      | ((attributeKey: string, input: string) => { synthesized_content: string } | null)
+      | undefined;
+
+    expect(typeof inferShortUserFactSlotRewrite).toBe('function');
+    expect(inferShortUserFactSlotRewrite!('location', '改 Tokyo')).toEqual({
+      synthesized_content: '我住Tokyo',
+    });
+    expect(inferShortUserFactSlotRewrite!('organization', '换 腾讯')).toEqual({
+      synthesized_content: '我在 腾讯 工作',
+    });
+    expect(inferShortUserFactSlotRewrite!('location', '还是东京吧')).toEqual({
+      synthesized_content: '我住东京',
+    });
+    expect(inferShortUserFactSlotRewrite!('organization', '还是 Anthropic 吧')).toEqual({
+      synthesized_content: '我在 Anthropic 工作',
+    });
+    expect(inferShortUserFactSlotRewrite!('location', '不要这个')).toBe(null);
+    expect(inferShortUserFactSlotRewrite!('location', '都去掉')).toBe(null);
+  });
+
+  it('extends short task-state rewrites to support compact cortex workflow updates', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserTaskStateRewrite = (contractModule as Record<string, unknown>).inferShortUserTaskStateRewrite as
+      | ((subjectKey: string, input: string) => { synthesized_content: string } | null)
+      | undefined;
+
+    expect(typeof inferShortUserTaskStateRewrite).toBe('function');
+    expect(inferShortUserTaskStateRewrite!('cortex', '改部署')).toEqual({
+      synthesized_content: '当前任务是部署 Cortex',
+    });
+    expect(inferShortUserTaskStateRewrite!('cortex', '换迁移')).toEqual({
+      synthesized_content: '当前任务是迁移 Cortex',
+    });
+    expect(inferShortUserTaskStateRewrite!('cortex', '还是部署吧')).toEqual({
+      synthesized_content: '当前任务是部署 Cortex',
+    });
+    expect(inferShortUserTaskStateRewrite!('cortex', '还是迁移吧')).toEqual({
+      synthesized_content: '当前任务是迁移 Cortex',
+    });
+    expect(inferShortUserTaskStateRewrite!('user', '改部署')).toBe(null);
+  });
+
+  it('extends short fact selection to support symmetrical keep-drop and drop-all follow-ups', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserFactSelection = (contractModule as Record<string, unknown>).inferShortUserFactSelection as
+      | ((input: string) => {
+          keep_fact_attributes: string[];
+          drop_fact_attributes: string[];
+          drop_all: boolean;
+        } | null)
+      | undefined;
+
+    expect(typeof inferShortUserFactSelection).toBe('function');
+    expect(inferShortUserFactSelection!('就公司，别记住址')).toEqual({
+      keep_fact_attributes: ['organization'],
+      drop_fact_attributes: ['location'],
+      drop_all: false,
+    });
+    expect(inferShortUserFactSelection!('都不要')).toEqual({
+      keep_fact_attributes: [],
+      drop_fact_attributes: [],
+      drop_all: true,
+    });
+  });
+
+  it('extends short task selection to keep the prior assistant proposed current task', async () => {
+    const contractModule = await import('../src/v2/contract.js');
+    const inferShortUserTaskSelection = (contractModule as Record<string, unknown>).inferShortUserTaskSelection as
+      | ((input: string) => { keep_current_task: boolean } | null)
+      | undefined;
+
+    expect(typeof inferShortUserTaskSelection).toBe('function');
+    expect(inferShortUserTaskSelection!('只保留当前任务')).toEqual({
+      keep_current_task: true,
+    });
+    expect(inferShortUserTaskSelection!('只保留中文')).toBe(null);
   });
 });

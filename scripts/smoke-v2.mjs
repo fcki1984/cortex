@@ -187,6 +187,23 @@ async function runRound(round) {
   const conflictAgentId = `${probeAgentId}-conflict`;
   const organizationVariantAgentId = `${probeAgentId}-org`;
   const reviewImportAgentId = `${probeAgentId}-review`;
+  const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
+  const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
+  const mixedReviewAgentId = `${probeAgentId}-review-mixed-routing`;
+  const compoundAutoAgentId = `${probeAgentId}-review-compound-auto`;
+  const reviewFollowupConfirmAgentId = `${probeAgentId}-review-followup-confirm`;
+  const reviewFollowupStyleRestateAgentId = `${probeAgentId}-review-followup-style-restate`;
+  const reviewFollowupStyleSelectionAgentId = `${probeAgentId}-review-followup-style-selection`;
+  const mixedActivePendingSelectionAgentId = `${probeAgentId}-mixed-active-pending-selection`;
+  const mixedActivePendingKeepLanguageAgentId = `${probeAgentId}-mixed-active-pending-keep-language`;
+  const mixedActivePendingKeepLocationAgentId = `${probeAgentId}-mixed-active-pending-keep-location`;
+  const mixedActivePendingKeepTaskAgentId = `${probeAgentId}-mixed-active-pending-keep-task`;
+  const mixedSelectionAgentId = `${probeAgentId}-mixed-selection`;
+  const mixedDropAllAgentId = `${probeAgentId}-mixed-drop-all`;
+  const taskSelectionAgentId = `${probeAgentId}-task-selection`;
+  const taskRewriteAgentId = `${probeAgentId}-task-rewrite`;
+  const organizationRewriteAgentId = `${probeAgentId}-organization-rewrite`;
+  const reviewFollowupMismatchAgentId = `${probeAgentId}-review-followup-mismatch`;
   const cleanupAgentIds = [
     probeAgentId,
     roundtripSourceAgentId,
@@ -196,6 +213,23 @@ async function runRound(round) {
     conflictAgentId,
     organizationVariantAgentId,
     reviewImportAgentId,
+    reviewStyleAutoAgentId,
+    reviewStyleReviewAgentId,
+    mixedReviewAgentId,
+    compoundAutoAgentId,
+    reviewFollowupConfirmAgentId,
+    reviewFollowupStyleRestateAgentId,
+    reviewFollowupStyleSelectionAgentId,
+    mixedActivePendingSelectionAgentId,
+    mixedActivePendingKeepLanguageAgentId,
+    mixedActivePendingKeepLocationAgentId,
+    mixedActivePendingKeepTaskAgentId,
+    mixedSelectionAgentId,
+    mixedDropAllAgentId,
+    taskSelectionAgentId,
+    taskRewriteAgentId,
+    organizationRewriteAgentId,
+    reviewFollowupMismatchAgentId,
   ];
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus, smokePhase } = {}) {
@@ -466,11 +500,30 @@ async function runRound(round) {
     assert(autoCommittedReviewInboxRecords.response.status === 200, `GET /api/v2/records auto-committed review inbox returned ${autoCommittedReviewInboxRecords.response.status}`);
     assert((autoCommittedReviewInboxRecords.json?.items || []).some((item) => item.content === '请把回答控制在三句话内'), 'stable review inbox import did not write the canonical auto-committed record');
 
-    const reviewInboxImport = await request('create review inbox review batch', 'POST', '/api/v2/review-inbox/import', {
+    const reviewInboxAutoStyleImport = await request('auto-commit explicit response-style import', 'POST', '/api/v2/review-inbox/import', {
       body: {
-        agent_id: reviewImportAgentId,
+        agent_id: reviewStyleAutoAgentId,
         format: 'text',
         content: '回答风格简洁直接',
+      },
+    });
+    assert(reviewInboxAutoStyleImport.response.status === 201, `POST /api/v2/review-inbox/import explicit response-style returned ${reviewInboxAutoStyleImport.response.status}`);
+    assert(reviewInboxAutoStyleImport.json?.batch_id == null, 'explicit response-style import should not leave a batch behind');
+    assert(reviewInboxAutoStyleImport.json?.auto_committed_count === 1, 'explicit response-style import did not auto-commit exactly one item');
+    assert(reviewInboxAutoStyleImport.json?.summary?.pending === 0, 'explicit response-style import left unexpected pending items');
+
+    const autoCommittedStyleRecords = await request('list auto-committed response-style records', 'GET', `/api/v2/records${query({
+      agent_id: reviewStyleAutoAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(autoCommittedStyleRecords.response.status === 200, `GET /api/v2/records explicit response-style returned ${autoCommittedStyleRecords.response.status}`);
+    assert((autoCommittedStyleRecords.json?.items || []).some((item) => item.content === '请简洁直接回答'), 'explicit response-style import did not write the canonical auto-committed record');
+
+    const reviewInboxImport = await request('create review inbox review batch', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: reviewStyleReviewAgentId,
+        format: 'text',
+        content: '说话干脆一点',
       },
     });
     assert(reviewInboxImport.response.status === 201, `POST /api/v2/review-inbox/import review batch returned ${reviewInboxImport.response.status}`);
@@ -478,7 +531,7 @@ async function runRound(round) {
     const reviewImportBatchId = reviewInboxImport.json?.batch_id;
     assert(typeof reviewImportBatchId === 'string' && reviewImportBatchId.length > 0, 'review inbox import did not return batch_id');
 
-    const reviewInboxListFull = await request('list review inbox batches (full)', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewImportAgentId)}&limit=20`, {
+    const reviewInboxListFull = await request('list review inbox batches (full)', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewStyleReviewAgentId)}&limit=20`, {
       retryable: true,
     });
     assert(reviewInboxListFull.response.status === 200, `GET /api/v2/review-inbox full returned ${reviewInboxListFull.response.status}`);
@@ -503,13 +556,13 @@ async function runRound(round) {
     assert(reviewInboxApply.json?.remaining_pending === 0, 'review inbox apply left pending items behind');
 
     const reviewInboxRecords = await request('list review inbox committed records', 'GET', `/api/v2/records${query({
-      agent_id: reviewImportAgentId,
+      agent_id: reviewStyleReviewAgentId,
       limit: 20,
     })}`, { retryable: true });
     assert(reviewInboxRecords.response.status === 200, `GET /api/v2/records review inbox returned ${reviewInboxRecords.response.status}`);
     assert((reviewInboxRecords.json?.items || []).some((item) => item.content === '请简洁直接回答'), 'review inbox apply did not write the canonical record');
 
-    const reviewInboxDeltaBase = await request('list review inbox batches after apply', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewImportAgentId)}&limit=20`, {
+    const reviewInboxDeltaBase = await request('list review inbox batches after apply', 'GET', `/api/v2/review-inbox?agent_id=${encodeURIComponent(reviewStyleReviewAgentId)}&limit=20`, {
       retryable: true,
     });
     assert(reviewInboxDeltaBase.response.status === 200, `GET /api/v2/review-inbox delta base returned ${reviewInboxDeltaBase.response.status}`);
@@ -518,9 +571,9 @@ async function runRound(round) {
 
     const reviewInboxDeltaImport = await request('create second review inbox review batch', 'POST', '/api/v2/review-inbox/import', {
       body: {
-        agent_id: reviewImportAgentId,
+        agent_id: reviewStyleReviewAgentId,
         format: 'text',
-        content: '回复风格简洁直接',
+        content: '回答风格简洁直接',
       },
     });
     assert(reviewInboxDeltaImport.response.status === 201, `POST /api/v2/review-inbox/import second review batch returned ${reviewInboxDeltaImport.response.status}`);
@@ -529,7 +582,7 @@ async function runRound(round) {
     assert(reviewInboxDeltaImport.json?.summary?.pending === 0, 'second review inbox import left unexpected pending items');
 
     const reviewInboxDelta = await request('list review inbox batches (delta)', 'GET', `/api/v2/review-inbox${query({
-      agent_id: reviewImportAgentId,
+      agent_id: reviewStyleReviewAgentId,
       limit: 20,
       cursor: reviewInboxDeltaBase.json?.sync?.cursor,
     })}`, {
@@ -538,7 +591,655 @@ async function runRound(round) {
     assert(reviewInboxDelta.response.status === 200, `GET /api/v2/review-inbox delta returned ${reviewInboxDelta.response.status}`);
     assert(reviewInboxDelta.json?.sync?.mode === 'delta', 'review inbox delta list did not return sync.mode=delta');
     assert((reviewInboxDelta.json?.items || []).length === 0, 'review inbox delta list should stay empty after a suppressed duplicate import');
-    logStep('review inbox', 'auto-commit, review batch, apply, suppression, and delta sync all passed');
+
+    const mixedReviewIngest = await request('route mixed auto-commit plus review ingest', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedReviewAgentId,
+        user_message: '后续交流中文就行。说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedReviewIngest.response.status === 201, `POST /api/v2/ingest mixed routing returned ${mixedReviewIngest.response.status}`);
+    assert(mixedReviewIngest.json?.auto_committed_count === 1, 'mixed routing did not auto-commit exactly one durable');
+    assert(mixedReviewIngest.json?.review_pending_count === 1, 'mixed routing did not leave exactly one review item');
+    assert(mixedReviewIngest.json?.review_source_preview === '说话干脆一点', 'mixed routing did not narrow review_source_preview to the pending clause');
+    assert(mixedReviewIngest.json?.review_summary?.pending === 1, 'mixed routing did not return the pending review summary');
+    assert(
+      JSON.stringify((mixedReviewIngest.json?.records || []).map((item) => item.content)) === JSON.stringify(['请用中文回答']),
+      'mixed routing did not auto-commit only the canonical language rule',
+    );
+    const mixedReviewBatchId = mixedReviewIngest.json?.review_batch_id;
+    assert(typeof mixedReviewBatchId === 'string' && mixedReviewBatchId.length > 0, 'mixed routing did not return review_batch_id');
+
+    const mixedReviewDetail = await request('get mixed auto-commit plus review detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mixedReviewBatchId)}`, {
+      retryable: true,
+    });
+    assert(mixedReviewDetail.response.status === 200, `GET /api/v2/review-inbox/:id mixed routing returned ${mixedReviewDetail.response.status}`);
+    assert(mixedReviewDetail.json?.batch?.source_preview === '说话干脆一点', 'mixed routing batch did not narrow source_preview to the pending clause');
+    assert(mixedReviewDetail.json?.items?.[0]?.payload?.source_excerpt === '说话干脆一点', 'mixed routing detail did not keep the pending clause source excerpt');
+    assert(mixedReviewDetail.json?.items?.[0]?.payload?.content === '请简洁直接回答', 'mixed routing detail did not keep the canonical response-style candidate');
+
+    const compoundAutoIngest = await request('auto-commit compound durable ingest without review work', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: compoundAutoAgentId,
+        user_message: '人在东京这边。先收一下 recall 那块',
+        assistant_message: '记住了',
+      },
+    });
+    assert(compoundAutoIngest.response.status === 201, `POST /api/v2/ingest compound auto returned ${compoundAutoIngest.response.status}`);
+    assert(compoundAutoIngest.json?.auto_committed_count === 2, 'compound auto ingest did not auto-commit both winners');
+    assert(compoundAutoIngest.json?.review_pending_count === 0, 'compound auto ingest should not leave review work');
+    assert(
+      JSON.stringify((compoundAutoIngest.json?.records || []).map((item) => item.content).sort()) === JSON.stringify(['当前任务是重构 Cortex recall', '我住东京']),
+      'compound auto ingest did not write the expected canonical winners',
+    );
+
+    const compoundAutoInbox = await request('list compound auto ingest review inbox batches', 'GET', `/api/v2/review-inbox${query({
+      agent_id: compoundAutoAgentId,
+      limit: 20,
+    })}`, {
+      retryable: true,
+    });
+    assert(compoundAutoInbox.response.status === 200, `GET /api/v2/review-inbox compound auto returned ${compoundAutoInbox.response.status}`);
+    assert((compoundAutoInbox.json?.items || []).length === 0, 'compound auto ingest should not create review inbox batches');
+
+    const liveReviewFollowupSeed = await request('create pending live review follow-up batch', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupConfirmAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(liveReviewFollowupSeed.response.status === 201, `POST /api/v2/ingest live review follow-up seed returned ${liveReviewFollowupSeed.response.status}`);
+    assert(liveReviewFollowupSeed.json?.review_pending_count === 1, 'live review follow-up seed did not create exactly one pending item');
+    const followupBatchId = liveReviewFollowupSeed.json?.review_batch_id;
+    assert(typeof followupBatchId === 'string' && followupBatchId.length > 0, 'live review follow-up seed did not return batch id');
+
+    const followupConfirm = await request('confirm single pending live review follow-up', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupConfirmAgentId,
+        user_message: '可以',
+        assistant_message: '收到',
+      },
+    });
+    assert(followupConfirm.response.status === 201, `POST /api/v2/ingest live review follow-up confirm returned ${followupConfirm.response.status}`);
+    assert(followupConfirm.json?.auto_committed_count === 1, 'live review follow-up confirm did not auto-commit exactly one item');
+    assert(followupConfirm.json?.review_pending_count === 0, 'live review follow-up confirm left pending items behind');
+    assert((followupConfirm.json?.records || []).some((item) => item.content === '请简洁直接回答'), 'live review follow-up confirm did not write the canonical record');
+
+    const followupDetail = await request('get resolved live review follow-up detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(followupBatchId)}`, {
+      retryable: true,
+    });
+    assert(followupDetail.response.status === 200, `GET /api/v2/review-inbox/:id live review follow-up returned ${followupDetail.response.status}`);
+    assert(followupDetail.json?.summary?.pending === 0, 'live review follow-up detail still has pending items');
+    assert(followupDetail.json?.summary?.accepted === 1, 'live review follow-up detail did not mark the item as accepted');
+
+    const styleRestateSeed = await request('create pending live review style restate batch', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupStyleRestateAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(styleRestateSeed.response.status === 201, `POST /api/v2/ingest live review style restate seed returned ${styleRestateSeed.response.status}`);
+    assert(styleRestateSeed.json?.review_pending_count === 1, 'live review style restate seed did not create exactly one pending item');
+    const styleRestateBatchId = styleRestateSeed.json?.review_batch_id;
+    assert(typeof styleRestateBatchId === 'string' && styleRestateBatchId.length > 0, 'live review style restate seed did not return batch id');
+
+    const styleRestateFollowup = await request('restate live review follow-up style explicitly', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupStyleRestateAgentId,
+        user_message: '简洁直接一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(styleRestateFollowup.response.status === 201, `POST /api/v2/ingest live review style restate returned ${styleRestateFollowup.response.status}`);
+    assert(styleRestateFollowup.json?.auto_committed_count === 1, 'live review style restate did not auto-commit exactly one item');
+    assert(styleRestateFollowup.json?.review_pending_count === 0, 'live review style restate left pending items behind');
+    assert((styleRestateFollowup.json?.records || []).some((item) => item.content === '请简洁直接回答'), 'live review style restate did not write the canonical record');
+
+    const styleRestateDetail = await request('get resolved live review style restate detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(styleRestateBatchId)}`, {
+      retryable: true,
+    });
+    assert(styleRestateDetail.response.status === 200, `GET /api/v2/review-inbox/:id live review style restate returned ${styleRestateDetail.response.status}`);
+    assert(styleRestateDetail.json?.summary?.pending === 0, 'live review style restate detail still has pending items');
+    assert(styleRestateDetail.json?.summary?.accepted === 1, 'live review style restate detail did not mark the item as accepted');
+
+    const styleSelectionLanguageSeed = await request('seed active language rule for response-style selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: reviewFollowupStyleSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(styleSelectionLanguageSeed.response.status === 201, `POST /api/v2/records response-style selection language seed returned ${styleSelectionLanguageSeed.response.status}`);
+
+    const styleSelectionStyleSeed = await request('seed active response-style rule for selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: reviewFollowupStyleSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请简洁直接回答',
+      },
+    });
+    assert(styleSelectionStyleSeed.response.status === 201, `POST /api/v2/records response-style selection style seed returned ${styleSelectionStyleSeed.response.status}`);
+
+    const styleSelectionFollowup = await request('select only active response-style truth', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupStyleSelectionAgentId,
+        user_message: '只保留回答风格',
+        assistant_message: '收到',
+      },
+    });
+    assert(styleSelectionFollowup.response.status === 201, `POST /api/v2/ingest response-style selection returned ${styleSelectionFollowup.response.status}`);
+    assert(styleSelectionFollowup.json?.auto_committed_count === 1, 'response-style selection did not auto-commit exactly one item');
+    assert(styleSelectionFollowup.json?.review_pending_count === 0, 'response-style selection left pending items behind');
+    assert(
+      JSON.stringify((styleSelectionFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['请简洁直接回答']),
+      'response-style selection did not keep only the canonical response-style record',
+    );
+
+    const styleSelectionListed = await request('list selected active response-style records', 'GET', `/api/v2/records${query({
+      agent_id: reviewFollowupStyleSelectionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(styleSelectionListed.response.status === 200, `GET /api/v2/records response-style selection returned ${styleSelectionListed.response.status}`);
+    assert(
+      JSON.stringify(styleSelectionListed.json?.items.map((item) => item.content)) === JSON.stringify(['请简洁直接回答']),
+      'response-style selection did not leave the active truth set with only the canonical response-style rule',
+    );
+
+    const mixedActivePendingLanguageSeed = await request('seed active language rule for mixed active-pending selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedActivePendingSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(mixedActivePendingLanguageSeed.response.status === 201, `POST /api/v2/records mixed active-pending selection language seed returned ${mixedActivePendingLanguageSeed.response.status}`);
+
+    const mixedActivePendingReviewSeed = await request('create pending response-style review for mixed active-pending selection', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingSelectionAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingReviewSeed.response.status === 201, `POST /api/v2/ingest mixed active-pending selection review seed returned ${mixedActivePendingReviewSeed.response.status}`);
+    assert(mixedActivePendingReviewSeed.json?.auto_committed_count === 0, 'mixed active-pending selection review seed should not auto-commit active records');
+    assert(mixedActivePendingReviewSeed.json?.review_pending_count === 1, 'mixed active-pending selection review seed should create one pending review item');
+    const mixedActivePendingBatchId = mixedActivePendingReviewSeed.json?.review_batch_id;
+    assert(typeof mixedActivePendingBatchId === 'string' && mixedActivePendingBatchId.length > 0, 'mixed active-pending selection review seed did not return batch id');
+
+    const mixedActivePendingFollowup = await request('keep mixed active language drop and pending style survivor', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingSelectionAgentId,
+        user_message: '只保留回答风格，别用中文',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingFollowup.response.status === 201, `POST /api/v2/ingest mixed active-pending selection returned ${mixedActivePendingFollowup.response.status}`);
+    assert(mixedActivePendingFollowup.json?.auto_committed_count === 1, 'mixed active-pending selection should return exactly one committed survivor');
+    assert(mixedActivePendingFollowup.json?.review_pending_count === 0, 'mixed active-pending selection should not leave review work behind');
+    assert(
+      JSON.stringify((mixedActivePendingFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['请简洁直接回答']),
+      'mixed active-pending selection did not keep the canonical response-style survivor',
+    );
+
+    const mixedActivePendingDetail = await request('get mixed active-pending selection review batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mixedActivePendingBatchId)}`, {
+      retryable: true,
+    });
+    assert(mixedActivePendingDetail.response.status === 200, `GET /api/v2/review-inbox/:id mixed active-pending selection returned ${mixedActivePendingDetail.response.status}`);
+    assert(mixedActivePendingDetail.json?.summary?.pending === 0, 'mixed active-pending selection detail should leave no pending items');
+    assert(mixedActivePendingDetail.json?.summary?.accepted === 1, 'mixed active-pending selection detail should accept exactly one pending item');
+
+    const mixedActivePendingListed = await request('list mixed active-pending survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: mixedActivePendingSelectionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedActivePendingListed.response.status === 200, `GET /api/v2/records mixed active-pending selection returned ${mixedActivePendingListed.response.status}`);
+    assert(
+      JSON.stringify(mixedActivePendingListed.json?.items.map((item) => item.content)) === JSON.stringify(['请简洁直接回答']),
+      'mixed active-pending selection did not leave only the canonical response-style truth active',
+    );
+
+    const mixedActivePendingKeepLanguageSeed = await request('seed active language rule for mixed active-pending keep-language selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedActivePendingKeepLanguageAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(mixedActivePendingKeepLanguageSeed.response.status === 201, `POST /api/v2/records mixed active-pending keep-language language seed returned ${mixedActivePendingKeepLanguageSeed.response.status}`);
+
+    const mixedActivePendingKeepLanguageReviewSeed = await request('create pending response-style review for mixed active-pending keep-language selection', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepLanguageAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepLanguageReviewSeed.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-language selection review seed returned ${mixedActivePendingKeepLanguageReviewSeed.response.status}`);
+    assert(mixedActivePendingKeepLanguageReviewSeed.json?.auto_committed_count === 0, 'mixed active-pending keep-language review seed should not auto-commit active records');
+    assert(mixedActivePendingKeepLanguageReviewSeed.json?.review_pending_count === 1, 'mixed active-pending keep-language review seed should create one pending review item');
+    const mixedActivePendingKeepLanguageBatchId = mixedActivePendingKeepLanguageReviewSeed.json?.review_batch_id;
+    assert(typeof mixedActivePendingKeepLanguageBatchId === 'string' && mixedActivePendingKeepLanguageBatchId.length > 0, 'mixed active-pending keep-language review seed did not return batch id');
+
+    const mixedActivePendingKeepLanguageFollowup = await request('keep active language and reject pending response-style review noise', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepLanguageAgentId,
+        user_message: '只保留中文',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepLanguageFollowup.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-language selection returned ${mixedActivePendingKeepLanguageFollowup.response.status}`);
+    assert(mixedActivePendingKeepLanguageFollowup.json?.auto_committed_count === 1, 'mixed active-pending keep-language selection should return exactly one committed survivor');
+    assert(mixedActivePendingKeepLanguageFollowup.json?.review_pending_count === 0, 'mixed active-pending keep-language selection should not leave review work behind');
+    assert(
+      JSON.stringify((mixedActivePendingKeepLanguageFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['请用中文回答']),
+      'mixed active-pending keep-language selection did not keep the canonical active language survivor',
+    );
+
+    const mixedActivePendingKeepLanguageDetail = await request('get mixed active-pending keep-language review batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mixedActivePendingKeepLanguageBatchId)}`, {
+      retryable: true,
+    });
+    assert(mixedActivePendingKeepLanguageDetail.response.status === 200, `GET /api/v2/review-inbox/:id mixed active-pending keep-language selection returned ${mixedActivePendingKeepLanguageDetail.response.status}`);
+    assert(mixedActivePendingKeepLanguageDetail.json?.summary?.pending === 0, 'mixed active-pending keep-language detail should leave no pending items');
+    assert(mixedActivePendingKeepLanguageDetail.json?.summary?.accepted === 0, 'mixed active-pending keep-language detail should not accept pending items');
+    assert(mixedActivePendingKeepLanguageDetail.json?.summary?.rejected === 1, 'mixed active-pending keep-language detail should reject exactly one pending item');
+
+    const mixedActivePendingKeepLanguageListed = await request('list mixed active-pending keep-language survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: mixedActivePendingKeepLanguageAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedActivePendingKeepLanguageListed.response.status === 200, `GET /api/v2/records mixed active-pending keep-language selection returned ${mixedActivePendingKeepLanguageListed.response.status}`);
+    assert(
+      JSON.stringify(mixedActivePendingKeepLanguageListed.json?.items.map((item) => item.content)) === JSON.stringify(['请用中文回答']),
+      'mixed active-pending keep-language selection did not leave only the canonical language truth active',
+    );
+
+    const mixedActivePendingKeepLocationSeed = await request('seed active location truth for mixed active-pending keep-location selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedActivePendingKeepLocationAgentId,
+        kind: 'fact_slot',
+        content: '我住东京',
+      },
+    });
+    assert(mixedActivePendingKeepLocationSeed.response.status === 201, `POST /api/v2/records mixed active-pending keep-location seed returned ${mixedActivePendingKeepLocationSeed.response.status}`);
+
+    const mixedActivePendingKeepLocationReviewSeed = await request('create pending response-style review for mixed active-pending keep-location selection', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepLocationAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepLocationReviewSeed.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-location selection review seed returned ${mixedActivePendingKeepLocationReviewSeed.response.status}`);
+    assert(mixedActivePendingKeepLocationReviewSeed.json?.auto_committed_count === 0, 'mixed active-pending keep-location review seed should not auto-commit active records');
+    assert(mixedActivePendingKeepLocationReviewSeed.json?.review_pending_count === 1, 'mixed active-pending keep-location review seed should create one pending review item');
+    const mixedActivePendingKeepLocationBatchId = mixedActivePendingKeepLocationReviewSeed.json?.review_batch_id;
+    assert(typeof mixedActivePendingKeepLocationBatchId === 'string' && mixedActivePendingKeepLocationBatchId.length > 0, 'mixed active-pending keep-location review seed did not return batch id');
+
+    const mixedActivePendingKeepLocationFollowup = await request('keep active location and reject pending response-style review noise', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepLocationAgentId,
+        user_message: '只保留住址',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepLocationFollowup.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-location selection returned ${mixedActivePendingKeepLocationFollowup.response.status}`);
+    assert(mixedActivePendingKeepLocationFollowup.json?.auto_committed_count === 1, 'mixed active-pending keep-location selection should return exactly one committed survivor');
+    assert(mixedActivePendingKeepLocationFollowup.json?.review_pending_count === 0, 'mixed active-pending keep-location selection should not leave review work behind');
+    assert(
+      JSON.stringify((mixedActivePendingKeepLocationFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['我住东京']),
+      'mixed active-pending keep-location selection did not keep the canonical active location survivor',
+    );
+
+    const mixedActivePendingKeepLocationDetail = await request('get mixed active-pending keep-location review batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mixedActivePendingKeepLocationBatchId)}`, {
+      retryable: true,
+    });
+    assert(mixedActivePendingKeepLocationDetail.response.status === 200, `GET /api/v2/review-inbox/:id mixed active-pending keep-location selection returned ${mixedActivePendingKeepLocationDetail.response.status}`);
+    assert(mixedActivePendingKeepLocationDetail.json?.summary?.pending === 0, 'mixed active-pending keep-location detail should leave no pending items');
+    assert(mixedActivePendingKeepLocationDetail.json?.summary?.accepted === 0, 'mixed active-pending keep-location detail should not accept pending items');
+    assert(mixedActivePendingKeepLocationDetail.json?.summary?.rejected === 1, 'mixed active-pending keep-location detail should reject exactly one pending item');
+
+    const mixedActivePendingKeepLocationListed = await request('list mixed active-pending keep-location survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: mixedActivePendingKeepLocationAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedActivePendingKeepLocationListed.response.status === 200, `GET /api/v2/records mixed active-pending keep-location selection returned ${mixedActivePendingKeepLocationListed.response.status}`);
+    assert(
+      JSON.stringify(mixedActivePendingKeepLocationListed.json?.items.map((item) => item.content)) === JSON.stringify(['我住东京']),
+      'mixed active-pending keep-location selection did not leave only the canonical location truth active',
+    );
+
+    const mixedActivePendingKeepTaskLanguageSeed = await request('seed active language rule for mixed active-pending keep-task selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedActivePendingKeepTaskAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(mixedActivePendingKeepTaskLanguageSeed.response.status === 201, `POST /api/v2/records mixed active-pending keep-task language seed returned ${mixedActivePendingKeepTaskLanguageSeed.response.status}`);
+
+    const mixedActivePendingKeepTaskSeed = await request('seed active task for mixed active-pending keep-task selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedActivePendingKeepTaskAgentId,
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      },
+    });
+    assert(mixedActivePendingKeepTaskSeed.response.status === 201, `POST /api/v2/records mixed active-pending keep-task seed returned ${mixedActivePendingKeepTaskSeed.response.status}`);
+
+    const mixedActivePendingKeepTaskReviewSeed = await request('create pending response-style review for mixed active-pending keep-task selection', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepTaskAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepTaskReviewSeed.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-task review seed returned ${mixedActivePendingKeepTaskReviewSeed.response.status}`);
+    assert(mixedActivePendingKeepTaskReviewSeed.json?.auto_committed_count === 0, 'mixed active-pending keep-task review seed should not auto-commit active records');
+    assert(mixedActivePendingKeepTaskReviewSeed.json?.review_pending_count === 1, 'mixed active-pending keep-task review seed should create one pending review item');
+    const mixedActivePendingKeepTaskBatchId = mixedActivePendingKeepTaskReviewSeed.json?.review_batch_id;
+    assert(typeof mixedActivePendingKeepTaskBatchId === 'string' && mixedActivePendingKeepTaskBatchId.length > 0, 'mixed active-pending keep-task review seed did not return batch id');
+
+    const mixedActivePendingKeepTaskFollowup = await request('keep active current task and reject pending review noise', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedActivePendingKeepTaskAgentId,
+        user_message: '只保留当前任务',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedActivePendingKeepTaskFollowup.response.status === 201, `POST /api/v2/ingest mixed active-pending keep-task selection returned ${mixedActivePendingKeepTaskFollowup.response.status}`);
+    assert(mixedActivePendingKeepTaskFollowup.json?.auto_committed_count === 1, 'mixed active-pending keep-task selection should return exactly one committed survivor');
+    assert(mixedActivePendingKeepTaskFollowup.json?.review_pending_count === 0, 'mixed active-pending keep-task selection should not leave review work behind');
+    assert(
+      JSON.stringify((mixedActivePendingKeepTaskFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['当前任务是重构 Cortex recall']),
+      'mixed active-pending keep-task selection did not keep the canonical active task survivor',
+    );
+
+    const mixedActivePendingKeepTaskDetail = await request('get mixed active-pending keep-task review batch detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mixedActivePendingKeepTaskBatchId)}`, {
+      retryable: true,
+    });
+    assert(mixedActivePendingKeepTaskDetail.response.status === 200, `GET /api/v2/review-inbox/:id mixed active-pending keep-task selection returned ${mixedActivePendingKeepTaskDetail.response.status}`);
+    assert(mixedActivePendingKeepTaskDetail.json?.summary?.pending === 0, 'mixed active-pending keep-task detail should leave no pending items');
+    assert(mixedActivePendingKeepTaskDetail.json?.summary?.accepted === 0, 'mixed active-pending keep-task detail should not accept pending items');
+    assert(mixedActivePendingKeepTaskDetail.json?.summary?.rejected === 1, 'mixed active-pending keep-task detail should reject exactly one pending item');
+
+    const mixedActivePendingKeepTaskListed = await request('list mixed active-pending keep-task survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: mixedActivePendingKeepTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedActivePendingKeepTaskListed.response.status === 200, `GET /api/v2/records mixed active-pending keep-task selection returned ${mixedActivePendingKeepTaskListed.response.status}`);
+    assert(
+      JSON.stringify(mixedActivePendingKeepTaskListed.json?.items.map((item) => item.content)) === JSON.stringify(['当前任务是重构 Cortex recall']),
+      'mixed active-pending keep-task selection did not leave only the canonical current task truth active',
+    );
+
+    const mixedSelectionLanguageSeed = await request('seed active language rule for mixed selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(mixedSelectionLanguageSeed.response.status === 201, `POST /api/v2/records mixed selection language seed returned ${mixedSelectionLanguageSeed.response.status}`);
+
+    const mixedSelectionLengthSeed = await request('seed active response-length rule for mixed selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请把回答控制在三句话内',
+      },
+    });
+    assert(mixedSelectionLengthSeed.response.status === 201, `POST /api/v2/records mixed selection length seed returned ${mixedSelectionLengthSeed.response.status}`);
+
+    const mixedSelectionLocationSeed = await request('seed active location fact for mixed selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedSelectionAgentId,
+        kind: 'fact_slot',
+        content: '我住东京',
+      },
+    });
+    assert(mixedSelectionLocationSeed.response.status === 201, `POST /api/v2/records mixed selection location seed returned ${mixedSelectionLocationSeed.response.status}`);
+
+    const mixedSelectionOrganizationSeed = await request('seed active organization fact for mixed selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedSelectionAgentId,
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+      },
+    });
+    assert(mixedSelectionOrganizationSeed.response.status === 201, `POST /api/v2/records mixed selection organization seed returned ${mixedSelectionOrganizationSeed.response.status}`);
+
+    const mixedSelectionFollowup = await request('keep mixed active language and location survivors', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedSelectionAgentId,
+        user_message: '只保留中文和住址',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedSelectionFollowup.response.status === 201, `POST /api/v2/ingest mixed selection returned ${mixedSelectionFollowup.response.status}`);
+    assert(mixedSelectionFollowup.json?.auto_committed_count === 2, 'mixed selection did not auto-commit exactly two survivors');
+    assert(mixedSelectionFollowup.json?.review_pending_count === 0, 'mixed selection left pending items behind');
+    assert(
+      JSON.stringify((mixedSelectionFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['请用中文回答', '我住东京']),
+      'mixed selection did not keep the expected language + location survivors',
+    );
+
+    const mixedSelectionListed = await request('list mixed active survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: mixedSelectionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedSelectionListed.response.status === 200, `GET /api/v2/records mixed selection returned ${mixedSelectionListed.response.status}`);
+    assert(
+      JSON.stringify(mixedSelectionListed.json?.items.map((item) => item.content).sort()) === JSON.stringify(['我住东京', '请用中文回答']),
+      'mixed selection did not leave only the expected language + location active truths',
+    );
+
+    const mixedSelectionCandidates = await request('list mixed active relation candidates after selection', 'GET', `/api/v2/relation-candidates${query({
+      agent_id: mixedSelectionAgentId,
+      status: 'pending',
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedSelectionCandidates.response.status === 200, `GET /api/v2/relation-candidates mixed selection returned ${mixedSelectionCandidates.response.status}`);
+    assert(
+      JSON.stringify(mixedSelectionCandidates.json?.items.map((item) => item.object_key)) === JSON.stringify(['东京']),
+      'mixed selection did not preserve only the surviving location relation candidate',
+    );
+
+    const mixedDropAllLanguageSeed = await request('seed active language rule for mixed drop-all', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedDropAllAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(mixedDropAllLanguageSeed.response.status === 201, `POST /api/v2/records mixed drop-all language seed returned ${mixedDropAllLanguageSeed.response.status}`);
+
+    const mixedDropAllLocationSeed = await request('seed active location fact for mixed drop-all', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: mixedDropAllAgentId,
+        kind: 'fact_slot',
+        content: '我住东京',
+      },
+    });
+    assert(mixedDropAllLocationSeed.response.status === 201, `POST /api/v2/records mixed drop-all location seed returned ${mixedDropAllLocationSeed.response.status}`);
+
+    const mixedDropAllFollowup = await request('drop all mixed active truths', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: mixedDropAllAgentId,
+        user_message: '都去掉',
+        assistant_message: '收到',
+      },
+    });
+    assert(mixedDropAllFollowup.response.status === 201, `POST /api/v2/ingest mixed drop-all returned ${mixedDropAllFollowup.response.status}`);
+    assert(mixedDropAllFollowup.json?.auto_committed_count === 0, 'mixed drop-all should not auto-commit new records');
+    assert(mixedDropAllFollowup.json?.review_pending_count === 0, 'mixed drop-all should not leave review work behind');
+    assert((mixedDropAllFollowup.json?.records || []).length === 0, 'mixed drop-all should not return surviving records');
+
+    const mixedDropAllListed = await request('list mixed active truths after drop-all', 'GET', `/api/v2/records${query({
+      agent_id: mixedDropAllAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedDropAllListed.response.status === 200, `GET /api/v2/records mixed drop-all returned ${mixedDropAllListed.response.status}`);
+    assert((mixedDropAllListed.json?.items || []).length === 0, 'mixed drop-all should remove all active truths');
+
+    const mixedDropAllCandidates = await request('list mixed relation candidates after drop-all', 'GET', `/api/v2/relation-candidates${query({
+      agent_id: mixedDropAllAgentId,
+      status: 'pending',
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mixedDropAllCandidates.response.status === 200, `GET /api/v2/relation-candidates mixed drop-all returned ${mixedDropAllCandidates.response.status}`);
+    assert((mixedDropAllCandidates.json?.items || []).length === 0, 'mixed drop-all should clear all pending relation candidates');
+
+    const taskSelectionLanguageSeed = await request('seed active language rule for task selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: taskSelectionAgentId,
+        kind: 'profile_rule',
+        content: '请用中文回答',
+      },
+    });
+    assert(taskSelectionLanguageSeed.response.status === 201, `POST /api/v2/records task selection language seed returned ${taskSelectionLanguageSeed.response.status}`);
+
+    const taskSelectionSeed = await request('seed active task for selection', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: taskSelectionAgentId,
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      },
+    });
+    assert(taskSelectionSeed.response.status === 201, `POST /api/v2/records task selection seed returned ${taskSelectionSeed.response.status}`);
+
+    const taskSelectionFollowup = await request('select only active current task', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: taskSelectionAgentId,
+        user_message: '只保留当前任务',
+        assistant_message: '收到',
+      },
+    });
+    assert(taskSelectionFollowup.response.status === 201, `POST /api/v2/ingest task selection returned ${taskSelectionFollowup.response.status}`);
+    assert(taskSelectionFollowup.json?.auto_committed_count === 1, 'task selection did not auto-commit exactly one survivor');
+    assert(taskSelectionFollowup.json?.review_pending_count === 0, 'task selection left pending items behind');
+    assert(
+      JSON.stringify((taskSelectionFollowup.json?.records || []).map((item) => item.content)) === JSON.stringify(['当前任务是重构 Cortex recall']),
+      'task selection did not keep only the current task survivor',
+    );
+
+    const taskSelectionListed = await request('list active task survivors after selection', 'GET', `/api/v2/records${query({
+      agent_id: taskSelectionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(taskSelectionListed.response.status === 200, `GET /api/v2/records task selection returned ${taskSelectionListed.response.status}`);
+    assert((taskSelectionListed.json?.items || []).length === 1, 'task selection should leave exactly one active record');
+    assert(taskSelectionListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall', 'task selection did not leave the canonical current-task truth active');
+
+    const taskRewriteSeed = await request('seed active task for rewrite', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: taskRewriteAgentId,
+        kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      },
+    });
+    assert(taskRewriteSeed.response.status === 201, `POST /api/v2/records task rewrite seed returned ${taskRewriteSeed.response.status}`);
+
+    const taskRewriteFollowup = await request('rewrite active current task to deployment', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: taskRewriteAgentId,
+        user_message: '改部署',
+        assistant_message: '收到',
+      },
+    });
+    assert(taskRewriteFollowup.response.status === 201, `POST /api/v2/ingest task rewrite returned ${taskRewriteFollowup.response.status}`);
+    assert(taskRewriteFollowup.json?.auto_committed_count === 1, 'task rewrite did not auto-commit exactly one item');
+    assert(taskRewriteFollowup.json?.review_pending_count === 0, 'task rewrite left pending items behind');
+    assert(taskRewriteFollowup.json?.records?.[0]?.content === '当前任务是部署 Cortex', 'task rewrite did not produce the canonical deployment task');
+
+    const taskRewriteListed = await request('list rewritten current task truth', 'GET', `/api/v2/records${query({
+      agent_id: taskRewriteAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(taskRewriteListed.response.status === 200, `GET /api/v2/records task rewrite returned ${taskRewriteListed.response.status}`);
+    assert((taskRewriteListed.json?.items || []).length === 1, 'task rewrite should leave exactly one active record');
+    assert(taskRewriteListed.json?.items?.[0]?.content === '当前任务是部署 Cortex', 'task rewrite did not leave the canonical deployment task active');
+
+    const organizationRewriteSeed = await request('seed active organization truth for rewrite', 'POST', '/api/v2/records', {
+      body: {
+        agent_id: organizationRewriteAgentId,
+        kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+      },
+    });
+    assert(organizationRewriteSeed.response.status === 201, `POST /api/v2/records organization rewrite seed returned ${organizationRewriteSeed.response.status}`);
+
+    const organizationRewriteFollowup = await request('rewrite active organization truth to Tencent', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: organizationRewriteAgentId,
+        user_message: '换 腾讯',
+        assistant_message: '收到',
+      },
+    });
+    assert(organizationRewriteFollowup.response.status === 201, `POST /api/v2/ingest organization rewrite returned ${organizationRewriteFollowup.response.status}`);
+    assert(organizationRewriteFollowup.json?.auto_committed_count === 1, 'organization rewrite did not auto-commit exactly one item');
+    assert(organizationRewriteFollowup.json?.review_pending_count === 0, 'organization rewrite left pending items behind');
+    assert(organizationRewriteFollowup.json?.records?.[0]?.content === '我在 腾讯 工作', 'organization rewrite did not produce the canonical Tencent fact');
+
+    const organizationRewriteListed = await request('list rewritten organization truth', 'GET', `/api/v2/records${query({
+      agent_id: organizationRewriteAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(organizationRewriteListed.response.status === 200, `GET /api/v2/records organization rewrite returned ${organizationRewriteListed.response.status}`);
+    assert((organizationRewriteListed.json?.items || []).length === 1, 'organization rewrite should leave exactly one active fact');
+    assert(organizationRewriteListed.json?.items?.[0]?.content === '我在 腾讯 工作', 'organization rewrite did not leave the canonical Tencent fact active');
+
+    const organizationRewriteCandidates = await request('list organization relation candidates after rewrite', 'GET', `/api/v2/relation-candidates${query({
+      agent_id: organizationRewriteAgentId,
+      status: 'pending',
+      limit: 20,
+    })}`, { retryable: true });
+    assert(organizationRewriteCandidates.response.status === 200, `GET /api/v2/relation-candidates organization rewrite returned ${organizationRewriteCandidates.response.status}`);
+    assert(
+      JSON.stringify(organizationRewriteCandidates.json?.items.map((item) => item.object_key)) === JSON.stringify(['腾讯']),
+      'organization rewrite did not leave only the rewritten organization relation candidate',
+    );
+
+    const mismatchSeed = await request('create pending live review mismatched rewrite batch', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupMismatchAgentId,
+        user_message: '说话干脆一点',
+        assistant_message: '收到',
+      },
+    });
+    assert(mismatchSeed.response.status === 201, `POST /api/v2/ingest live review mismatched rewrite seed returned ${mismatchSeed.response.status}`);
+    assert(mismatchSeed.json?.review_pending_count === 1, 'live review mismatched rewrite seed did not create exactly one pending item');
+    const mismatchBatchId = mismatchSeed.json?.review_batch_id;
+    assert(typeof mismatchBatchId === 'string' && mismatchBatchId.length > 0, 'live review mismatched rewrite seed did not return batch id');
+
+    const mismatchFollowup = await request('send mismatched live review follow-up rewrite', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: reviewFollowupMismatchAgentId,
+        user_message: '改英文',
+        assistant_message: '收到',
+      },
+    });
+    assert(mismatchFollowup.response.status === 201, `POST /api/v2/ingest live review mismatched rewrite returned ${mismatchFollowup.response.status}`);
+
+    const mismatchDetail = await request('get pending live review mismatched rewrite detail', 'GET', `/api/v2/review-inbox/${encodeURIComponent(mismatchBatchId)}`, {
+      retryable: true,
+    });
+    assert(mismatchDetail.response.status === 200, `GET /api/v2/review-inbox/:id live review mismatched rewrite returned ${mismatchDetail.response.status}`);
+    assert(mismatchDetail.json?.summary?.pending === 1, 'live review mismatched rewrite detail should keep one pending item');
+    assert(mismatchDetail.json?.summary?.accepted === 0, 'live review mismatched rewrite detail should not mark the item as accepted');
+    assert(mismatchDetail.json?.items?.[0]?.status === 'pending', 'live review mismatched rewrite item should remain pending');
+    assert(mismatchDetail.json?.items?.[0]?.payload?.attribute_key === 'response_style', 'live review mismatched rewrite should keep the pending response-style attribute');
+
+    const mismatchRecords = await request('list live review mismatched rewrite records', 'GET', `/api/v2/records${query({
+      agent_id: reviewFollowupMismatchAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(mismatchRecords.response.status === 200, `GET /api/v2/records live review mismatched rewrite returned ${mismatchRecords.response.status}`);
+    assert(!(mismatchRecords.json?.items || []).some((item) => item.attribute_key === 'response_style' && item.content === '请用英文回答'), 'live review mismatched rewrite should not write an attribute-mismatched response-style record');
+    logStep('review inbox', 'auto-commit, review batch, mixed auto-review routing, compound auto routing, apply, follow-up confirm, follow-up style restate, active-truth selection, mixed active-pending selection, mixed keep-language/location/task selection, mixed survivor selection, mixed drop-all, task selection, task rewrite, organization rewrite, follow-up rewrite guard, suppression, and delta sync all passed');
 
     const roundtripSourceRecord = await request('create round-trip source record', 'POST', '/api/v2/records', {
       body: {
@@ -574,7 +1275,7 @@ async function runRound(round) {
       body: {
         agent_id: deletedAgentId,
         format: 'text',
-        content: '回答风格简洁直接',
+        content: '说话干脆一点',
       },
     });
     assert(deletedReviewBatch.response.status === 201, `POST /api/v2/review-inbox/import deleted-agent returned ${deletedReviewBatch.response.status}`);

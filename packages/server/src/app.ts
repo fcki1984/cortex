@@ -60,6 +60,7 @@ export class CortexApp {
     this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
     this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
     this.reviewInboxV2 = new CortexReviewInboxV2(this.recordsV2, this.relationsV2);
+    this.recordsV2.setLiveReviewFollowupResolver(this.reviewInboxV2);
 
     log.info('CortexApp initialized');
   }
@@ -92,6 +93,7 @@ export class CortexApp {
       this.lifecycleV2 = new CortexLifecycleV2(this.recordsV2);
       this.feedbackV2 = new CortexFeedbackV2(this.recordsV2);
       this.reviewInboxV2 = new CortexReviewInboxV2(this.recordsV2, this.relationsV2);
+      this.recordsV2.setLiveReviewFollowupResolver(this.reviewInboxV2);
       log.info('Reloaded V2 record services');
     }
 

@@ -9,7 +9,7 @@ import {
   inferTaskStateKey,
   isWeakConversationalProfileRule,
   isSpeculativeContent,
-  matchesColloquialRecallRefactorTask,
+  matchesImplicitCortexTaskSubject,
   matchesConversationalLocationFact,
 } from './contract.js';
 import type {
@@ -255,7 +255,7 @@ function inferUserSubject(content: string): string | null {
 
 function inferSubjectKey(content: string): string | null {
   if (USER_SUBJECT_RE.test(content)) return 'user';
-  if (matchesColloquialRecallRefactorTask(content)) return 'cortex';
+  if (matchesImplicitCortexTaskSubject(content)) return 'cortex';
   if (/\bcortex\b/i.test(content)) return 'cortex';
   if (AGENT_SUBJECT_RE.test(content)) return 'agent';
   return null;
