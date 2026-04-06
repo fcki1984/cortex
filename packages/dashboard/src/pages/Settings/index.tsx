@@ -55,6 +55,8 @@ export default function Settings() {
   const [error, setError] = useState('');
   const [editingSection, setEditingSection] = useState<SectionKey | null>(null);
   const [draft, setDraft] = useState<any>({});
+  const [sieveMissionDraft, setSieveMissionDraft] = useState('');
+  const [savingSieveMission, setSavingSieveMission] = useState(false);
   const [view, setView] = useState<SettingsView>('basic');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [testState, setTestState] = useState<Record<string, { status: 'idle' | 'testing' | 'success' | 'error'; message?: string; latency?: number }>>({});
@@ -62,8 +64,27 @@ export default function Settings() {
   const { t } = useI18n();
   const liveEditableSections = useMemo(() => new Set<SectionKey>(['llm', 'lifecycle']), []);
 
+  const applySaveToast = (response: any) => {
+    const restartRequired = Array.isArray(response?.restart_required_sections)
+      ? response.restart_required_sections
+      : [];
+    setToast({
+      message: restartRequired.length > 0
+        ? t('settings.toastConfigSavedPartial', { sections: restartRequired.join(', ') })
+        : t('settings.toastConfigSaved'),
+      type: 'success',
+    });
+  };
+
+  const refreshConfig = async () => {
+    const refreshed = await getConfig();
+    setConfig(refreshed);
+    setSieveMissionDraft(refreshed.sieve?.retainMission ?? '');
+    return refreshed;
+  };
+
   useEffect(() => {
-    getConfig().then(setConfig).catch((e: any) => setError(e.message));
+    refreshConfig().catch((e: any) => setError(e.message));
     getLogLevel().then((res: any) => setLogLevelState(res.level)).catch(() => {});
   }, []);
 
@@ -439,18 +460,26 @@ export default function Settings() {
   };
 
   const handleConfigSaveSuccess = async (response: any) => {
-    const refreshed = await getConfig();
-    setConfig(refreshed);
+    await refreshConfig();
     cancelEdit();
-    const restartRequired = Array.isArray(response?.restart_required_sections)
-      ? response.restart_required_sections
-      : [];
-    setToast({
-      message: restartRequired.length > 0
-        ? t('settings.toastConfigSavedPartial', { sections: restartRequired.join(', ') })
-        : t('settings.toastConfigSaved'),
-      type: 'success',
-    });
+    applySaveToast(response);
+  };
+
+  const saveSieveMission = async () => {
+    setSavingSieveMission(true);
+    try {
+      const response = await updateConfig({
+        sieve: {
+          retainMission: sieveMissionDraft,
+        },
+      });
+      await refreshConfig();
+      applySaveToast(response);
+    } catch (e: any) {
+      setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
+    } finally {
+      setSavingSieveMission(false);
+    }
   };
 
   const saveSection = async (section: SectionKey) => {
@@ -1103,6 +1132,10 @@ export default function Settings() {
             renderToggleField={renderToggleField}
             renderNumberField={renderNumberField}
             renderSlider={renderSlider}
+            missionDraft={sieveMissionDraft}
+            missionSaving={savingSieveMission}
+            onMissionDraftChange={setSieveMissionDraft}
+            onMissionSave={saveSieveMission}
             t={t}
           />
         </>

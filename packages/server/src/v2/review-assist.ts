@@ -136,6 +136,13 @@ export function buildRecordReviewAssist(payload: ReviewRecordPayload): ReviewAss
   }
 
   if (warnings.length > 0) {
+    if (warnings.includes('mission_unclear')) {
+      return {
+        suggested_action: 'edit',
+        suggested_reason: '这条候选本身已经接近 durable，但当前 mission 下是否该保留还不够明确，建议先人工审查后再决定是否接受。',
+        suggested_rewrite: null,
+      };
+    }
     return {
       suggested_action: 'edit',
       suggested_reason: '这条候选带有降级或稳定性警告，建议先人工确认，不直接使用自动改写。',

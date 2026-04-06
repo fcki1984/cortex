@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, updateAgent, deleteAgent, getAgentConfig, checkAuth } from '../api/client.js';
+import { getAgent, updateAgent, deleteAgent, getAgentConfig, checkAuth, getConfig } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { formatAgentDescriptionLabel, formatAgentNameLabel, formatRecordKindLabel, formatSourceTypeLabel } from '../utils/v2Display.js';
 
@@ -196,6 +196,7 @@ export default function AgentDetail() {
 
   const [agent, setAgent] = useState<any>(null);
   const [mergedConfig, setMergedConfig] = useState<any>(null);
+  const [globalConfig, setGlobalConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<TabKey>('overview');
@@ -226,9 +227,10 @@ export default function AgentDetail() {
     if (!id) return;
     setLoading(true);
     try {
-      const [agentData, configData] = await Promise.all([getAgent(id), getAgentConfig(id)]);
+      const [agentData, configData, globalConfigData] = await Promise.all([getAgent(id), getAgentConfig(id), getConfig()]);
       setAgent(agentData);
       setMergedConfig(configData);
+      setGlobalConfig(globalConfigData);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -295,6 +297,8 @@ export default function AgentDetail() {
       extraction: buildDraft('extraction', mc.llm?.extraction, override.llm?.extraction, LLM_PROVIDERS),
       lifecycle: buildDraft('lifecycle', mc.llm?.lifecycle, override.llm?.lifecycle, LLM_PROVIDERS),
       embedding: buildDraft('embedding', mc.embedding, override.embedding, EMBEDDING_PROVIDERS),
+      retainMissionMode: override?.sieve?.retainMission ? 'override' : 'inherit',
+      retainMission: override?.sieve?.retainMission ?? '',
     });
     setEditingConfig(true);
   };
@@ -312,6 +316,11 @@ export default function AgentDetail() {
 
   const saveConfig = async () => {
     try {
+      if (configDraft.retainMissionMode === 'override' && !String(configDraft.retainMission ?? '').trim()) {
+        setToast({ message: t('agentDetail.retainMissionRequired'), type: 'error' });
+        return;
+      }
+
       const buildPayload = (d: any) => {
         const out: any = { provider: d.provider, model: d.useCustomModel ? d.customModel : d.model };
         if (d.apiKey) out.apiKey = d.apiKey;
@@ -328,12 +337,18 @@ export default function AgentDetail() {
           ...buildPayload(configDraft.embedding),
           dimensions: Number(configDraft.embedding.dimensions),
         },
+        sieve: {
+          retainMission: configDraft.retainMissionMode === 'override'
+            ? String(configDraft.retainMission ?? '').trim()
+            : null,
+        },
       };
 
       const updated = await updateAgent(id!, { config_override });
       setAgent((prev: any) => ({ ...prev, ...updated }));
-      const configData = await getAgentConfig(id!);
+      const [configData, globalConfigData] = await Promise.all([getAgentConfig(id!), getConfig()]);
       setMergedConfig(configData);
+      setGlobalConfig(globalConfigData);
       setEditingConfig(false);
       setToast({ message: t('agentDetail.toastConfigSaved'), type: 'success' });
     } catch (e: any) {
@@ -853,6 +868,9 @@ def ingest(user_msg: str, assistant_msg: str):
   const kindEntries = Object.entries(stats.kinds || {});
   const sourceEntries = Object.entries(stats.sources || {});
   const mc = mergedConfig?.config;
+  const globalRetainMission = globalConfig?.sieve?.retainMission ?? '';
+  const agentRetainMissionOverride = agent?.config_override?.sieve?.retainMission ?? '';
+  const effectiveRetainMission = mc?.sieve?.retainMission ?? globalRetainMission ?? '';
   const displayAgentName = formatAgentNameLabel(t, agent.id, agent.name);
   const displayAgentDescription = formatAgentDescriptionLabel(t, agent.id, agent.description);
 
@@ -1051,6 +1069,52 @@ def ingest(user_msg: str, assistant_msg: str):
                 {renderProviderBlock(t('agentDetail.extractionLlm'), 'extraction', LLM_PROVIDERS)}
                 {renderProviderBlock(t('agentDetail.lifecycleLlm'), 'lifecycle', LLM_PROVIDERS)}
                 {renderProviderBlock(t('agentDetail.embedding'), 'embedding', EMBEDDING_PROVIDERS)}
+                <div style={{ marginBottom: 20, padding: 16, background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>
+                    {t('agentDetail.retainMissionSection')}
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <input
+                        type="radio"
+                        checked={configDraft.retainMissionMode === 'inherit'}
+                        onChange={() => updateDraft('retainMissionMode', 'inherit')}
+                      />
+                      <span>{t('agentDetail.inheritGlobalMission')}</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="radio"
+                        checked={configDraft.retainMissionMode === 'override'}
+                        onChange={() => updateDraft('retainMissionMode', 'override')}
+                      />
+                      <span>{t('agentDetail.useAgentMission')}</span>
+                    </label>
+                  </div>
+                  {configDraft.retainMissionMode === 'override' && (
+                    <div className="form-group" style={{ marginBottom: 12 }}>
+                      <label>{t('agentDetail.agentMissionLabel')}</label>
+                      <textarea
+                        aria-label={t('agentDetail.agentMissionLabel')}
+                        rows={4}
+                        style={{ width: '100%', resize: 'vertical' }}
+                        placeholder={t('agentDetail.agentMissionPlaceholder')}
+                        value={configDraft.retainMission ?? ''}
+                        onChange={e => updateDraft('retainMission', e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+                      {t('agentDetail.effectiveMissionLabel')}
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                      {(configDraft.retainMissionMode === 'override'
+                        ? String(configDraft.retainMission ?? '').trim()
+                        : globalRetainMission) || t('agentDetail.noMissionConfigured')}
+                    </div>
+                  </div>
+                </div>
               </>
             ) : (
               <>
@@ -1085,6 +1149,14 @@ def ingest(user_msg: str, assistant_msg: str):
                         </td>
                       </tr>
                       <tr><td>{t('agentDetail.embeddingDimensions')}</td><td>{mc.embedding?.dimensions}</td></tr>
+                      <tr>
+                        <td>{t('agentDetail.missionSourceLabel')}</td>
+                        <td>{agentRetainMissionOverride ? t('agentDetail.agentMissionOverrideActive') : t('agentDetail.inheritingGlobalMission')}</td>
+                      </tr>
+                      <tr>
+                        <td>{t('agentDetail.effectiveMissionLabel')}</td>
+                        <td style={{ whiteSpace: 'pre-wrap' }}>{effectiveRetainMission || t('agentDetail.noMissionConfigured')}</td>
+                      </tr>
                     </tbody>
                   </table>
                 ) : (

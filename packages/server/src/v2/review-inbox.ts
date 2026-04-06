@@ -1465,11 +1465,13 @@ export class CortexReviewInboxV2 {
     format: 'text' | 'memory_md';
     content: string;
     source_label?: string;
+    retain_mission?: string;
   }): Promise<{
     batch: ReviewBatch | null;
     items: ReviewItem[];
     summary: ReviewBatchSummary;
     auto_committed_count: number;
+    mission_filtered_count: number;
   }> {
     const preview = await previewImportForReviewInbox(this.recordsV2, input);
     let autoCommittedCount = 0;
@@ -1515,6 +1517,7 @@ export class CortexReviewInboxV2 {
         items: [],
         summary: emptySummary(),
         auto_committed_count: autoCommittedCount,
+        mission_filtered_count: preview.mission_filtered_count,
       };
     }
 
@@ -1529,6 +1532,7 @@ export class CortexReviewInboxV2 {
     return {
       ...created,
       auto_committed_count: autoCommittedCount,
+      mission_filtered_count: preview.mission_filtered_count,
     };
   }
 

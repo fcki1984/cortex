@@ -5,7 +5,7 @@ import type { EmbeddingProvider } from '../src/embedding/interface.js';
 import type { LLMProvider } from '../src/llm/interface.js';
 import { V2_CONTRACT_CANONICAL_CASES } from '../src/v2/contract.js';
 import { CortexRelationsV2 } from '../src/v2/relations.js';
-import { V2_EXTRACTION_SYSTEM_PROMPT } from '../src/v2/prompts.js';
+import { buildV2ExtractionSystemPrompt, V2_EXTRACTION_SYSTEM_PROMPT } from '../src/v2/prompts.js';
 import { CortexRecordsV2 } from '../src/v2/service.js';
 import { buildCanonicalExportBundle, confirmImport, previewImport } from '../src/v2/import-export.js';
 import {
@@ -110,6 +110,15 @@ describe('V2 Import / Export', () => {
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('Do not collapse compound inputs into a single vague summary.');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('If multiple clauses set the same stable key, keep only the later winner.');
     expect(V2_EXTRACTION_SYSTEM_PROMPT).toContain('Do not keep superseded earlier durable records.');
+  });
+
+  it('adds retain mission guidance to the deep extraction prompt without changing the default prompt baseline', () => {
+    const missionPrompt = buildV2ExtractionSystemPrompt('只保留长期偏好和稳定背景，不保留短期任务');
+
+    expect(missionPrompt).toContain('Retain mission');
+    expect(missionPrompt).toContain('只保留长期偏好和稳定背景，不保留短期任务');
+    expect(missionPrompt).toContain('When the mission is unclear');
+    expect(V2_EXTRACTION_SYSTEM_PROMPT).not.toContain('Retain mission');
   });
 
   it('uses deep extraction for plain text preview candidates', async () => {

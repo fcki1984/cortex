@@ -19,6 +19,21 @@ describe('review assist', () => {
     expect(result.suggested_rewrite).toBe('请用中文回答');
   });
 
+  it('explains mission-driven review when the candidate is durable but mission scope is unclear', () => {
+    const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
+      content: '当前任务是重构 Cortex recall',
+      source_excerpt: '当前任务是重构 Cortex recall',
+      normalized_kind: 'task_state',
+      requested_kind: 'task_state',
+      state_key: 'refactor_status',
+      warnings: ['mission_unclear'],
+    }));
+
+    expect(result.suggested_action).toBe('edit');
+    expect(result.suggested_reason).toContain('mission');
+    expect(result.suggested_reason).toContain('审查');
+  });
+
   it('keeps english language preference rewrites in english regardless of ui locale', () => {
     const result = buildRecordReviewAssist(createReviewAssistRecordPayload({
       content: 'Please answer in English',

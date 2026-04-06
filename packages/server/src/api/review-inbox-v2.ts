@@ -1,7 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
+import { getAgentById } from '../db/agent-queries.js';
 import { createLogger } from '../utils/logger.js';
 import { observedRoute } from './observability.js';
+import {
+  extractRetainMissionFromConfigOverride,
+  resolveEffectiveRetainMission,
+} from '../v2/retain-mission.js';
 
 const log = createLogger('review-inbox-v2');
 
@@ -68,17 +73,26 @@ export function registerV2ReviewInboxRoutes(app: FastifyInstance, cortex: Cortex
     }
 
     try {
+      const agent = getAgentById(body.agent_id);
+      const retainMission = resolveEffectiveRetainMission({
+        globalMission: cortex.config.sieve?.retainMission,
+        agentOverride: extractRetainMissionFromConfigOverride(
+          agent?.config_override ? JSON.parse(agent.config_override) : null,
+        ),
+      });
       const result = await cortex.reviewInboxV2.createImportBatch({
         agent_id: body.agent_id,
         format: body.format,
         content: body.content,
         source_label: body.filename,
+        retain_mission: retainMission,
       });
       reply.code(201);
       return {
         batch_id: result.batch?.id || null,
         source_preview: result.batch?.source_preview || null,
         auto_committed_count: result.auto_committed_count,
+        mission_filtered_count: result.mission_filtered_count,
         summary: result.summary,
       };
     } catch (error: any) {

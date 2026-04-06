@@ -4,7 +4,7 @@ import { stripCodeFences, stripInjectedContent } from '../utils/sanitize.js';
 import { detectHighSignals, isSmallTalk } from '../signals/index.js';
 import type { LLMProvider } from '../llm/interface.js';
 import type { EmbeddingProvider } from '../embedding/interface.js';
-import { V2_EXTRACTION_SYSTEM_PROMPT } from './prompts.js';
+import { buildV2ExtractionSystemPrompt } from './prompts.js';
 import {
   canDeriveRelationCandidate,
   inferShortUserFactSelection,
@@ -24,6 +24,7 @@ import {
   splitAssistantProposalClauses,
   splitCompoundClauses,
 } from './contract.js';
+import { resolveRetainMissionScope, type RetainMissionScope } from './retain-mission.js';
 import { CortexRelationsV2 } from './relations.js';
 import {
   deleteRecord,
@@ -150,6 +151,12 @@ export type PreviewImportCandidateDetail = {
   origins: CandidateOrigin[];
   source_excerpt: string;
   disposition: PreviewImportCandidateDisposition;
+  mission_scope: RetainMissionScope;
+};
+
+export type PreviewImportCandidateDetailsResult = {
+  details: PreviewImportCandidateDetail[];
+  mission_filtered_count: number;
 };
 
 type IngestDetailDisposition = 'auto_commit' | 'review' | 'note';
@@ -334,6 +341,7 @@ function buildReviewRecordCandidate(
   index: number,
   sourceExcerpt: string,
   evidence: Array<{ role: 'user' | 'assistant' | 'system'; content: string; conversation_ref_id?: string }>,
+  extraWarnings: string[] = [],
 ): Record<string, unknown> {
   const candidate = normalized.candidate;
   const content = candidate.kind === 'profile_rule' || candidate.kind === 'fact_slot'
@@ -370,7 +378,10 @@ function buildReviewRecordCandidate(
     retired_at: candidate.kind === 'session_note' ? candidate.retired_at || null : undefined,
     purge_after: candidate.kind === 'session_note' ? candidate.purge_after || null : undefined,
     source_excerpt: sourceExcerpt,
-    warnings: normalized.reason_code ? [normalized.reason_code] : [],
+    warnings: Array.from(new Set([
+      ...(normalized.reason_code ? [normalized.reason_code] : []),
+      ...extraWarnings,
+    ])),
     evidence: scopeReviewEvidenceToSourceExcerpt(evidence, sourceExcerpt),
   };
 }
@@ -440,6 +451,39 @@ function classifySharedDetailDisposition(
   }
   if (detail.origins.includes('deterministic') || detail.origins.includes('fast')) return 'auto_commit';
   return 'review';
+}
+
+function routeDetailByRetainMission(
+  detail: Pick<CollectedCandidateDetail, 'candidate' | 'origins' | 'source_excerpt'>,
+  retainMission?: string,
+): {
+  disposition: IngestDetailDisposition;
+  mission_scope: RetainMissionScope;
+  filtered: boolean;
+} {
+  const baseDisposition = classifySharedDetailDisposition(detail);
+  if (detail.candidate.written_kind === 'session_note') {
+    return {
+      disposition: baseDisposition,
+      mission_scope: 'in_scope',
+      filtered: false,
+    };
+  }
+
+  const missionScope = resolveRetainMissionScope(retainMission, detail.candidate);
+  if (missionScope === 'out_of_scope') {
+    return {
+      disposition: baseDisposition,
+      mission_scope: missionScope,
+      filtered: true,
+    };
+  }
+
+  return {
+    disposition: missionScope === 'unclear' ? 'review' : baseDisposition,
+    mission_scope: missionScope,
+    filtered: false,
+  };
 }
 
 function isAtomicDeterministicInput(content: string): boolean {
@@ -1730,13 +1774,19 @@ export class CortexRecordsV2 {
     source_type: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
+    retain_mission?: string;
   }): Promise<{
     candidateDetails: CollectedCandidateDetail[];
     hintedFallback: NormalizedRecordCandidate;
   }> {
     const fast = detectHighSignals(input.exchange).map(signal => signalToCandidate(signal, input.agent_id));
     const deep = !isSmallTalk(input.content)
-      ? await this.extractDeepCandidates(input.exchange, input.agent_id, input.session_id).catch((error: Error) => {
+      ? await this.extractDeepCandidates(
+          input.exchange,
+          input.agent_id,
+          input.session_id,
+          input.retain_mission,
+        ).catch((error: Error) => {
           log.warn({ error: error.message }, 'V2 extraction failed');
           return [] as NormalizedRecordCandidate[];
         })
@@ -1801,6 +1851,7 @@ export class CortexRecordsV2 {
     source_type: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
+    retain_mission?: string;
   }): Promise<{
     candidates: NormalizedRecordCandidate[];
     hintedFallback: NormalizedRecordCandidate;
@@ -1824,6 +1875,7 @@ export class CortexRecordsV2 {
     source_type: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
+    retain_mission?: string;
   }): Promise<{
     candidateDetails: CollectedCandidateDetail[];
     hintedFallback: NormalizedRecordCandidate;
@@ -1870,6 +1922,7 @@ export class CortexRecordsV2 {
           exchange: clauseExchange,
           requested_kind: requestedKind,
           carry_context: carry,
+          retain_mission: input.retain_mission,
         });
         clauseCandidateDetails = collected.candidateDetails;
       }
@@ -1901,6 +1954,7 @@ export class CortexRecordsV2 {
     source_type: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
+    retain_mission?: string;
   }): Promise<{
     candidates: NormalizedRecordCandidate[];
     hintedFallback: NormalizedRecordCandidate;
@@ -1919,6 +1973,7 @@ export class CortexRecordsV2 {
     source_type?: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
+    retain_mission?: string;
   }): Promise<NormalizedRecordCandidate[]> {
     const content = stripInjectedContent(input.content || '').trim();
     if (!content) return [];
@@ -1936,6 +1991,7 @@ export class CortexRecordsV2 {
       source_type: input.source_type || 'user_confirmed',
       session_id: input.session_id,
       carry_context: input.carry_context,
+      retain_mission: input.retain_mission,
     });
 
     if (candidates.length === 0) {
@@ -1960,9 +2016,15 @@ export class CortexRecordsV2 {
     source_type?: SourceType;
     session_id?: string;
     carry_context?: ClauseCarryContext;
-  }): Promise<PreviewImportCandidateDetail[]> {
+    retain_mission?: string;
+  }): Promise<PreviewImportCandidateDetailsResult> {
     const content = stripInjectedContent(input.content || '').trim();
-    if (!content) return [];
+    if (!content) {
+      return {
+        details: [],
+        mission_filtered_count: 0,
+      };
+    }
 
     const exchange = {
       user: content,
@@ -1977,19 +2039,25 @@ export class CortexRecordsV2 {
       source_type: input.source_type || 'user_confirmed',
       session_id: input.session_id,
       carry_context: input.carry_context,
+      retain_mission: input.retain_mission,
     });
 
     if (candidateDetails.length === 0) {
-      return [{
+      const routedFallback = routeDetailByRetainMission({
         candidate: hintedFallback,
         origins: ['fallback'],
         source_excerpt: content,
-        disposition: classifySharedDetailDisposition({
+      }, input.retain_mission);
+      return {
+        details: routedFallback.filtered ? [] : [{
           candidate: hintedFallback,
           origins: ['fallback'],
           source_excerpt: content,
-        }),
-      }];
+          disposition: routedFallback.disposition,
+          mission_scope: routedFallback.mission_scope,
+        }],
+        mission_filtered_count: routedFallback.filtered ? 1 : 0,
+      };
     }
 
     if (
@@ -1997,24 +2065,43 @@ export class CortexRecordsV2 {
       hintedFallback.written_kind !== 'session_note' &&
       candidateDetails.every(detail => detail.candidate.written_kind === 'session_note')
     ) {
-      return [{
+      const routedFallback = routeDetailByRetainMission({
         candidate: hintedFallback,
         origins: ['fallback'],
         source_excerpt: content,
-        disposition: classifySharedDetailDisposition({
+      }, input.retain_mission);
+      return {
+        details: routedFallback.filtered ? [] : [{
           candidate: hintedFallback,
           origins: ['fallback'],
           source_excerpt: content,
-        }),
-      }];
+          disposition: routedFallback.disposition,
+          mission_scope: routedFallback.mission_scope,
+        }],
+        mission_filtered_count: routedFallback.filtered ? 1 : 0,
+      };
     }
 
-    return candidateDetails.map(detail => ({
-      candidate: detail.candidate,
-      origins: detail.origins,
-      source_excerpt: detail.source_excerpt,
-      disposition: classifySharedDetailDisposition(detail),
-    }));
+    let missionFilteredCount = 0;
+    const details = candidateDetails.flatMap((detail) => {
+      const routed = routeDetailByRetainMission(detail, input.retain_mission);
+      if (routed.filtered) {
+        missionFilteredCount += 1;
+        return [];
+      }
+      return [{
+        candidate: detail.candidate,
+        origins: detail.origins,
+        source_excerpt: detail.source_excerpt,
+        disposition: routed.disposition,
+        mission_scope: routed.mission_scope,
+      }];
+    });
+
+    return {
+      details,
+      mission_filtered_count: missionFilteredCount,
+    };
   }
 
   async initialize(): Promise<void> {
@@ -2052,6 +2139,7 @@ export class CortexRecordsV2 {
     },
     agentId: string,
     sessionId?: string,
+    retainMission?: string,
   ): Promise<NormalizedRecordCandidate[]> {
     if (!this.llm || typeof this.llm.complete !== 'function') return [];
 
@@ -2062,7 +2150,7 @@ export class CortexRecordsV2 {
     const raw = await this.llm.complete(segments, {
       maxTokens: 1200,
       temperature: 0.1,
-      systemPrompt: V2_EXTRACTION_SYSTEM_PROMPT,
+      systemPrompt: buildV2ExtractionSystemPrompt(retainMission),
     });
 
     const parsed = parseJsonObject(raw);
@@ -2108,10 +2196,12 @@ export class CortexRecordsV2 {
     messages?: ExchangeMessage[];
     agent_id?: string;
     session_id?: string;
+    retain_mission?: string;
   }): Promise<{
     records: IngestCommittedRecord[];
     conversation_ref_id?: string;
     review_record_candidates: Array<Record<string, unknown>>;
+    mission_filtered_count: number;
     skipped: boolean;
   }> {
     const agentId = req.agent_id || 'default';
@@ -2123,7 +2213,7 @@ export class CortexRecordsV2 {
     })).filter(message => message.content.length > 0);
 
     if (user.length < 2 && assistant.length < 2) {
-      return { records: [], review_record_candidates: [], skipped: true };
+      return { records: [], review_record_candidates: [], mission_filtered_count: 0, skipped: true };
     }
 
     const conversationRefId = insertConversationRef({
@@ -2141,6 +2231,7 @@ export class CortexRecordsV2 {
       exchange,
       source_type: 'user_explicit',
       session_id: req.session_id,
+      retain_mission: req.retain_mission,
     });
     let normalizedCandidates = candidateDetails.map((detail) => detail.candidate);
 
@@ -2372,13 +2463,28 @@ export class CortexRecordsV2 {
 
     const results: IngestCommittedRecord[] = [];
     const reviewRecordCandidates: Array<Record<string, unknown>> = [];
+    let missionFilteredCount = 0;
+    const routedCandidateDetails = candidateDetails.flatMap((detail) => {
+      const routed = routeDetailByRetainMission(detail, req.retain_mission);
+      if (routed.filtered) {
+        missionFilteredCount += 1;
+        return [];
+      }
+      return [{
+        detail,
+        disposition: routed.disposition,
+        mission_scope: routed.mission_scope,
+      }];
+    });
 
     const autoCommitDetails = suppressNoOpAutoCommitDetails(
       agentId,
-      candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) !== 'review'),
+      routedCandidateDetails
+        .filter((item) => item.disposition !== 'review')
+        .map((item) => item.detail),
       { keepFingerprints: forceVisibleFingerprints },
     );
-    const reviewDetails = candidateDetails.filter((detail) => classifySharedDetailDisposition(detail) === 'review');
+    const reviewDetails = routedCandidateDetails.filter((item) => item.disposition === 'review');
 
     for (const detail of autoCommitDetails) {
       const normalized = detail.candidate;
@@ -2405,12 +2511,13 @@ export class CortexRecordsV2 {
       await this.deleteRecord(recordId);
     }
 
-    for (const [index, detail] of reviewDetails.entries()) {
+    for (const [index, reviewDetail] of reviewDetails.entries()) {
       reviewRecordCandidates.push(buildReviewRecordCandidate(
-        detail.candidate,
+        reviewDetail.detail.candidate,
         index,
-        detail.source_excerpt,
+        reviewDetail.detail.source_excerpt,
         evidence,
+        reviewDetail.mission_scope === 'unclear' ? ['mission_unclear'] : [],
       ));
     }
 
@@ -2422,6 +2529,7 @@ export class CortexRecordsV2 {
       records: combinedResults,
       conversation_ref_id: conversationRefId,
       review_record_candidates: reviewRecordCandidates,
+      mission_filtered_count: missionFilteredCount,
       skipped: false,
     };
   }

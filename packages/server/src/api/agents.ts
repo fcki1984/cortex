@@ -3,6 +3,7 @@ import { listAgents, getAgentById, getAgentStats, insertAgent, updateAgent, dele
 import { getConfig } from '../utils/config.js';
 import { createLogger } from '../utils/logger.js';
 import { observedRoute } from './observability.js';
+import { extractRetainMissionFromConfigOverride, normalizeRetainMission } from '../v2/retain-mission.js';
 
 const log = createLogger('agents');
 
@@ -49,11 +50,12 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     }
 
     try {
+      const normalizedOverride = normalizeConfigOverrideRetainMission(body.config_override);
       const agent = insertAgent({
         id: body.id,
         name: body.name,
         description: body.description,
-        config_override: body.config_override,
+        config_override: normalizedOverride,
       });
       reply.code(201);
       return agent;
@@ -71,6 +73,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
     // Handle apiKey preservation logic
     if (body.config_override) {
+      body.config_override = normalizeConfigOverrideRetainMission(body.config_override);
       const existing = getAgentById(id);
       if (existing?.config_override) {
         const existingConfig = JSON.parse(existing.config_override);
@@ -139,10 +142,33 @@ export function registerAgentRoutes(app: FastifyInstance): void {
         baseUrl: override.embedding?.baseUrl ?? globalConfig.embedding.baseUrl,
         hasApiKey: !!(override.embedding?.apiKey ?? globalConfig.embedding.apiKey),
       },
+      sieve: {
+        retainMission: normalizeRetainMission(
+          extractRetainMissionFromConfigOverride(override) || globalConfig.sieve?.retainMission || '',
+        ),
+      },
     };
 
     return { config: merged, has_override: !!agent.config_override };
   });
+}
+
+function normalizeConfigOverrideRetainMission(configOverride: any): any {
+  if (!configOverride || typeof configOverride !== 'object') return configOverride;
+
+  const next = structuredClone(configOverride);
+  const retainMission = normalizeRetainMission(next?.sieve?.retainMission);
+
+  if (next?.sieve && typeof next.sieve === 'object' && 'retainMission' in next.sieve) {
+    if (retainMission) next.sieve.retainMission = retainMission;
+    else delete next.sieve.retainMission;
+
+    if (Object.keys(next.sieve).length === 0) {
+      delete next.sieve;
+    }
+  }
+
+  return Object.keys(next).length > 0 ? next : null;
 }
 
 // Mask apiKey fields: replace with hasApiKey boolean

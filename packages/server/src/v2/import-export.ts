@@ -88,6 +88,7 @@ export type ReviewInboxImportPreview = {
   auto_commit_record_candidates: PreviewRecordCandidate[];
   review_record_candidates: PreviewRecordCandidate[];
   review_relation_candidates: PreviewRelationCandidate[];
+  mission_filtered_count: number;
   warnings: string[];
   stats: {
     format: ImportFormat;
@@ -496,7 +497,7 @@ async function buildPreviewFromSegments(
   let carry: PreviewCarryContext = {};
 
   for (const segment of segments) {
-    const candidateDetails = await recordsV2.previewImportCandidateDetails({
+    const candidateDetailResult = await recordsV2.previewImportCandidateDetails({
       agent_id: agentId,
       content: segment.content,
       requested_kind: shouldApplyRequestedKindHint(segment.content, segment.requested_kind)
@@ -506,7 +507,7 @@ async function buildPreviewFromSegments(
       carry_context: carry,
     });
 
-    for (const detail of candidateDetails) {
+    for (const detail of candidateDetailResult.details) {
       carry = updatePreviewCarryContext(carry, detail.candidate);
       entries.push({
         detail,
@@ -547,6 +548,7 @@ export async function previewImportForReviewInbox(
     agent_id: string;
     format: 'text' | 'memory_md';
     content: string;
+    retain_mission?: string;
   },
 ): Promise<ReviewInboxImportPreview> {
   ensureAgent(input.agent_id);
@@ -557,9 +559,10 @@ export async function previewImportForReviewInbox(
 
   const entries: PreviewRecordDetailEntry[] = [];
   let carry: PreviewCarryContext = {};
+  let missionFilteredCount = 0;
 
   for (const segment of segments) {
-    const candidateDetails = await recordsV2.previewImportCandidateDetails({
+    const candidateDetailResult = await recordsV2.previewImportCandidateDetails({
       agent_id: input.agent_id,
       content: segment.content,
       requested_kind: shouldApplyRequestedKindHint(segment.content, segment.requested_kind)
@@ -567,18 +570,24 @@ export async function previewImportForReviewInbox(
         : undefined,
       source_type: 'user_confirmed',
       carry_context: carry,
+      retain_mission: input.retain_mission,
     });
+    missionFilteredCount += candidateDetailResult.mission_filtered_count;
 
-    for (const detail of candidateDetails) {
+    for (const detail of candidateDetailResult.details) {
       carry = updatePreviewCarryContext(carry, detail.candidate);
+      const preview = previewRecordFromNormalized(
+        detail.candidate,
+        entries.length,
+        detail.source_excerpt,
+        normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
+      );
+      if (detail.mission_scope === 'unclear' && !preview.warnings.includes('mission_unclear')) {
+        preview.warnings = [...preview.warnings, 'mission_unclear'];
+      }
       entries.push({
         detail,
-        preview: previewRecordFromNormalized(
-          detail.candidate,
-          entries.length,
-          detail.source_excerpt,
-          normalizeEvidence(undefined, detail.source_excerpt, 'user_confirmed'),
-        ),
+        preview,
         order: entries.length,
       });
     }
@@ -601,6 +610,7 @@ export async function previewImportForReviewInbox(
     auto_commit_record_candidates: autoCommitRecordCandidates,
     review_record_candidates: reviewRecordCandidates,
     review_relation_candidates: reviewRelationCandidates,
+    mission_filtered_count: missionFilteredCount,
     warnings: [],
     stats: {
       format: input.format,

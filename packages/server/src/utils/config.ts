@@ -120,6 +120,7 @@ const CortexConfigSchema = z.object({
     similarityThreshold: z.number().min(0.1).max(0.8).default(0.35),
     exactDupThreshold: z.number().min(0.01).max(0.2).default(0.08),
     relationExtraction: z.boolean().default(true),
+    retainMission: z.string().default(''),
     minImportance: z.number().min(0.1).max(0.9).default(0.3), // Fix #9
   }).default({}),
   lifecycle: z.object({

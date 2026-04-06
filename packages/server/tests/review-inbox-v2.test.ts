@@ -31,7 +31,13 @@ function createMockEmbedding(): EmbeddingProvider {
   };
 }
 
-async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boolean; compoundReview?: boolean; responseStyleReview?: boolean } = {}): Promise<{
+async function createApp(options: {
+  reviewOnly?: boolean;
+  weakColloquial?: boolean;
+  compoundReview?: boolean;
+  responseStyleReview?: boolean;
+  globalMission?: string;
+} = {}): Promise<{
   app: FastifyInstance;
   records: CortexRecordsV2;
   relations: CortexRelationsV2;
@@ -60,6 +66,7 @@ async function createApp(options: { reviewOnly?: boolean; weakColloquial?: boole
     config: {
       sieve: {
         extractionLogging: false,
+        retainMission: options.globalMission || '',
       },
     },
     recordsV2: records,
@@ -179,6 +186,128 @@ describe('V2 review inbox', () => {
         content: '请用中文回答',
       }),
     ]));
+  });
+
+  it('filters out-of-scope ingest durables by the global retain mission and reports mission_filtered_count', async () => {
+    const setup = await createApp({
+      globalMission: '只保留长期偏好和稳定背景，不保留短期任务',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-mission-filter',
+        user_message: '当前任务是重构 Cortex recall',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.mission_filtered_count).toBe(1);
+    expect(body.records).toHaveLength(0);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-mission-filter',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toHaveLength(0);
+  });
+
+  it('applies agent-level retain mission overrides when routing ingest candidates', async () => {
+    const setup = await createApp({
+      globalMission: '保留长期偏好、稳定背景和持续任务',
+    });
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/agents',
+      payload: {
+        id: 'review-mission-agent',
+        name: 'Review Mission Agent',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/api/v2/agents/review-mission-agent',
+      payload: {
+        config_override: {
+          sieve: {
+            retainMission: '只保留长期偏好和稳定背景，不保留短期任务',
+          },
+        },
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-mission-agent',
+        user_message: '当前任务是重构 Cortex recall',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.mission_filtered_count).toBe(1);
+    expect(body.records).toHaveLength(0);
+  });
+
+  it('applies retain mission filtering to review inbox import for text and memory_md sources', async () => {
+    const setup = await createApp({
+      globalMission: '只保留长期偏好和稳定背景，不保留短期任务',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-mission-import',
+        format: 'text',
+        content: '后续交流中文就行。当前任务是重构 Cortex recall',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.batch_id || null).toBe(null);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.mission_filtered_count).toBe(1);
+    expect(body.summary).toEqual(expect.objectContaining({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-mission-import',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+    ]);
   });
 
   it('auto-resolves pending live review items when later truth writes confirm the same stable key', async () => {

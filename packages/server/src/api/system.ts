@@ -91,6 +91,8 @@ function isSectionChanged(section: string, current: any, updated: any): boolean 
       return JSON.stringify(current?.search ?? null) !== JSON.stringify(updated?.search ?? null);
     case 'sieve':
       return JSON.stringify(current?.sieve ?? null) !== JSON.stringify(updated?.sieve ?? null);
+    case 'sieve.retainMission':
+      return (current?.sieve?.retainMission ?? '') !== (updated?.sieve?.retainMission ?? '');
     case 'lifecycle.schedule':
       return (current?.lifecycle?.schedule ?? '') !== (updated?.lifecycle?.schedule ?? '');
     case 'lifecycle':
@@ -124,7 +126,11 @@ function collectChangedConfigSections(partial: any, current: any, updated: any):
   if (partial?.embedding) sections.add('embedding');
   if (partial?.gate) sections.add('gate');
   if (partial?.search) sections.add('search');
-  if (partial?.sieve) sections.add('sieve');
+  if (partial?.sieve) {
+    const sieveKeys = Object.keys(partial.sieve);
+    if (sieveKeys.some((key) => key !== 'retainMission')) sections.add('sieve');
+    if (sieveKeys.includes('retainMission')) sections.add('sieve.retainMission');
+  }
   if (partial?.lifecycle?.schedule !== undefined) sections.add('lifecycle.schedule');
   if (partial?.lifecycle && partial?.lifecycle?.schedule === undefined) sections.add('lifecycle');
   if (partial?.storage) sections.add('storage');
@@ -142,6 +148,7 @@ function canApplySectionAtRuntime(section: string): boolean {
     case 'llm.extraction':
     case 'embedding':
     case 'lifecycle.schedule':
+    case 'sieve.retainMission':
       return true;
     default:
       return false;
@@ -153,6 +160,7 @@ function isSectionWritableFromSettings(section: string): boolean {
     case 'llm.extraction':
     case 'embedding':
     case 'lifecycle.schedule':
+    case 'sieve.retainMission':
       return true;
     default:
       return false;

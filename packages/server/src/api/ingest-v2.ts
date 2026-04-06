@@ -1,7 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { CortexApp } from '../app.js';
 import { ensureAgent } from '../db/index.js';
+import { getAgentById } from '../db/agent-queries.js';
 import { insertExtractionLog } from '../core/extraction-log.js';
+import {
+  extractRetainMissionFromConfigOverride,
+  resolveEffectiveRetainMission,
+} from '../v2/retain-mission.js';
 
 function logCategoryFromKind(kind: string): 'preference' | 'fact' | 'goal' | 'summary' {
   switch (kind) {
@@ -33,6 +38,13 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
     const startedAt = Date.now();
     const body = req.body as any;
     if (body.agent_id) ensureAgent(body.agent_id);
+    const agent = body.agent_id ? getAgentById(body.agent_id) : null;
+    const retainMission = resolveEffectiveRetainMission({
+      globalMission: cortex.config.sieve?.retainMission,
+      agentOverride: extractRetainMissionFromConfigOverride(
+        agent?.config_override ? JSON.parse(agent.config_override) : null,
+      ),
+    });
 
     const result = await cortex.recordsV2.ingest({
       user_message: body.user_message || '',
@@ -40,6 +52,7 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
       messages: body.messages,
       agent_id: body.agent_id,
       session_id: body.session_id,
+      retain_mission: retainMission,
     });
     const reviewBatch = result.review_record_candidates.length > 0
       ? cortex.reviewInboxV2.createLiveBatch({
@@ -88,6 +101,7 @@ export function registerV2IngestRoutes(app: FastifyInstance, cortex: CortexApp):
       review_source_preview: refreshedReviewBatch?.batch.source_preview || reviewBatch?.batch?.source_preview || null,
       review_summary: refreshedReviewBatch?.summary || reviewBatch?.summary || null,
       auto_committed_count: result.records.length,
+      mission_filtered_count: result.mission_filtered_count,
     };
   });
 }

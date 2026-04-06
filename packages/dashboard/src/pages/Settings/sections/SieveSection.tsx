@@ -9,11 +9,26 @@ interface SieveSectionProps {
   renderToggleField: (label: string, desc: string, path: string) => React.ReactNode;
   renderNumberField: (label: string, desc: string, path: string, min?: number, max?: number) => React.ReactNode;
   renderSlider: (label: string, desc: string, path: string, min: number, max: number, step: number) => React.ReactNode;
+  missionDraft: string;
+  missionSaving: boolean;
+  onMissionDraftChange: (value: string) => void;
+  onMissionSave: () => void;
   t: (key: string, params?: any) => string;
 }
 
 export default function SieveSection({
-  config, editing, sectionHeader, displayRow, renderToggleField, renderNumberField, renderSlider, t,
+  config,
+  editing,
+  sectionHeader,
+  displayRow,
+  renderToggleField,
+  renderNumberField,
+  renderSlider,
+  missionDraft,
+  missionSaving,
+  onMissionDraftChange,
+  onMissionSave,
+  t,
 }: SieveSectionProps) {
   return (
     <div className="card">
@@ -45,6 +60,28 @@ export default function SieveSection({
           </tbody>
         </table>
       )}
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('settings.retainMissionLabel')}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: 10 }}>
+          {t('settings.retainMissionDesc')}
+        </div>
+        <textarea
+          aria-label={t('settings.retainMissionLabel')}
+          value={missionDraft}
+          rows={4}
+          placeholder={t('settings.retainMissionPlaceholder')}
+          style={{ width: '100%', resize: 'vertical', marginBottom: 10 }}
+          onChange={e => onMissionDraftChange(e.target.value)}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            {t('settings.retainMissionHint')}
+          </div>
+          <button className="btn primary" disabled={missionSaving} onClick={onMissionSave}>
+            {missionSaving ? t('common.running') : t('settings.retainMissionSave')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

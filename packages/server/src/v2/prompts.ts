@@ -33,7 +33,21 @@ const NEGATIVE_EXAMPLES = [
   '- "方案简单些吧" -> session_note',
 ].join('\n');
 
-export const V2_EXTRACTION_SYSTEM_PROMPT = `You are the extraction stage of a structured memory system.
+function missionGuidance(retainMission?: string): string {
+  const normalized = typeof retainMission === 'string' ? retainMission.trim() : '';
+  if (!normalized) return '';
+
+  return `
+
+Retain mission:
+- Current mission: "${normalized}"
+- Only propose durable records that look reusable under this mission.
+- If a candidate is probably outside this mission, prefer omitting it instead of stretching it into durable truth.
+- When the mission is unclear for a durable-looking candidate, keep the extraction conservative so downstream review can arbitrate it.`;
+}
+
+export function buildV2ExtractionSystemPrompt(retainMission?: string): string {
+  return `You are the extraction stage of a structured memory system.
 
 Your job is to convert a conversation into 4 stable record kinds:
 - profile_rule: durable user/agent rules, preferences, constraints, persona
@@ -68,6 +82,7 @@ ${REFERENCE_EXAMPLES}
 - Weak / tentative examples that must stay session_note:
 ${NEGATIVE_EXAMPLES}
 - Do not convert vague implementation chatter or tentative plans into durable records.
+${missionGuidance(retainMission)}
 
 Output JSON only:
 {
@@ -107,3 +122,6 @@ Output JSON only:
 
 If nothing qualifies:
 {"records": [], "nothing_extracted": true}`;
+}
+
+export const V2_EXTRACTION_SYSTEM_PROMPT = buildV2ExtractionSystemPrompt();

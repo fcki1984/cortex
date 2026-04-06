@@ -105,6 +105,14 @@ export class CortexApp {
       reloaded.add('lifecycle.schedule');
     }
 
+    if (runtimeSet.has('sieve.retainMission')) {
+      nextConfig.sieve = {
+        ...nextConfig.sieve,
+        retainMission: newConfig.sieve.retainMission,
+      };
+      reloaded.add('sieve.retainMission');
+    }
+
     this.config = nextConfig;
     return Array.from(reloaded);
   }

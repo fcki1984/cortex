@@ -258,6 +258,7 @@ describe('API Integration', () => {
       expect(body.gate.relevanceGate.inspectTopK).toBe(4);
       expect(body.gate.relevanceGate.minSemanticScore).toBe(0.66);
       expect(body.gate.relevanceGate.minFusedScoreNoOverlap).toBe(0.22);
+      expect(body.sieve.retainMission).toBe('');
     });
   });
 
@@ -299,6 +300,35 @@ describe('API Integration', () => {
       expect(cortex.llmExtraction).not.toBe(previousExtraction);
       expect(cortex.embeddingProvider).not.toBe(previousEmbedding);
       expect(cortex.recordsV2).not.toBe(previousRecordsV2);
+    });
+
+    it('should persist and live-apply the global retain mission without opening the rest of sieve settings', async () => {
+      const mission = '保留长期偏好、稳定背景和持续任务';
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v2/config',
+        payload: {
+          sieve: {
+            retainMission: mission,
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.ok).toBe(true);
+      expect(body.runtime_applied).toBe(true);
+      expect(body.applied_sections).toContain('sieve.retainMission');
+      expect(body.config.sieve.retainMission).toBe(mission);
+      expect(cortex.config.sieve.retainMission).toBe(mission);
+
+      const verify = await app.inject({
+        method: 'GET',
+        url: '/api/v2/config',
+      });
+      expect(verify.statusCode).toBe(200);
+      expect(JSON.parse(verify.payload).sieve.retainMission).toBe(mission);
     });
 
     it('should reject writes to deployment-only sections', async () => {
@@ -437,6 +467,87 @@ describe('API Integration', () => {
       expect(body.applied_sections).toEqual(['llm.extraction']);
       expect(body.restart_required_sections).toEqual([]);
       expect(body.config.llm.extraction.timeoutMs).toBe(nextExtractionTimeout);
+    });
+  });
+
+  describe('GET /api/v2/agents/:id/config', () => {
+    it('should merge agent-level retain mission overrides over the global default and fall back when cleared', async () => {
+      const globalMission = '保留长期偏好、稳定背景和持续任务';
+      const agentMission = '只保留长期偏好和稳定背景，不保留短期任务';
+
+      const setGlobal = await app.inject({
+        method: 'PATCH',
+        url: '/api/v2/config',
+        payload: {
+          sieve: {
+            retainMission: globalMission,
+          },
+        },
+      });
+      expect(setGlobal.statusCode).toBe(200);
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/v2/agents',
+        payload: {
+          id: 'mission-agent',
+          name: 'Mission Agent',
+        },
+      });
+      expect(created.statusCode).toBe(201);
+
+      const override = await app.inject({
+        method: 'PATCH',
+        url: '/api/v2/agents/mission-agent',
+        payload: {
+          config_override: {
+            sieve: {
+              retainMission: agentMission,
+            },
+          },
+        },
+      });
+      expect(override.statusCode).toBe(200);
+
+      const merged = await app.inject({
+        method: 'GET',
+        url: '/api/v2/agents/mission-agent/config',
+      });
+      expect(merged.statusCode).toBe(200);
+      expect(JSON.parse(merged.payload)).toEqual(expect.objectContaining({
+        config: expect.objectContaining({
+          sieve: expect.objectContaining({
+            retainMission: agentMission,
+          }),
+        }),
+        has_override: true,
+      }));
+
+      const cleared = await app.inject({
+        method: 'PATCH',
+        url: '/api/v2/agents/mission-agent',
+        payload: {
+          config_override: {
+            sieve: {
+              retainMission: '',
+            },
+          },
+        },
+      });
+      expect(cleared.statusCode).toBe(200);
+
+      const mergedAfterClear = await app.inject({
+        method: 'GET',
+        url: '/api/v2/agents/mission-agent/config',
+      });
+      expect(mergedAfterClear.statusCode).toBe(200);
+      expect(JSON.parse(mergedAfterClear.payload)).toEqual(expect.objectContaining({
+        config: expect.objectContaining({
+          sieve: expect.objectContaining({
+            retainMission: globalMission,
+          }),
+        }),
+      }));
     });
   });
 
