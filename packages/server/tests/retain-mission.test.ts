@@ -46,4 +46,36 @@ describe('retain mission routing', () => {
 
     expect(resolveRetainMissionScope('只保留真正长期有复用价值的内容', candidate)).toBe('unclear');
   });
+
+  it('distinguishes stable profile-rule keys inside the same category', () => {
+    const language = normalizeManualInput('mission-language-only', {
+      content: '请用中文回答',
+      source_type: 'user_explicit',
+    });
+    const length = normalizeManualInput('mission-length-excluded', {
+      content: '请把回答控制在三句话内',
+      source_type: 'user_explicit',
+    });
+
+    const mission = '只保留语言偏好，不保留回答长度';
+
+    expect(resolveRetainMissionScope(mission, language)).toBe('in_scope');
+    expect(resolveRetainMissionScope(mission, length)).toBe('out_of_scope');
+  });
+
+  it('distinguishes stable fact-slot keys inside the same category', () => {
+    const organization = normalizeManualInput('mission-organization-kept', {
+      content: '我在 OpenAI 工作',
+      source_type: 'user_explicit',
+    });
+    const location = normalizeManualInput('mission-location-filtered', {
+      content: '我住东京',
+      source_type: 'user_explicit',
+    });
+
+    const mission = '只保留工作背景和语言偏好';
+
+    expect(resolveRetainMissionScope(mission, organization)).toBe('in_scope');
+    expect(resolveRetainMissionScope(mission, location)).toBe('out_of_scope');
+  });
 });

@@ -310,6 +310,122 @@ describe('V2 review inbox', () => {
     ]);
   });
 
+  it('routes ingest candidates by retain mission at stable-key granularity', async () => {
+    const setup = await createApp({
+      globalMission: '只保留语言偏好和工作背景',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-mission-keyed-ingest',
+        user_message: '后续交流中文就行。我住东京。我在 OpenAI 工作。请把回答控制在三句话内',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.mission_filtered_count).toBe(2);
+    expect(body.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+      }),
+    ]));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-mission-keyed-ingest',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'organization',
+        content: '我在 OpenAI 工作',
+      }),
+    ]));
+    expect(JSON.parse(records.payload).items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute_key: 'location',
+      }),
+      expect.objectContaining({
+        attribute_key: 'response_length',
+      }),
+    ]));
+  });
+
+  it('routes review inbox import candidates by retain mission at stable-key granularity', async () => {
+    const setup = await createApp({
+      globalMission: '只保留语言偏好和工作背景',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-mission-keyed-import',
+        format: 'text',
+        content: '后续交流中文就行。我住东京。我在 OpenAI 工作。请把回答控制在三句话内',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.batch_id || null).toBe(null);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.mission_filtered_count).toBe(2);
+    expect(body.summary).toEqual(expect.objectContaining({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-mission-keyed-import',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'organization',
+        content: '我在 OpenAI 工作',
+      }),
+    ]));
+    expect(JSON.parse(records.payload).items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute_key: 'location',
+      }),
+      expect.objectContaining({
+        attribute_key: 'response_length',
+      }),
+    ]));
+  });
+
   it('auto-resolves pending live review items when later truth writes confirm the same stable key', async () => {
     const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
