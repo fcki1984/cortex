@@ -189,6 +189,7 @@ async function runRound(round) {
   const reviewImportAgentId = `${probeAgentId}-review`;
   const futureLanguageAgentId = `${probeAgentId}-future-language`;
   const englishColloquialProfileAgentId = `${probeAgentId}-profile-en`;
+  const englishColloquialExpansionAgentId = `${probeAgentId}-profile-en-extended`;
   const japaneseLanguageAgentId = `${probeAgentId}-japanese-language`;
   const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
   const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
@@ -224,6 +225,7 @@ async function runRound(round) {
     reviewImportAgentId,
     futureLanguageAgentId,
     englishColloquialProfileAgentId,
+    englishColloquialExpansionAgentId,
     japaneseLanguageAgentId,
     reviewStyleAutoAgentId,
     reviewStyleReviewAgentId,
@@ -588,6 +590,53 @@ async function runRound(round) {
         'Please keep answers within three sentences',
       ]),
       'english colloquial profile rules did not persist the canonical English truths',
+    );
+
+    const extendedEnglishLengthIngest = await request('auto-commit extended english colloquial response length', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Keep answers under three sentences',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(extendedEnglishLengthIngest.response.status === 201, `POST /api/v2/ingest extended english colloquial response length returned ${extendedEnglishLengthIngest.response.status}`);
+    assert(extendedEnglishLengthIngest.json?.auto_committed_count === 1, 'extended english colloquial response length did not auto-commit exactly one item');
+    assert(extendedEnglishLengthIngest.json?.review_pending_count === 0, 'extended english colloquial response length should not leave review work behind');
+
+    const extendedEnglishComplexityIngest = await request('auto-commit extended english colloquial solution complexity', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Use a simple approach',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(extendedEnglishComplexityIngest.response.status === 201, `POST /api/v2/ingest extended english colloquial solution complexity returned ${extendedEnglishComplexityIngest.response.status}`);
+    assert(extendedEnglishComplexityIngest.json?.auto_committed_count === 1, 'extended english colloquial solution complexity did not auto-commit exactly one item');
+    assert(extendedEnglishComplexityIngest.json?.review_pending_count === 0, 'extended english colloquial solution complexity should not leave review work behind');
+
+    const extendedEnglishOrganizationIngest = await request('auto-commit extended english colloquial organization fact', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: "I'm working at OpenAI",
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(extendedEnglishOrganizationIngest.response.status === 201, `POST /api/v2/ingest extended english colloquial organization fact returned ${extendedEnglishOrganizationIngest.response.status}`);
+    assert(extendedEnglishOrganizationIngest.json?.auto_committed_count === 1, 'extended english colloquial organization fact did not auto-commit exactly one item');
+    assert(extendedEnglishOrganizationIngest.json?.review_pending_count === 0, 'extended english colloquial organization fact should not leave review work behind');
+
+    const englishColloquialExpansionRecords = await request('list extended english colloquial durable records', 'GET', `/api/v2/records${query({
+      agent_id: englishColloquialExpansionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishColloquialExpansionRecords.response.status === 200, `GET /api/v2/records extended english colloquial durables returned ${englishColloquialExpansionRecords.response.status}`);
+    assert(
+      JSON.stringify((englishColloquialExpansionRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        'I work at OpenAI',
+        'Please avoid complex solutions',
+        'Please keep answers within three sentences',
+      ]),
+      'extended english colloquial durable inputs did not persist the canonical truths',
     );
 
     const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {

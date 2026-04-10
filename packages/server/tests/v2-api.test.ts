@@ -2525,6 +2525,129 @@ describe('API V2 Integration', () => {
         content: 'Please avoid complex solutions',
       }),
     ]);
+
+    const extendedLengthPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-colloquial-length-preview-2',
+        format: 'text',
+        content: 'Keep answers under three sentences',
+      },
+    });
+
+    expect(extendedLengthPreview.statusCode).toBe(200);
+    const extendedLengthPreviewBody = JSON.parse(extendedLengthPreview.payload);
+    expect(extendedLengthPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      }),
+    ]);
+
+    const extendedLengthIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Keep answers under three sentences',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-colloquial-length-ingest-2',
+      },
+    });
+
+    expect(extendedLengthIngest.statusCode).toBe(201);
+    const extendedLengthIngestBody = JSON.parse(extendedLengthIngest.payload);
+    expect(extendedLengthIngestBody.auto_committed_count).toBe(1);
+    expect(extendedLengthIngestBody.review_pending_count).toBe(0);
+    expect(extendedLengthIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please keep answers within three sentences',
+      }),
+    ]);
+
+    const extendedComplexityPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-colloquial-complexity-preview-2',
+        format: 'text',
+        content: 'Use a simple approach',
+      },
+    });
+
+    expect(extendedComplexityPreview.statusCode).toBe(200);
+    const extendedComplexityPreviewBody = JSON.parse(extendedComplexityPreview.payload);
+    expect(extendedComplexityPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
+      }),
+    ]);
+
+    const extendedComplexityIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Use a simple approach',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-colloquial-complexity-ingest-2',
+      },
+    });
+
+    expect(extendedComplexityIngest.statusCode).toBe(201);
+    const extendedComplexityIngestBody = JSON.parse(extendedComplexityIngest.payload);
+    expect(extendedComplexityIngestBody.auto_committed_count).toBe(1);
+    expect(extendedComplexityIngestBody.review_pending_count).toBe(0);
+    expect(extendedComplexityIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please avoid complex solutions',
+      }),
+    ]);
+
+    const organizationPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-colloquial-organization-preview',
+        format: 'text',
+        content: "I'm working at OpenAI",
+      },
+    });
+
+    expect(organizationPreview.statusCode).toBe(200);
+    const organizationPreviewBody = JSON.parse(organizationPreview.payload);
+    expect(organizationPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'fact_slot',
+        attribute_key: 'organization',
+        content: 'I work at OpenAI',
+      }),
+    ]);
+
+    const organizationIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: "I'm working at OpenAI",
+        assistant_message: 'Understood',
+        agent_id: 'api-english-colloquial-organization-ingest',
+      },
+    });
+
+    expect(organizationIngest.statusCode).toBe(201);
+    const organizationIngestBody = JSON.parse(organizationIngest.payload);
+    expect(organizationIngestBody.auto_committed_count).toBe(1);
+    expect(organizationIngestBody.review_pending_count).toBe(0);
+    expect(organizationIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I work at OpenAI',
+      }),
+    ]);
   });
 
   it('keeps short crisp colloquial response-style inputs aligned across preview and ingest', async () => {

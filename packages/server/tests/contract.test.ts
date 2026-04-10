@@ -134,6 +134,12 @@ describe('V2 shared atomic contract', () => {
         content: 'Please keep answers within three sentences',
       },
       {
+        input: 'Keep answers under three sentences',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      },
+      {
         input: '方案简单点',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
@@ -141,6 +147,18 @@ describe('V2 shared atomic contract', () => {
       },
       {
         input: 'Keep it simple',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
+      },
+      {
+        input: 'Use a simple approach',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
+      },
+      {
+        input: "Don't make it too complex",
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
         content: 'Please avoid complex solutions',
@@ -861,16 +879,29 @@ describe('V2 shared atomic contract', () => {
   });
 
   it('keeps colloquial explicit fact follow-ups relation-safe after canonicalization', () => {
-    const normalized = normalizeManualInput('contract-colloquial-fact', {
-      content: '目前任职于 OpenAI',
-    });
+    const samples = [
+      {
+        input: '目前任职于 OpenAI',
+        content: '我在 OpenAI 工作',
+      },
+      {
+        input: "I'm working at OpenAI",
+        content: 'I work at OpenAI',
+      },
+    ];
 
-    expect(normalized.written_kind).toBe('fact_slot');
-    expect(normalized.candidate.kind).toBe('fact_slot');
-    expect(normalized.candidate.attribute_key).toBe('organization');
-    expect(normalized.candidate.value_text).toBe('我在 OpenAI 工作');
-    expect(relationPredicateForFactAttribute(normalized.candidate.attribute_key)).toBe('works_at');
-    expect(extractFactRelationObjectValue(normalized.candidate.attribute_key, normalized.candidate.value_text)).toBe('OpenAI');
+    for (const sample of samples) {
+      const normalized = normalizeManualInput('contract-colloquial-fact', {
+        content: sample.input,
+      });
+
+      expect(normalized.written_kind).toBe('fact_slot');
+      expect(normalized.candidate.kind).toBe('fact_slot');
+      expect(normalized.candidate.attribute_key).toBe('organization');
+      expect(normalized.candidate.value_text).toBe(sample.content);
+      expect(relationPredicateForFactAttribute(normalized.candidate.attribute_key)).toBe('works_at');
+      expect(extractFactRelationObjectValue(normalized.candidate.attribute_key, normalized.candidate.value_text)).toBe('OpenAI');
+    }
   });
 
   it('extends short proposal selection to keep deterministic solution-complexity follow-ups', async () => {

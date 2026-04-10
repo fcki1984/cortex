@@ -118,6 +118,13 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain("user_message: 'Three sentences max'");
     expect(smoke).toContain("user_message: 'Keep it simple'");
     expect(smoke).toContain("(englishColloquialProfileRecords.json?.items || []).map((item) => item.content).sort()");
+    expect(smoke).toContain('auto-commit extended english colloquial response length');
+    expect(smoke).toContain("user_message: 'Keep answers under three sentences'");
+    expect(smoke).toContain('auto-commit extended english colloquial solution complexity');
+    expect(smoke).toContain("user_message: 'Use a simple approach'");
+    expect(smoke).toContain('auto-commit extended english colloquial organization fact');
+    expect(smoke).toContain('user_message: "I\'m working at OpenAI"');
+    expect(smoke).toContain("(englishColloquialExpansionRecords.json?.items || []).map((item) => item.content).sort()");
     expect(smoke).toContain('auto-commit explicit japanese language preference');
     expect(smoke).toContain("user_message: '日本語で答えて'");
     expect(smoke).toContain("japaneseLanguageIngest.json?.auto_committed_count === 1");

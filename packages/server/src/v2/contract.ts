@@ -276,10 +276,17 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     disposition: 'auto_commit',
     strong_inputs: [
       'Three sentences max',
+      'Keep answers under three sentences',
     ],
     weak_inputs: [],
-    matches_conversational: (content: string) => /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content),
-    matches_attribute: (content: string) => /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content),
+    matches_conversational: (content: string) => (
+      /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content)
+      || /keep\s+(?:answers?|replies?|responses?)\s+(?:under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+    ),
+    matches_attribute: (content: string) => (
+      /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content)
+      || /keep\s+(?:answers?|replies?|responses?)\s+(?:under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+    ),
   },
   {
     attribute_key: 'solution_complexity',
@@ -331,10 +338,16 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     disposition: 'auto_commit',
     strong_inputs: [
       'Keep it simple',
+      'Use a simple approach',
+      "Don't make it too complex",
     ],
     weak_inputs: [],
-    matches_conversational: (content: string) => /(?:keep it simple|avoid complex solutions?)/i.test(content),
-    matches_attribute: (content: string) => /(?:keep it simple|avoid complex solutions?)/i.test(content),
+    matches_conversational: (content: string) => (
+      /(?:keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
+    ),
+    matches_attribute: (content: string) => (
+      /(?:keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
+    ),
   },
   {
     attribute_key: 'response_style',
@@ -471,6 +484,15 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
   {
     input: '目前任职于 OpenAI',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
+    input: "I'm working at OpenAI",
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
     disposition: 'auto_commit',
@@ -685,6 +707,15 @@ function findProfileRuleAliasSpec(attributeKey: ConversationalProfileRuleMatch['
   return PROFILE_RULE_ALIAS_SPECS.find(spec => spec.attribute_key === attributeKey) ?? null;
 }
 
+function matchesAnyProfileRuleAliasAttribute(
+  attributeKey: ConversationalProfileRuleMatch['attribute_key'],
+  content: string,
+): boolean {
+  return PROFILE_RULE_ALIAS_SPECS.some(
+    spec => spec.attribute_key === attributeKey && spec.matches_attribute(content),
+  );
+}
+
 function matchProfileRuleAliasSpec(content: string): InternalProfileRuleAliasSpec | null {
   if (isWeakConversationalProfileRule(content)) return null;
 
@@ -720,7 +751,7 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
   }
 
   if (attributeKey === 'solution_complexity') {
-    if (findProfileRuleAliasSpec('solution_complexity')?.matches_attribute(content)) {
+    if (matchesAnyProfileRuleAliasAttribute('solution_complexity', content)) {
       return /[A-Za-z]/.test(content) ? 'Please avoid complex solutions' : '不要复杂方案';
     }
   }
@@ -1212,16 +1243,16 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
   if (isWeakConversationalProfileRule(content)) return null;
 
   if (/我叫|我的名字|my name is|call me/i.test(content)) return 'display_name';
-  if (findProfileRuleAliasSpec('language_preference')?.matches_attribute(content)) {
+  if (matchesAnyProfileRuleAliasAttribute('language_preference', content)) {
     return 'language_preference';
   }
   if (matchesResponseStyleAttribute(content) && ownerScope === 'user') {
     return 'response_style';
   }
-  if (findProfileRuleAliasSpec('response_length')?.matches_attribute(content)) {
+  if (matchesAnyProfileRuleAliasAttribute('response_length', content)) {
     return 'response_length';
   }
-  if (findProfileRuleAliasSpec('solution_complexity')?.matches_attribute(content)) {
+  if (matchesAnyProfileRuleAliasAttribute('solution_complexity', content)) {
     return 'solution_complexity';
   }
   if (/(低风险|高风险|risk tolerance|risk profile)/i.test(content)) return 'risk_tolerance';
@@ -1231,7 +1262,7 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
 function matchFactSlotAttribute(content: string): string | null {
   if (matchesConversationalLocationFact(content)) return 'location';
   if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
-  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|任职于|就职于|供职于|i work (?:at|for|in)|works? at/i.test(content)) return 'organization';
+  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|任职于|就职于|供职于|i work (?:at|for|in)|works? at|i(?:'m| am)(?: currently)? working (?:at|for|in)/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
     return 'occupation';
   }

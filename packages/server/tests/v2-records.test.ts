@@ -354,6 +354,38 @@ describe('CortexRecordsV2', () => {
     expect(complexity.record.content).toBe('Please avoid complex solutions');
   });
 
+  it('stores next-wave bounded English durable writes using canonical content', async () => {
+    const length = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-2',
+      kind: 'profile_rule',
+      content: 'Keep answers under three sentences',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-2',
+      kind: 'profile_rule',
+      content: 'Use a simple approach',
+    });
+
+    const organization = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-2',
+      kind: 'fact_slot',
+      content: "I'm working at OpenAI",
+    });
+
+    expect(length.record.kind).toBe('profile_rule');
+    expect(length.record.attribute_key).toBe('response_length');
+    expect(length.record.content).toBe('Please keep answers within three sentences');
+
+    expect(complexity.record.kind).toBe('profile_rule');
+    expect(complexity.record.attribute_key).toBe('solution_complexity');
+    expect(complexity.record.content).toBe('Please avoid complex solutions');
+
+    expect(organization.record.kind).toBe('fact_slot');
+    expect(organization.record.attribute_key).toBe('organization');
+    expect(organization.record.content).toBe('I work at OpenAI');
+  });
+
   it('stores additional constraint-style colloquial profile-rule writes using canonical durable content', async () => {
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent-2',
