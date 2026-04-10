@@ -311,6 +311,34 @@ describe('V2 shared atomic contract', () => {
         state_key: 'migration_status',
         content: '当前任务是迁移 Cortex',
       },
+      {
+        input: 'Current task is migrating Cortex',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      },
+      {
+        input: 'Current task is deploying Cortex',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      },
+      {
+        input: 'Current task is refactoring Cortex recall',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      },
+      {
+        input: 'Current task is rewriting Cortex recall',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      },
     ] as const;
 
     for (const sample of samples) {
@@ -363,6 +391,30 @@ describe('V2 shared atomic contract', () => {
         requested_kind: 'task_state',
         written_kind: 'task_state',
         state_key: 'migration_status',
+      }),
+      expect.objectContaining({
+        input: 'Current task is migrating Cortex',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'migration_status',
+      }),
+      expect.objectContaining({
+        input: 'Current task is deploying Cortex',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'deployment_status',
+      }),
+      expect.objectContaining({
+        input: 'Current task is refactoring Cortex recall',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'refactor_status',
+      }),
+      expect.objectContaining({
+        input: 'Current task is rewriting Cortex recall',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'refactor_status',
       }),
     ]));
   });

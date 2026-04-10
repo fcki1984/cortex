@@ -205,6 +205,10 @@ async function runRound(round) {
   const taskSelectionAgentId = `${probeAgentId}-task-selection`;
   const deploymentTaskAgentId = `${probeAgentId}-task-deployment`;
   const migrationTaskAgentId = `${probeAgentId}-task-migration`;
+  const englishDeploymentTaskAgentId = `${probeAgentId}-task-deployment-en`;
+  const englishMigrationTaskAgentId = `${probeAgentId}-task-migration-en`;
+  const englishRefactorTaskAgentId = `${probeAgentId}-task-refactor-en`;
+  const englishRewriteTaskAgentId = `${probeAgentId}-task-rewrite-en`;
   const taskRewriteAgentId = `${probeAgentId}-task-rewrite`;
   const organizationRewriteAgentId = `${probeAgentId}-organization-rewrite`;
   const reviewFollowupMismatchAgentId = `${probeAgentId}-review-followup-mismatch`;
@@ -235,6 +239,10 @@ async function runRound(round) {
     taskSelectionAgentId,
     deploymentTaskAgentId,
     migrationTaskAgentId,
+    englishDeploymentTaskAgentId,
+    englishMigrationTaskAgentId,
+    englishRefactorTaskAgentId,
+    englishRewriteTaskAgentId,
     taskRewriteAgentId,
     organizationRewriteAgentId,
     reviewFollowupMismatchAgentId,
@@ -1231,6 +1239,86 @@ async function runRound(round) {
     assert(migrationTaskListed.response.status === 200, `GET /api/v2/records migration task returned ${migrationTaskListed.response.status}`);
     assert((migrationTaskListed.json?.items || []).length === 1, 'migration task should leave exactly one active record');
     assert(migrationTaskListed.json?.items?.[0]?.content === '当前任务是迁移 Cortex', 'migration task did not leave the canonical migration task active');
+
+    const englishDeploymentTaskIngest = await request('auto-commit english deployment task directly', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: englishDeploymentTaskAgentId,
+        user_message: 'Current task is deploying Cortex',
+        assistant_message: 'Understood',
+      },
+    });
+    assert(englishDeploymentTaskIngest.response.status === 201, `POST /api/v2/ingest english deployment task returned ${englishDeploymentTaskIngest.response.status}`);
+    assert(englishDeploymentTaskIngest.json?.auto_committed_count === 1, 'english deployment task did not auto-commit exactly one item');
+    assert(englishDeploymentTaskIngest.json?.review_pending_count === 0, 'english deployment task left pending items behind');
+    assert(englishDeploymentTaskIngest.json?.records?.[0]?.content === '当前任务是部署 Cortex', 'english deployment task did not produce the canonical deployment task');
+
+    const englishDeploymentTaskListed = await request('list direct english deployment task truth', 'GET', `/api/v2/records${query({
+      agent_id: englishDeploymentTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishDeploymentTaskListed.response.status === 200, `GET /api/v2/records english deployment task returned ${englishDeploymentTaskListed.response.status}`);
+    assert((englishDeploymentTaskListed.json?.items || []).length === 1, 'english deployment task should leave exactly one active record');
+    assert(englishDeploymentTaskListed.json?.items?.[0]?.content === '当前任务是部署 Cortex', 'english deployment task did not leave the canonical deployment task active');
+
+    const englishMigrationTaskIngest = await request('auto-commit english migration task directly', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: englishMigrationTaskAgentId,
+        user_message: 'Current task is migrating Cortex',
+        assistant_message: 'Understood',
+      },
+    });
+    assert(englishMigrationTaskIngest.response.status === 201, `POST /api/v2/ingest english migration task returned ${englishMigrationTaskIngest.response.status}`);
+    assert(englishMigrationTaskIngest.json?.auto_committed_count === 1, 'english migration task did not auto-commit exactly one item');
+    assert(englishMigrationTaskIngest.json?.review_pending_count === 0, 'english migration task left pending items behind');
+    assert(englishMigrationTaskIngest.json?.records?.[0]?.content === '当前任务是迁移 Cortex', 'english migration task did not produce the canonical migration task');
+
+    const englishMigrationTaskListed = await request('list direct english migration task truth', 'GET', `/api/v2/records${query({
+      agent_id: englishMigrationTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishMigrationTaskListed.response.status === 200, `GET /api/v2/records english migration task returned ${englishMigrationTaskListed.response.status}`);
+    assert((englishMigrationTaskListed.json?.items || []).length === 1, 'english migration task should leave exactly one active record');
+    assert(englishMigrationTaskListed.json?.items?.[0]?.content === '当前任务是迁移 Cortex', 'english migration task did not leave the canonical migration task active');
+
+    const englishRefactorTaskIngest = await request('auto-commit english refactor task directly', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: englishRefactorTaskAgentId,
+        user_message: 'Current task is refactoring Cortex recall',
+        assistant_message: 'Understood',
+      },
+    });
+    assert(englishRefactorTaskIngest.response.status === 201, `POST /api/v2/ingest english refactor task returned ${englishRefactorTaskIngest.response.status}`);
+    assert(englishRefactorTaskIngest.json?.auto_committed_count === 1, 'english refactor task did not auto-commit exactly one item');
+    assert(englishRefactorTaskIngest.json?.review_pending_count === 0, 'english refactor task left pending items behind');
+    assert(englishRefactorTaskIngest.json?.records?.[0]?.content === '当前任务是重构 Cortex recall', 'english refactor task did not produce the canonical refactor task');
+
+    const englishRefactorTaskListed = await request('list direct english refactor task truth', 'GET', `/api/v2/records${query({
+      agent_id: englishRefactorTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishRefactorTaskListed.response.status === 200, `GET /api/v2/records english refactor task returned ${englishRefactorTaskListed.response.status}`);
+    assert((englishRefactorTaskListed.json?.items || []).length === 1, 'english refactor task should leave exactly one active record');
+    assert(englishRefactorTaskListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall', 'english refactor task did not leave the canonical refactor task active');
+
+    const englishRewriteTaskIngest = await request('auto-commit english rewrite task directly', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: englishRewriteTaskAgentId,
+        user_message: 'Current task is rewriting Cortex recall',
+        assistant_message: 'Understood',
+      },
+    });
+    assert(englishRewriteTaskIngest.response.status === 201, `POST /api/v2/ingest english rewrite task returned ${englishRewriteTaskIngest.response.status}`);
+    assert(englishRewriteTaskIngest.json?.auto_committed_count === 1, 'english rewrite task did not auto-commit exactly one item');
+    assert(englishRewriteTaskIngest.json?.review_pending_count === 0, 'english rewrite task left pending items behind');
+    assert(englishRewriteTaskIngest.json?.records?.[0]?.content === '当前任务是重构 Cortex recall', 'english rewrite task did not produce the canonical rewrite task');
+
+    const englishRewriteTaskListed = await request('list direct english rewrite task truth', 'GET', `/api/v2/records${query({
+      agent_id: englishRewriteTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishRewriteTaskListed.response.status === 200, `GET /api/v2/records english rewrite task returned ${englishRewriteTaskListed.response.status}`);
+    assert((englishRewriteTaskListed.json?.items || []).length === 1, 'english rewrite task should leave exactly one active record');
+    assert(englishRewriteTaskListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall', 'english rewrite task did not leave the canonical rewrite task active');
 
     const taskRewriteSeed = await request('seed active task for rewrite', 'POST', '/api/v2/records', {
       body: {

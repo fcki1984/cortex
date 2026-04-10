@@ -740,6 +740,236 @@ describe('API V2 Integration', () => {
     ]);
   });
 
+  it('keeps explicit English cortex workflow task statements aligned across preview and /api/v2/ingest', async () => {
+    const migrationPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-task-migration-preview',
+        format: 'text',
+        content: 'Current task is migrating Cortex',
+      },
+    });
+
+    expect(migrationPreview.statusCode).toBe(200);
+    const migrationPreviewBody = JSON.parse(migrationPreview.payload);
+    expect(migrationPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        requested_kind: 'task_state',
+        normalized_kind: 'task_state',
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+
+    const migrationIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Current task is migrating Cortex',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-task-migration-ingest',
+      },
+    });
+
+    expect(migrationIngested.statusCode).toBe(201);
+    const migrationBody = JSON.parse(migrationIngested.payload);
+    expect(migrationBody.auto_committed_count).toBe(1);
+    expect(migrationBody.review_pending_count).toBe(0);
+    expect(migrationBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-english-task-migration-ingest',
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+
+    const deploymentPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-task-deployment-preview',
+        format: 'text',
+        content: 'Current task is deploying Cortex',
+      },
+    });
+
+    expect(deploymentPreview.statusCode).toBe(200);
+    const deploymentPreviewBody = JSON.parse(deploymentPreview.payload);
+    expect(deploymentPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        requested_kind: 'task_state',
+        normalized_kind: 'task_state',
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
+
+    const deploymentIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Current task is deploying Cortex',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-task-deployment-ingest',
+      },
+    });
+
+    expect(deploymentIngested.statusCode).toBe(201);
+    const deploymentBody = JSON.parse(deploymentIngested.payload);
+    expect(deploymentBody.auto_committed_count).toBe(1);
+    expect(deploymentBody.review_pending_count).toBe(0);
+    expect(deploymentBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
+
+    const deploymentListed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-english-task-deployment-ingest',
+    });
+    expect(deploymentListed.statusCode).toBe(200);
+    expect(JSON.parse(deploymentListed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
+
+    const refactorPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-task-refactor-preview',
+        format: 'text',
+        content: 'Current task is refactoring Cortex recall',
+      },
+    });
+
+    expect(refactorPreview.statusCode).toBe(200);
+    const refactorPreviewBody = JSON.parse(refactorPreview.payload);
+    expect(refactorPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        requested_kind: 'task_state',
+        normalized_kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const refactorIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Current task is refactoring Cortex recall',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-task-refactor-ingest',
+      },
+    });
+
+    expect(refactorIngested.statusCode).toBe(201);
+    const refactorBody = JSON.parse(refactorIngested.payload);
+    expect(refactorBody.auto_committed_count).toBe(1);
+    expect(refactorBody.review_pending_count).toBe(0);
+    expect(refactorBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const refactorListed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-english-task-refactor-ingest',
+    });
+    expect(refactorListed.statusCode).toBe(200);
+    expect(JSON.parse(refactorListed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const rewritePreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-task-rewrite-preview',
+        format: 'text',
+        content: 'Current task is rewriting Cortex recall',
+      },
+    });
+
+    expect(rewritePreview.statusCode).toBe(200);
+    const rewritePreviewBody = JSON.parse(rewritePreview.payload);
+    expect(rewritePreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        requested_kind: 'task_state',
+        normalized_kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const rewriteIngested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Current task is rewriting Cortex recall',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-task-rewrite-ingest',
+      },
+    });
+
+    expect(rewriteIngested.statusCode).toBe(201);
+    const rewriteBody = JSON.parse(rewriteIngested.payload);
+    expect(rewriteBody.auto_committed_count).toBe(1);
+    expect(rewriteBody.review_pending_count).toBe(0);
+    expect(rewriteBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        source_type: 'user_explicit',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const rewriteListed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-english-task-rewrite-ingest',
+    });
+    expect(rewriteListed.statusCode).toBe(200);
+    expect(JSON.parse(rewriteListed.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
   it('auto-commits explicit japanese language preferences as durable profile rules', async () => {
     const preview = await app.inject({
       method: 'POST',

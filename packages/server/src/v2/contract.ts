@@ -89,6 +89,10 @@ function matchesCanonicalResponseStyle(content: string): boolean {
   );
 }
 
+const CORTEX_REFACTOR_KEYWORD_RE = /(?:重构|refactor(?:ing)?|rewrit(?:e|ing))/i;
+const CORTEX_DEPLOYMENT_KEYWORD_RE = /(?:部署|deploy(?:ment|ing)?)/i;
+const CORTEX_MIGRATION_KEYWORD_RE = /(?:迁移|migrat(?:e|ion|ing))/i;
+
 function matchesExplicitCanonicalResponseStyle(content: string): boolean {
   return (
     matchesAnchoredConversationalResponseStyle(content, '干脆|利索|利落') ||
@@ -130,10 +134,10 @@ export function matchesColloquialCortexWorkflowTask(
   stateKey: 'deployment_status' | 'migration_status',
 ): boolean {
   if (stateKey === 'deployment_status') {
-    return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:部署|deploy(?:ment)?)(?:一下|下)?$/i.test(content.trim());
+    return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:部署|deploy(?:ment|ing)?)(?:一下|下)?$/i.test(content.trim());
   }
 
-  return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:迁移|migrate|migration)(?:一下|下)?$/i.test(content.trim());
+  return /^(?:先(?:做|搞|跑|处理)?(?:一下|下)?\s*)?(?:迁移|migrat(?:e|ion|ing))(?:一下|下)?$/i.test(content.trim());
 }
 
 export function matchesImplicitCortexTaskSubject(content: string): boolean {
@@ -490,6 +494,42 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'task_state(subject_key=cortex, state_key=migration_status)',
   },
   {
+    input: 'Current task is migrating Cortex',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'migration_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=migration_status)',
+  },
+  {
+    input: 'Current task is deploying Cortex',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'deployment_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=deployment_status)',
+  },
+  {
+    input: 'Current task is refactoring Cortex recall',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'refactor_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
+    input: 'Current task is rewriting Cortex recall',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'refactor_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
     input: '最近也许会考虑换方案',
     requested_kind: 'session_note',
     written_kind: 'session_note',
@@ -524,8 +564,8 @@ const SHORT_USER_LOCATION_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|
 const SHORT_USER_ORGANIZATION_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改|换)\s*((?:[A-Za-z][A-Za-z0-9_.\- ]{0,48})|(?:[\u4e00-\u9fff]{1,24}))$/iu;
 const SHORT_USER_LOCATION_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?((?:[\u4e00-\u9fff]{1,12})|(?:[A-Za-z][A-Za-z0-9_\-]{0,47}))(?:吧)?$/iu;
 const SHORT_USER_ORGANIZATION_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?((?:[A-Za-z][A-Za-z0-9_.\- ]{0,48})|(?:[\u4e00-\u9fff]{1,24}))(?:吧)?$/iu;
-const SHORT_USER_TASK_STATE_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改|换)\s*(重构|部署|迁移|refactor|rewrite|deploy(?:ment)?|migrat(?:e|ion))$/i;
-const SHORT_USER_TASK_STATE_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?(重构|部署|迁移|refactor|rewrite|deploy(?:ment)?|migrat(?:e|ion))(?:吧)?$/i;
+const SHORT_USER_TASK_STATE_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改|换)\s*(重构|部署|迁移|refactor(?:ing)?|rewrit(?:e|ing)|deploy(?:ment|ing)?|migrat(?:e|ion|ing))$/i;
+const SHORT_USER_TASK_STATE_CONTEXTUAL_REWRITE_RE = /^(?:(?:还是|先|就|那就)\s*)?(重构|部署|迁移|refactor(?:ing)?|rewrit(?:e|ing)|deploy(?:ment|ing)?|migrat(?:e|ion|ing))(?:吧)?$/i;
 const SHORT_USER_REPLACEMENT_REQUEST_RE = /(?:^|[，,、 ])(?:换一个|换种)(?:[，,、 ]|$)/i;
 const SHORT_USER_DISAGREEMENT_PREFIX_RE = /^(?:先别|不要|不用|不是|别|不)[，,、 ]*/i;
 const SHORT_USER_DROP_ALL_RE = /^(?:都不要|全都不要|都别要|都别加|都去掉|都删掉)$/i;
@@ -726,7 +766,7 @@ function canonicalTaskStateContent(stateKey: string, content: string, subjectKey
     case 'refactor_status':
       if (
         !matchesColloquialRecallRefactorTask(content) &&
-        (!/cortex/i.test(content) || !/recall/i.test(content) || !/(?:重构|refactor)/i.test(content))
+        (!/cortex/i.test(content) || !/recall/i.test(content) || !CORTEX_REFACTOR_KEYWORD_RE.test(content))
       ) {
         return null;
       }
@@ -734,14 +774,14 @@ function canonicalTaskStateContent(stateKey: string, content: string, subjectKey
     case 'deployment_status':
       return (
         matchesColloquialCortexWorkflowTask(content, 'deployment_status') ||
-        (/cortex/i.test(content) && /(?:部署|deploy|deployment)/i.test(content))
+        (/cortex/i.test(content) && CORTEX_DEPLOYMENT_KEYWORD_RE.test(content))
       )
         ? canonical
         : null;
     case 'migration_status':
       return (
         matchesColloquialCortexWorkflowTask(content, 'migration_status') ||
-        (/cortex/i.test(content) && /(?:迁移|migrate|migration)/i.test(content))
+        (/cortex/i.test(content) && CORTEX_MIGRATION_KEYWORD_RE.test(content))
       )
         ? canonical
         : null;
@@ -957,7 +997,7 @@ export function inferShortUserTaskStateRewrite(subjectKey: string, content: stri
   if (!stateRaw) return null;
 
   let stateKey: string | null = null;
-  if (stateRaw === '重构' || stateRaw === 'refactor' || stateRaw === 'rewrite') {
+  if (stateRaw === '重构' || stateRaw.startsWith('refactor') || stateRaw.startsWith('rewrit')) {
     stateKey = 'refactor_status';
   } else if (stateRaw === '部署' || stateRaw.startsWith('deploy')) {
     stateKey = 'deployment_status';
@@ -1161,9 +1201,9 @@ function matchFactSlotAttribute(content: string): string | null {
 
 function matchTaskStateKey(content: string): string | null {
   if (matchesColloquialRecallRefactorTask(content)) return 'refactor_status';
-  if (/重构|rewrite|refactor/i.test(content)) return 'refactor_status';
-  if (/部署|deploy|deployment/i.test(content)) return 'deployment_status';
-  if (/迁移|migrate|migration/i.test(content)) return 'migration_status';
+  if (CORTEX_REFACTOR_KEYWORD_RE.test(content)) return 'refactor_status';
+  if (CORTEX_DEPLOYMENT_KEYWORD_RE.test(content)) return 'deployment_status';
+  if (CORTEX_MIGRATION_KEYWORD_RE.test(content)) return 'migration_status';
   if (/待办|todo|remind me|记得|别忘了/i.test(content)) return 'open_todo';
   if (/决定|decided|final decision|choose|就这样吧/i.test(content)) return 'current_decision';
   if (/目标|计划|goal|plan to|打算|想要/i.test(content)) return 'current_goal';

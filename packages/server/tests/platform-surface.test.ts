@@ -176,6 +176,18 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('auto-commit migration task directly');
     expect(smoke).toContain("migrationTaskIngest.json?.auto_committed_count === 1");
     expect(smoke).toContain("migrationTaskListed.json?.items?.[0]?.content === '当前任务是迁移 Cortex'");
+    expect(smoke).toContain('auto-commit english deployment task directly');
+    expect(smoke).toContain("englishDeploymentTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("englishDeploymentTaskListed.json?.items?.[0]?.content === '当前任务是部署 Cortex'");
+    expect(smoke).toContain('auto-commit english migration task directly');
+    expect(smoke).toContain("englishMigrationTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("englishMigrationTaskListed.json?.items?.[0]?.content === '当前任务是迁移 Cortex'");
+    expect(smoke).toContain('auto-commit english refactor task directly');
+    expect(smoke).toContain("englishRefactorTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("englishRefactorTaskListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall'");
+    expect(smoke).toContain('auto-commit english rewrite task directly');
+    expect(smoke).toContain("englishRewriteTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("englishRewriteTaskListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall'");
     expect(smoke).toContain('rewrite active current task to deployment');
     expect(smoke).toContain("taskRewriteFollowup.json?.records?.[0]?.content === '当前任务是部署 Cortex'");
     expect(smoke).toContain("taskRewriteListed.json?.items?.[0]?.content === '当前任务是部署 Cortex'");

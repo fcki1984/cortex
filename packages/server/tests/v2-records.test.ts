@@ -148,6 +148,96 @@ describe('CortexRecordsV2', () => {
     expect(recall.meta.reason).toBeUndefined();
   });
 
+  it('stores explicit English cortex workflow task statements as canonical durable task_state writes', async () => {
+    const migration = await service.remember({
+      agent_id: 'english-task-migration-agent',
+      kind: 'task_state',
+      content: 'Current task is migrating Cortex',
+    });
+
+    const deployment = await service.remember({
+      agent_id: 'english-task-deployment-agent',
+      kind: 'task_state',
+      content: 'Current task is deploying Cortex',
+    });
+
+    const refactor = await service.remember({
+      agent_id: 'english-task-refactor-agent',
+      kind: 'task_state',
+      content: 'Current task is refactoring Cortex recall',
+    });
+
+    const rewrite = await service.remember({
+      agent_id: 'english-task-rewrite-agent',
+      kind: 'task_state',
+      content: 'Current task is rewriting Cortex recall',
+    });
+
+    expect(migration.record.kind).toBe('task_state');
+    expect(migration.record.subject_key).toBe('cortex');
+    expect(migration.record.state_key).toBe('migration_status');
+    expect(migration.record.content).toBe('当前任务是迁移 Cortex');
+    expect(migration.normalization).toBe('durable');
+
+    expect(deployment.record.kind).toBe('task_state');
+    expect(deployment.record.subject_key).toBe('cortex');
+    expect(deployment.record.state_key).toBe('deployment_status');
+    expect(deployment.record.content).toBe('当前任务是部署 Cortex');
+    expect(deployment.normalization).toBe('durable');
+
+    expect(refactor.record.kind).toBe('task_state');
+    expect(refactor.record.subject_key).toBe('cortex');
+    expect(refactor.record.state_key).toBe('refactor_status');
+    expect(refactor.record.content).toBe('当前任务是重构 Cortex recall');
+    expect(refactor.normalization).toBe('durable');
+
+    expect(rewrite.record.kind).toBe('task_state');
+    expect(rewrite.record.subject_key).toBe('cortex');
+    expect(rewrite.record.state_key).toBe('refactor_status');
+    expect(rewrite.record.content).toBe('当前任务是重构 Cortex recall');
+    expect(rewrite.normalization).toBe('durable');
+
+    const migrationRecords = service.listRecords({ agent_id: 'english-task-migration-agent', kind: 'task_state', limit: 10 });
+    expect(migrationRecords.items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      }),
+    ]);
+
+    const deploymentRecords = service.listRecords({ agent_id: 'english-task-deployment-agent', kind: 'task_state', limit: 10 });
+    expect(deploymentRecords.items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      }),
+    ]);
+
+    const refactorRecords = service.listRecords({ agent_id: 'english-task-refactor-agent', kind: 'task_state', limit: 10 });
+    expect(refactorRecords.items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const rewriteRecords = service.listRecords({ agent_id: 'english-task-rewrite-agent', kind: 'task_state', limit: 10 });
+    expect(rewriteRecords.items).toEqual([
+      expect.objectContaining({
+        kind: 'task_state',
+        subject_key: 'cortex',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
   it('does not recall assistant inferred durable records by default', async () => {
     await service.remember({
       agent_id: 'inferred-agent',
