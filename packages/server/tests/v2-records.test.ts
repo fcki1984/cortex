@@ -386,6 +386,28 @@ describe('CortexRecordsV2', () => {
     expect(organization.record.content).toBe('I work at OpenAI');
   });
 
+  it('stores English living-location fact variants using canonical durable content', async () => {
+    const living = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-en',
+      kind: 'fact_slot',
+      content: "I'm living in Tokyo",
+    });
+
+    const located = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-en',
+      kind: 'fact_slot',
+      content: "I'm located in Tokyo",
+    });
+
+    expect(living.record.kind).toBe('fact_slot');
+    expect(living.record.attribute_key).toBe('location');
+    expect(living.record.content).toBe('I live in Tokyo');
+
+    expect(located.record.kind).toBe('fact_slot');
+    expect(located.record.attribute_key).toBe('location');
+    expect(located.record.content).toBe('I live in Tokyo');
+  });
+
   it('stores additional constraint-style colloquial profile-rule writes using canonical durable content', async () => {
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent-2',

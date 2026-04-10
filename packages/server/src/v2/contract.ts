@@ -465,6 +465,15 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'fact_slot(entity_key=user, attribute_key=location)',
   },
   {
+    input: "I'm living in Tokyo",
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'location',
+    relation_predicate: 'lives_in',
+    output: 'fact_slot(entity_key=user, attribute_key=location)',
+  },
+  {
     input: '人在东京这边',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
@@ -641,14 +650,21 @@ const FACT_SLOT_RELATION_PREDICATES: Record<string, string> = {
   skill: 'has_skill',
 };
 
-function matchRelationObjectValue(content: string, patterns: RegExp[]): string | null {
+function matchRelationObjectValue(
+  content: string,
+  patterns: RegExp[],
+  options: { fallback_to_input?: boolean } = {},
+): string | null {
   for (const pattern of patterns) {
     const match = content.match(pattern);
     const value = match?.[1]?.trim();
     if (value) return value;
   }
-  const fallback = content.trim();
-  return fallback || null;
+  if (options.fallback_to_input) {
+    const fallback = content.trim();
+    return fallback || null;
+  }
+  return null;
 }
 
 function stripBulletPrefix(line: string): string {
@@ -1298,7 +1314,8 @@ export function extractFactRelationObjectValue(attributeKey: string | null | und
         /(?:人(?:在)?|我(?:现在|目前)?在)\s*([\u4e00-\u9fff]{1,12})(?:这边|那边)/i,
         /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
-        /\blive(?:s|d|ing)?\s+in\s+([a-z0-9_\- ]+)/i,
+        /\bliv(?:e|es|ed|ing)\s+in\s+([a-z0-9_\- ]+)/i,
+        /\blocated in\s+([a-z0-9_\- ]+)/i,
         /\bbased in\s+([a-z0-9_\- ]+)/i,
         /\bfrom\s+([a-z0-9_\- ]+)/i,
         /来自\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,

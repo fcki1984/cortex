@@ -327,6 +327,20 @@ describe('V2 shared atomic contract', () => {
         content: '我住东京',
       },
       {
+        input: "I'm living in Tokyo",
+        written_kind: 'fact_slot',
+        attribute_key: 'location',
+        state_key: null,
+        content: 'I live in Tokyo',
+      },
+      {
+        input: "I'm located in Tokyo",
+        written_kind: 'fact_slot',
+        attribute_key: 'location',
+        state_key: null,
+        content: 'I live in Tokyo',
+      },
+      {
         input: '先收一下 recall 那块',
         written_kind: 'task_state',
         attribute_key: null,

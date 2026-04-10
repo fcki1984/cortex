@@ -190,6 +190,7 @@ async function runRound(round) {
   const futureLanguageAgentId = `${probeAgentId}-future-language`;
   const englishColloquialProfileAgentId = `${probeAgentId}-profile-en`;
   const englishColloquialExpansionAgentId = `${probeAgentId}-profile-en-extended`;
+  const englishLocationAgentId = `${probeAgentId}-location-en`;
   const japaneseLanguageAgentId = `${probeAgentId}-japanese-language`;
   const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
   const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
@@ -226,6 +227,7 @@ async function runRound(round) {
     futureLanguageAgentId,
     englishColloquialProfileAgentId,
     englishColloquialExpansionAgentId,
+    englishLocationAgentId,
     japaneseLanguageAgentId,
     reviewStyleAutoAgentId,
     reviewStyleReviewAgentId,
@@ -637,6 +639,44 @@ async function runRound(round) {
         'Please keep answers within three sentences',
       ]),
       'extended english colloquial durable inputs did not persist the canonical truths',
+    );
+
+    const englishLivingLocationIngest = await request('auto-commit english living-location fact', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: "I'm living in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: englishLocationAgentId,
+      },
+    });
+    assert(englishLivingLocationIngest.response.status === 201, `POST /api/v2/ingest english living-location fact returned ${englishLivingLocationIngest.response.status}`);
+    assert(englishLivingLocationIngest.json?.auto_committed_count === 1, 'english living-location fact did not auto-commit exactly one item');
+    assert(englishLivingLocationIngest.json?.review_pending_count === 0, 'english living-location fact should not leave review work behind');
+
+    const englishLocatedLocationIngest = await request('auto-commit english located-location fact', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: "I'm located in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: englishLocationAgentId,
+      },
+    });
+    assert(englishLocatedLocationIngest.response.status === 201, `POST /api/v2/ingest english located-location fact returned ${englishLocatedLocationIngest.response.status}`);
+    assert(englishLocatedLocationIngest.json?.auto_committed_count === 0, 'english located-location fact should converge to the active canonical truth without a duplicate auto-commit');
+    assert(englishLocatedLocationIngest.json?.review_pending_count === 0, 'english located-location fact should not leave review work behind');
+    assert(
+      JSON.stringify(englishLocatedLocationIngest.json?.records || []) === JSON.stringify([]),
+      'english located-location fact should not emit a duplicate record once the canonical location truth is already active',
+    );
+
+    const englishLocationRecords = await request('list english location durable records', 'GET', `/api/v2/records${query({
+      agent_id: englishLocationAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishLocationRecords.response.status === 200, `GET /api/v2/records english location durables returned ${englishLocationRecords.response.status}`);
+    assert(
+      JSON.stringify((englishLocationRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        'I live in Tokyo',
+      ]),
+      'english living-location variants did not converge to the canonical location truth',
     );
 
     const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {

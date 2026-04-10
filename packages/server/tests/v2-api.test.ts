@@ -2693,6 +2693,144 @@ describe('API V2 Integration', () => {
     ]);
   });
 
+  it('keeps English living-location fact variants aligned across preview and ingest', async () => {
+    const livingPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-living-location-preview',
+        format: 'text',
+        content: "I'm living in Tokyo",
+      },
+    });
+
+    expect(livingPreview.statusCode).toBe(200);
+    const livingPreviewBody = JSON.parse(livingPreview.payload);
+    expect(livingPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'fact_slot',
+        attribute_key: 'location',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+
+    const livingIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: "I'm living in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: 'api-english-living-location-ingest',
+      },
+    });
+
+    expect(livingIngest.statusCode).toBe(201);
+    const livingIngestBody = JSON.parse(livingIngest.payload);
+    expect(livingIngestBody.auto_committed_count).toBe(1);
+    expect(livingIngestBody.review_pending_count).toBe(0);
+    expect(livingIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+
+    const locatedPreview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-located-location-preview',
+        format: 'text',
+        content: "I'm located in Tokyo",
+      },
+    });
+
+    expect(locatedPreview.statusCode).toBe(200);
+    const locatedPreviewBody = JSON.parse(locatedPreview.payload);
+    expect(locatedPreviewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'fact_slot',
+        attribute_key: 'location',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+
+    const locatedIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: "I'm located in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: 'api-english-located-location-ingest',
+      },
+    });
+
+    expect(locatedIngest.statusCode).toBe(201);
+    const locatedIngestBody = JSON.parse(locatedIngest.payload);
+    expect(locatedIngestBody.auto_committed_count).toBe(1);
+    expect(locatedIngestBody.review_pending_count).toBe(0);
+    expect(locatedIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+  });
+
+  it('treats synonymous English location facts as canonical no-ops once the truth is already active', async () => {
+    const firstIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: "I'm living in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: 'api-english-location-noop-ingest',
+      },
+    });
+
+    expect(firstIngest.statusCode).toBe(201);
+    const firstIngestBody = JSON.parse(firstIngest.payload);
+    expect(firstIngestBody.auto_committed_count).toBe(1);
+    expect(firstIngestBody.review_pending_count).toBe(0);
+    expect(firstIngestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+
+    const secondIngest = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: "I'm located in Tokyo",
+        assistant_message: 'Understood',
+        agent_id: 'api-english-location-noop-ingest',
+      },
+    });
+
+    expect(secondIngest.statusCode).toBe(201);
+    const secondIngestBody = JSON.parse(secondIngest.payload);
+    expect(secondIngestBody.auto_committed_count).toBe(0);
+    expect(secondIngestBody.review_pending_count).toBe(0);
+    expect(secondIngestBody.records).toEqual([]);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-english-location-noop-ingest&limit=20',
+    });
+
+    expect(listed.statusCode).toBe(200);
+    const listedBody = JSON.parse(listed.payload);
+    expect(listedBody.items).toEqual([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'location',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+  });
+
   it('keeps anchored colloquial response-style inputs aligned across preview and ingest', async () => {
     const stylePreview = await app.inject({
       method: 'POST',
