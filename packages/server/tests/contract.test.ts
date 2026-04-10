@@ -98,6 +98,12 @@ describe('V2 shared atomic contract', () => {
         content: '请用中文回答',
       },
       {
+        input: 'Use English from now on',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: 'Please answer in English',
+      },
+      {
         input: '三句话内就行',
         written_kind: 'profile_rule',
         attribute_key: 'response_length',
@@ -122,10 +128,22 @@ describe('V2 shared atomic contract', () => {
         content: '请把回答控制在三句话内',
       },
       {
+        input: 'Three sentences max',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      },
+      {
         input: '方案简单点',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
         content: '不要复杂方案',
+      },
+      {
+        input: 'Keep it simple',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
       },
       {
         input: '别整复杂方案',
@@ -445,6 +463,12 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('Use English from now on')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: 'Please answer in English',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('三句话内就行')).toEqual(expect.objectContaining({
       attribute_key: 'response_length',
       canonical_content: '请把回答控制在三句话内',
@@ -466,6 +490,12 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('别超过三句话')).toEqual(expect.objectContaining({
       attribute_key: 'response_length',
       canonical_content: '请把回答控制在三句话内',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Three sentences max')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: 'Please keep answers within three sentences',
       disposition: 'auto_commit',
     }));
 
@@ -502,6 +532,12 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('方案简单一点')).toEqual(expect.objectContaining({
       attribute_key: 'solution_complexity',
       canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Keep it simple')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: 'Please avoid complex solutions',
       disposition: 'auto_commit',
     }));
 

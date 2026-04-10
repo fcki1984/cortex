@@ -113,6 +113,11 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain("user_message: '后面都说中文'");
     expect(smoke).toContain("futureLanguageIngest.json?.auto_committed_count === 1");
     expect(smoke).toContain("futureLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '请用中文回答')");
+    expect(smoke).toContain('auto-commit bounded english colloquial profile rules');
+    expect(smoke).toContain("user_message: 'Use English from now on'");
+    expect(smoke).toContain("user_message: 'Three sentences max'");
+    expect(smoke).toContain("user_message: 'Keep it simple'");
+    expect(smoke).toContain("(englishColloquialProfileRecords.json?.items || []).map((item) => item.content).sort()");
     expect(smoke).toContain('auto-commit explicit japanese language preference');
     expect(smoke).toContain("user_message: '日本語で答えて'");
     expect(smoke).toContain("japaneseLanguageIngest.json?.auto_committed_count === 1");

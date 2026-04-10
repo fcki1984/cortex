@@ -188,6 +188,7 @@ async function runRound(round) {
   const organizationVariantAgentId = `${probeAgentId}-org`;
   const reviewImportAgentId = `${probeAgentId}-review`;
   const futureLanguageAgentId = `${probeAgentId}-future-language`;
+  const englishColloquialProfileAgentId = `${probeAgentId}-profile-en`;
   const japaneseLanguageAgentId = `${probeAgentId}-japanese-language`;
   const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
   const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
@@ -222,6 +223,7 @@ async function runRound(round) {
     organizationVariantAgentId,
     reviewImportAgentId,
     futureLanguageAgentId,
+    englishColloquialProfileAgentId,
     japaneseLanguageAgentId,
     reviewStyleAutoAgentId,
     reviewStyleReviewAgentId,
@@ -539,6 +541,53 @@ async function runRound(round) {
     assert(
       (futureLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '请用中文回答'),
       'future speech-language preference did not persist the canonical language truth',
+    );
+
+    const englishLanguageIngest = await request('auto-commit bounded english colloquial profile rules', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Use English from now on',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialProfileAgentId,
+      },
+    });
+    assert(englishLanguageIngest.response.status === 201, `POST /api/v2/ingest english colloquial language returned ${englishLanguageIngest.response.status}`);
+    assert(englishLanguageIngest.json?.auto_committed_count === 1, 'english colloquial language did not auto-commit exactly one item');
+    assert(englishLanguageIngest.json?.review_pending_count === 0, 'english colloquial language should not leave review work behind');
+
+    const englishLengthIngest = await request('auto-commit bounded english colloquial response length', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Three sentences max',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialProfileAgentId,
+      },
+    });
+    assert(englishLengthIngest.response.status === 201, `POST /api/v2/ingest english colloquial response length returned ${englishLengthIngest.response.status}`);
+    assert(englishLengthIngest.json?.auto_committed_count === 1, 'english colloquial response length did not auto-commit exactly one item');
+    assert(englishLengthIngest.json?.review_pending_count === 0, 'english colloquial response length should not leave review work behind');
+
+    const englishComplexityIngest = await request('auto-commit bounded english colloquial solution complexity', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Keep it simple',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialProfileAgentId,
+      },
+    });
+    assert(englishComplexityIngest.response.status === 201, `POST /api/v2/ingest english colloquial solution complexity returned ${englishComplexityIngest.response.status}`);
+    assert(englishComplexityIngest.json?.auto_committed_count === 1, 'english colloquial solution complexity did not auto-commit exactly one item');
+    assert(englishComplexityIngest.json?.review_pending_count === 0, 'english colloquial solution complexity should not leave review work behind');
+
+    const englishColloquialProfileRecords = await request('list bounded english colloquial profile records', 'GET', `/api/v2/records${query({
+      agent_id: englishColloquialProfileAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishColloquialProfileRecords.response.status === 200, `GET /api/v2/records english colloquial profile rules returned ${englishColloquialProfileRecords.response.status}`);
+    assert(
+      JSON.stringify((englishColloquialProfileRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        'Please answer in English',
+        'Please avoid complex solutions',
+        'Please keep answers within three sentences',
+      ]),
+      'english colloquial profile rules did not persist the canonical English truths',
     );
 
     const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {

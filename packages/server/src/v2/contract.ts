@@ -208,6 +208,23 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     matches_attribute: (content: string) => /日本語で(?:答えて|答えてください|回答して|返答して)(?:ください)?/iu.test(content),
   },
   {
+    attribute_key: 'language_preference',
+    canonical_content: 'Please answer in English',
+    disposition: 'auto_commit',
+    strong_inputs: [
+      'Use English from now on',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => (
+      /(?:use|answer|respond|reply).{0,12}english.{0,12}(?:from now on|going forward|for future replies?|for future responses?)/i.test(content) ||
+      /english.{0,12}(?:from now on|going forward).{0,12}(?:answer|reply|respond|use)/i.test(content)
+    ),
+    matches_attribute: (content: string) => (
+      /(?:use|answer|respond|reply).{0,12}english.{0,12}(?:from now on|going forward|for future replies?|for future responses?)/i.test(content) ||
+      /english.{0,12}(?:from now on|going forward).{0,12}(?:answer|reply|respond|use)/i.test(content)
+    ),
+  },
+  {
     attribute_key: 'response_length',
     canonical_content: '请把回答控制在三句话内',
     disposition: 'auto_commit',
@@ -254,6 +271,17 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     ),
   },
   {
+    attribute_key: 'response_length',
+    canonical_content: 'Please keep answers within three sentences',
+    disposition: 'auto_commit',
+    strong_inputs: [
+      'Three sentences max',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content),
+    matches_attribute: (content: string) => /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content),
+  },
+  {
     attribute_key: 'solution_complexity',
     canonical_content: '不要复杂方案',
     disposition: 'auto_commit',
@@ -288,7 +316,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '轻量方案就好吧',
     ],
     matches_conversational: (content: string) => (
-      /(?:方案简单点|方案简单一点|方案简单一些|方案简单些|方案轻量一点|简单点|轻量点|简单方案就行|简单方案即可|简单方案就好|简单方案就可以|轻量方案就行|轻量方案即可|轻量方案就好|轻量方案就可以|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案|keep it simple|avoid complex|lightweight solution|simple solution)/i.test(content)
+      /(?:方案简单点|方案简单一点|方案简单一些|方案简单些|方案轻量一点|简单点|轻量点|简单方案就行|简单方案即可|简单方案就好|简单方案就可以|轻量方案就行|轻量方案即可|轻量方案就好|轻量方案就可以|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案)/i.test(content)
     ),
     matches_attribute: (content: string) => (
       /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
@@ -296,6 +324,17 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       /(?:方案|实现|solution|setup).*(?:简单|轻量|simple|lightweight)/i.test(content) ||
       /(?:别搞太复杂|别整复杂方案|别太复杂|简单方案就好|轻量方案就好|keep it simple|avoid complex)/i.test(content)
     ),
+  },
+  {
+    attribute_key: 'solution_complexity',
+    canonical_content: 'Please avoid complex solutions',
+    disposition: 'auto_commit',
+    strong_inputs: [
+      'Keep it simple',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => /(?:keep it simple|avoid complex solutions?)/i.test(content),
+    matches_attribute: (content: string) => /(?:keep it simple|avoid complex solutions?)/i.test(content),
   },
   {
     attribute_key: 'response_style',
@@ -625,7 +664,9 @@ export function extractSentenceCountConstraint(raw: string): string | null {
   if (zhMatch?.[1]) return canonicalSentenceCount(zhMatch[1]);
 
   const enMatch = raw.match(EN_SENTENCE_RE);
-  return enMatch?.[1]?.trim() || null;
+  const english = enMatch?.[1]?.trim();
+  if (!english) return null;
+  return /^[A-Za-z ]+$/.test(english) ? english.toLowerCase() : english;
 }
 
 function languageTemplate(label: '中文' | '英文' | '日文'): string {

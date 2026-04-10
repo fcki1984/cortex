@@ -322,6 +322,38 @@ describe('CortexRecordsV2', () => {
     expect(complexity.record.content).toBe('不要复杂方案');
   });
 
+  it('stores bounded English colloquial profile-rule writes using canonical durable content', async () => {
+    const language = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en',
+      kind: 'profile_rule',
+      content: 'Use English from now on',
+    });
+
+    const length = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en',
+      kind: 'profile_rule',
+      content: 'Three sentences max',
+    });
+
+    const complexity = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en',
+      kind: 'profile_rule',
+      content: 'Keep it simple',
+    });
+
+    expect(language.record.kind).toBe('profile_rule');
+    expect(language.record.attribute_key).toBe('language_preference');
+    expect(language.record.content).toBe('Please answer in English');
+
+    expect(length.record.kind).toBe('profile_rule');
+    expect(length.record.attribute_key).toBe('response_length');
+    expect(length.record.content).toBe('Please keep answers within three sentences');
+
+    expect(complexity.record.kind).toBe('profile_rule');
+    expect(complexity.record.attribute_key).toBe('solution_complexity');
+    expect(complexity.record.content).toBe('Please avoid complex solutions');
+  });
+
   it('stores additional constraint-style colloquial profile-rule writes using canonical durable content', async () => {
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent-2',
