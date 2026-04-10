@@ -188,6 +188,38 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('auto-commits stable short colloquial response-style inputs without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-short-style',
+        user_message: '说话利索点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records[0]).toEqual(expect.objectContaining({
+      written_kind: 'profile_rule',
+      content: '请简洁直接回答',
+    }));
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-auto-short-style',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
   it('filters out-of-scope ingest durables by the global retain mission and reports mission_filtered_count', async () => {
     const setup = await createApp({
       globalMission: '只保留长期偏好和稳定背景，不保留短期任务',
@@ -435,7 +467,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-reconcile-match',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -499,7 +531,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-reconcile-conflict',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -553,7 +585,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-followup-confirm',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -627,7 +659,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-followup-reject',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -768,7 +800,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-followup-rewrite-response-style-mismatch',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -839,7 +871,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-followup-rewrite-response-style-match',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -1283,7 +1315,7 @@ describe('V2 review inbox', () => {
 
     const batch = setup.reviewInbox.createLiveBatch({
       agent_id: 'review-live-followup-selective-response-style',
-      source_preview: '后续交流中文就行\n说话干脆一点',
+      source_preview: '后续交流中文就行\n说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_drop_language_for_style',
@@ -1293,7 +1325,7 @@ describe('V2 review inbox', () => {
         createReviewAssistRecordPayload({
           candidate_id: 'review_keep_response_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -1381,12 +1413,12 @@ describe('V2 review inbox', () => {
 
     const batch = setup.reviewInbox.createLiveBatch({
       agent_id: 'review-live-followup-keep-active-language',
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_response_style_when_keep_language',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -1565,7 +1597,7 @@ describe('V2 review inbox', () => {
 
     const batch = setup.reviewInbox.createLiveBatch({
       agent_id: agentId,
-      source_preview: '我在 OpenAI 工作\n说话干脆一点',
+      source_preview: '我在 OpenAI 工作\n说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_organization_when_keep_language_cross_bucket',
@@ -1579,7 +1611,7 @@ describe('V2 review inbox', () => {
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_response_style_when_keep_language_cross_bucket',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -1685,12 +1717,12 @@ describe('V2 review inbox', () => {
 
     const styleBatch = setup.reviewInbox.createLiveBatch({
       agent_id: agentId,
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_response_style_when_keep_language_cross_batch',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -1796,12 +1828,12 @@ describe('V2 review inbox', () => {
 
     const batch = setup.reviewInbox.createLiveBatch({
       agent_id: 'review-live-followup-keep-active-task',
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_response_style_when_keep_task',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -1886,12 +1918,12 @@ describe('V2 review inbox', () => {
 
     const batch = setup.reviewInbox.createLiveBatch({
       agent_id: 'review-live-followup-keep-active-location',
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'review_reject_pending_response_style_when_keep_location',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -2119,6 +2151,46 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('auto-commits short-form colloquial response-style imports without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-import-short-colloquial-response-style',
+        format: 'text',
+        content: '说话干脆点',
+      },
+    });
+
+    expect(created.statusCode).toBe(201);
+    const createdBody = JSON.parse(created.payload);
+    expect(createdBody.batch_id || null).toBe(null);
+    expect(createdBody.auto_committed_count).toBe(1);
+    expect(createdBody.summary).toEqual({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    });
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-import-short-colloquial-response-style',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: '请简洁直接回答',
+      }),
+    ]));
+  });
+
   it('suppresses repeated live review-only inputs when the canonical rewrite already exists as active truth', async () => {
     const setup = await createApp({ responseStyleReview: true });
     app = setup.app;
@@ -2140,7 +2212,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-noop-existing-response-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -2170,7 +2242,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-import-colloquial-response-style',
         format: 'text',
-        content: '说话干脆一点',
+        content: '说话直接一点',
       },
     });
 
@@ -2178,7 +2250,7 @@ describe('V2 review inbox', () => {
     const createdBody = JSON.parse(created.payload);
     expect(createdBody.auto_committed_count).toBe(0);
     expect(createdBody.summary.pending).toBe(1);
-    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(createdBody.source_preview).toBe('说话直接一点');
     expect(typeof createdBody.batch_id).toBe('string');
 
     const detail = await app.inject({
@@ -2195,7 +2267,7 @@ describe('V2 review inbox', () => {
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
         }),
       }),
     ]);
@@ -2223,7 +2295,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-import-noop-existing-response-style',
         format: 'text',
-        content: '说话干脆一点',
+        content: '说话直接一点',
       },
     });
 
@@ -2256,7 +2328,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-noop-existing-pending-response-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -2270,7 +2342,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-noop-existing-pending-response-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -2372,7 +2444,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-response-style-apply',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -3488,7 +3560,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-sync-delta-updated',
         format: 'text',
-        content: '说话干脆一点',
+        content: '说话直接一点',
       },
     });
     expect(created.statusCode).toBe(201);
@@ -3733,7 +3805,7 @@ describe('V2 review inbox', () => {
       url: '/api/v2/ingest',
       payload: {
         agent_id: 'review-live-mixed-clause-context',
-        user_message: '后续交流中文就行。说话干脆一点',
+        user_message: '后续交流中文就行。说话直接一点',
         assistant_message: '收到',
       },
     });
@@ -3757,18 +3829,18 @@ describe('V2 review inbox', () => {
 
     expect(detail.statusCode).toBe(200);
     const detailBody = JSON.parse(detail.payload);
-    expect(detailBody.batch.source_preview).toBe('说话干脆一点');
+    expect(detailBody.batch.source_preview).toBe('说话直接一点');
     expect(detailBody.items).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           evidence: expect.arrayContaining([
             expect.objectContaining({
               role: 'user',
-              content: '说话干脆一点',
+              content: '说话直接一点',
             }),
           ]),
         }),
@@ -4000,7 +4072,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-import-preview',
         format: 'text',
-        content: '后续交流中文就行。说话干脆一点',
+        content: '后续交流中文就行。说话直接一点',
       },
     });
 
@@ -4008,7 +4080,7 @@ describe('V2 review inbox', () => {
     const createdBody = JSON.parse(created.payload);
     expect(typeof createdBody.batch_id).toBe('string');
     expect(createdBody.auto_committed_count).toBe(1);
-    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(createdBody.source_preview).toBe('说话直接一点');
     expect(createdBody.summary.pending).toBe(1);
 
     const detail = await app.inject({
@@ -4025,7 +4097,7 @@ describe('V2 review inbox', () => {
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
         }),
       }),
     ]);
@@ -4055,13 +4127,13 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-import-response-style',
         format: 'text',
-        content: '说话干脆一点',
+        content: '说话直接一点',
       },
     });
 
     expect(created.statusCode).toBe(201);
     const createdBody = JSON.parse(created.payload);
-    expect(createdBody.source_preview).toBe('说话干脆一点');
+    expect(createdBody.source_preview).toBe('说话直接一点');
     expect(createdBody.summary.pending).toBe(1);
 
     const detail = await app.inject({
@@ -4078,7 +4150,7 @@ describe('V2 review inbox', () => {
           normalized_kind: 'profile_rule',
           attribute_key: 'response_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
         }),
       }),
     ]);
@@ -4701,7 +4773,7 @@ describe('V2 review inbox', () => {
       payload: {
         agent_id: 'review-reject',
         format: 'text',
-        content: '说话干脆一点',
+        content: '说话直接一点',
       },
     });
     const createdBody = JSON.parse(created.payload);

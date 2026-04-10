@@ -291,6 +291,20 @@ describe('V2 shared atomic contract', () => {
         state_key: 'refactor_status',
         content: '当前任务是重构 Cortex recall',
       },
+      {
+        input: '先做部署',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'deployment_status',
+        content: '当前任务是部署 Cortex',
+      },
+      {
+        input: '先迁移一下',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'migration_status',
+        content: '当前任务是迁移 Cortex',
+      },
     ] as const;
 
     for (const sample of samples) {
@@ -316,6 +330,35 @@ describe('V2 shared atomic contract', () => {
           : normalized.candidate.summary,
       ).toBe(sample.content);
     }
+  });
+
+  it('keeps deployment and migration task-state samples in the shared canonical contract examples', () => {
+    expect(V2_CONTRACT_CANONICAL_CASES).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        input: '当前任务是部署 Cortex',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'deployment_status',
+      }),
+      expect.objectContaining({
+        input: '先做部署',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'deployment_status',
+      }),
+      expect.objectContaining({
+        input: '当前任务是迁移 Cortex',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'migration_status',
+      }),
+      expect.objectContaining({
+        input: '先迁移一下',
+        requested_kind: 'task_state',
+        written_kind: 'task_state',
+        state_key: 'migration_status',
+      }),
+    ]));
   });
 
   it('exposes a shared colloquial profile-rule helper with weak-language gating', async () => {
@@ -452,6 +495,18 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('后面都说中文')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('之后都讲中文')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('三句话内就可以')).toEqual(expect.objectContaining({
       attribute_key: 'response_length',
       canonical_content: '请把回答控制在三句话内',
@@ -503,6 +558,84 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('说话干脆一点')).toEqual(expect.objectContaining({
       attribute_key: 'response_style',
       canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('说话干脆点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('说话利索点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('讲话干脆点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('讲话利索点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('表达干脆点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('表达利落点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('讲干脆点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('讲利索点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('说得利索点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('说话直接一点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('说话直接点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('讲直接点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('讲话直接点')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: '请简洁直接回答',
       disposition: 'review',
     }));
 
@@ -544,6 +677,12 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('简单方案就行吧')).toBe(null);
     expect(matchConversationalProfileRule!('简单方案即可吧')).toBe(null);
     expect(matchConversationalProfileRule!('轻量方案就行吧')).toBe(null);
+    expect(matchConversationalProfileRule!('回答短一点')).toBe(null);
+    expect(matchConversationalProfileRule!('回复短一点')).toBe(null);
+    expect(matchConversationalProfileRule!('简单些就行')).toBe(null);
+    expect(matchConversationalProfileRule!('直接讲中文')).toBe(null);
+    expect(matchConversationalProfileRule!('直接点说')).toBe(null);
+    expect(matchConversationalProfileRule!('先说重点')).toBe(null);
   });
 
   it('drives strong and weak profile-rule aliases from a shared alias set', async () => {
@@ -557,10 +696,17 @@ describe('V2 shared atomic contract', () => {
       expect.objectContaining({
         attribute_key: 'language_preference',
         canonical_content: '请用中文回答',
+        strong_inputs: expect.arrayContaining([
+          '之后都用中文',
+          '后面都用中文',
+        ]),
       }),
       expect.objectContaining({
         attribute_key: 'response_length',
         canonical_content: '请把回答控制在三句话内',
+        strong_inputs: expect.arrayContaining([
+          '控制在三句内',
+        ]),
       }),
       expect.objectContaining({
         attribute_key: 'solution_complexity',
@@ -569,6 +715,19 @@ describe('V2 shared atomic contract', () => {
       expect.objectContaining({
         attribute_key: 'response_style',
         canonical_content: '请简洁直接回答',
+        disposition: 'auto_commit',
+        strong_inputs: expect.arrayContaining([
+          '讲话干脆点',
+          '讲话利索点',
+        ]),
+      }),
+      expect.objectContaining({
+        attribute_key: 'response_style',
+        canonical_content: '请简洁直接回答',
+        disposition: 'review',
+        strong_inputs: expect.arrayContaining([
+          '讲话直接点',
+        ]),
       }),
     ]));
 

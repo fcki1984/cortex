@@ -84,6 +84,8 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('最近也许会考虑换方案。目前任职于 OpenAI');
     expect(smoke).toContain('我住大阪。现在住东京');
     expect(smoke).toContain("['我住大阪', '请用中文回答', '现在住东京'].join('\\n')");
+    expect(smoke).toContain("user_message: '先做部署'");
+    expect(smoke).toContain("user_message: '先迁移一下'");
     expect(smoke).toContain("'## Fact Slots'");
     expect(releasePlan).toContain('smoke:v2');
     expect(releasePlan).toContain('3');
@@ -107,6 +109,13 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('/api/v2/review-inbox?agent_id=');
     expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}');
     expect(smoke).toContain('/api/v2/review-inbox/${encodeURIComponent(reviewImportBatchId)}/apply');
+    expect(smoke).toContain('auto-commit future speech-language preference');
+    expect(smoke).toContain("user_message: '后面都说中文'");
+    expect(smoke).toContain("futureLanguageIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("futureLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '请用中文回答')");
+    expect(smoke).toContain('auto-commit short-form colloquial response-style import');
+    expect(smoke).toContain("content: '说话利索点'");
+    expect(smoke).toContain("content: '说得利索点'");
     expect(smoke).toContain("reviewInboxListFull.json?.sync?.mode === 'full'");
     expect(smoke).toContain("reviewInboxDetail.json?.items?.[0]?.suggested_rewrite === '请简洁直接回答'");
     expect(smoke).toContain('cursor: reviewInboxDeltaBase.json?.sync?.cursor');
@@ -115,8 +124,8 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('route mixed auto-commit plus review ingest');
     expect(smoke).toContain("mixedReviewIngest.json?.auto_committed_count === 1");
     expect(smoke).toContain("mixedReviewIngest.json?.review_pending_count === 1");
-    expect(smoke).toContain("mixedReviewIngest.json?.review_source_preview === '说话干脆一点'");
-    expect(smoke).toContain("mixedReviewDetail.json?.batch?.source_preview === '说话干脆一点'");
+    expect(smoke).toContain("mixedReviewIngest.json?.review_source_preview === '讲直接点'");
+    expect(smoke).toContain("mixedReviewDetail.json?.batch?.source_preview === '讲直接点'");
     expect(smoke).toContain('auto-commit compound durable ingest without review work');
     expect(smoke).toContain("compoundAutoIngest.json?.auto_committed_count === 2");
     expect(smoke).toContain("compoundAutoIngest.json?.review_pending_count === 0");
@@ -157,6 +166,12 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('select only active current task');
     expect(smoke).toContain("taskSelectionFollowup.json?.auto_committed_count === 1");
     expect(smoke).toContain("taskSelectionListed.json?.items?.[0]?.content === '当前任务是重构 Cortex recall'");
+    expect(smoke).toContain('auto-commit deployment task directly');
+    expect(smoke).toContain("deploymentTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("deploymentTaskListed.json?.items?.[0]?.content === '当前任务是部署 Cortex'");
+    expect(smoke).toContain('auto-commit migration task directly');
+    expect(smoke).toContain("migrationTaskIngest.json?.auto_committed_count === 1");
+    expect(smoke).toContain("migrationTaskListed.json?.items?.[0]?.content === '当前任务是迁移 Cortex'");
     expect(smoke).toContain('rewrite active current task to deployment');
     expect(smoke).toContain("taskRewriteFollowup.json?.records?.[0]?.content === '当前任务是部署 Cortex'");
     expect(smoke).toContain("taskRewriteListed.json?.items?.[0]?.content === '当前任务是部署 Cortex'");

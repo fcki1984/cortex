@@ -70,24 +70,37 @@ type InternalProfileRuleAliasSpec = V2ContractProfileRuleAliasSet & {
   matches_attribute: (content: string) => boolean;
 };
 
+function matchesAnchoredConversationalResponseStyle(
+  content: string,
+  descriptors: '直接|干脆|利索|利落' | '干脆|利索|利落',
+): boolean {
+  return new RegExp(
+    `^(?:请)?(?:(?:说话|表达|讲|说)(?:得)?)\\s*.{0,4}(?:${descriptors})(?:(?:一)?点|一些|些)?$`,
+    'i',
+  ).test(content.trim());
+}
+
 function matchesCanonicalResponseStyle(content: string): boolean {
   return (
+    matchesAnchoredConversationalResponseStyle(content, '直接|干脆|利索|利落') ||
     matchesExplicitCanonicalResponseStyle(content) ||
-    /(?:说话|表达).*(?:干脆|直接|简洁|简短|精简)/i.test(content) ||
-    /(?:干脆|直接|简洁|简短|精简).*(?:说话|表达)/i.test(content)
+    /(?:说话|表达).*(?:干脆|直接|简洁|简短|精简|利索|利落)/i.test(content) ||
+    /(?:干脆|直接|简洁|简短|精简|利索|利落).*(?:说话|表达)/i.test(content)
   );
 }
 
 function matchesExplicitCanonicalResponseStyle(content: string): boolean {
   return (
+    matchesAnchoredConversationalResponseStyle(content, '干脆|利索|利落') ||
+    /^(?:请)?(?:说话|表达).{0,4}(?:干脆|利索|利落)(?:(?:一)?点|一些|些)?$/i.test(content.trim()) ||
     (
-      /(?:直接|干脆)/i.test(content) &&
+      /(?:直接|干脆|利索|利落)/i.test(content) &&
       /(?:回答|回复|风格|answer|reply|response|style)/i.test(content)
     ) ||
-    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:简洁|简短|精简).*(?:直接|干脆)(?:一点|一些|些)?$/i.test(content.trim()) ||
-    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:直接|干脆).*(?:简洁|简短|精简)(?:一点|一些|些)?$/i.test(content.trim()) ||
-    /(?:简洁|简短|精简).*(?:直接|干脆).*(?:回答|回复|风格)?/i.test(content) ||
-    /(?:回答|回复|风格).*(?:简洁|简短|精简).*(?:直接|干脆)/i.test(content) ||
+    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:简洁|简短|精简).*(?:直接|干脆|利索|利落)(?:一点|一些|些)?$/i.test(content.trim()) ||
+    /^(?:请)?(?:回答|回复|表达|风格|说话)?(?:保持)?(?:更)?(?:直接|干脆|利索|利落).*(?:简洁|简短|精简)(?:一点|一些|些)?$/i.test(content.trim()) ||
+    /(?:简洁|简短|精简).*(?:直接|干脆|利索|利落).*(?:回答|回复|风格)?/i.test(content) ||
+    /(?:回答|回复|风格).*(?:简洁|简短|精简).*(?:直接|干脆|利索|利落)/i.test(content) ||
     (
       /(?:answer|reply|response|style)/i.test(content) &&
       /(?:concise|brief)/i.test(content) &&
@@ -98,8 +111,8 @@ function matchesExplicitCanonicalResponseStyle(content: string): boolean {
 
 function matchesResponseStyleAttribute(content: string): boolean {
   return (
-    /(?:简洁|简短|精简|直接|concise|brief|short|direct).*(回答|回复|answer|response|解释)/i.test(content) ||
-    /(回答|回复|answer|response).*(简洁|简短|精简|直接|concise|brief|short|direct)/i.test(content) ||
+    /(?:简洁|简短|精简|直接|利索|利落|concise|brief|short|direct).*(回答|回复|answer|response|解释)/i.test(content) ||
+    /(回答|回复|answer|response).*(简洁|简短|精简|直接|利索|利落|concise|brief|short|direct)/i.test(content) ||
     matchesCanonicalResponseStyle(content)
   );
 }
@@ -141,6 +154,10 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '后续交流中文就行',
       '以后都中文回答',
       '后面中文就可以',
+      '之后都用中文',
+      '后面都用中文',
+      '后面都说中文',
+      '之后都讲中文',
       '中文就可以',
       '中文就行',
       '中文即可',
@@ -160,7 +177,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       const languageLabel = canonicalLanguageLabel(content);
       if (!languageLabel) return false;
       return (
-        /(?:后续|之后|后面|接下来|以后).{0,8}(?:交流|沟通|聊|都用|用|回答|回复)/i.test(content) ||
+        /(?:后续|之后|后面|接下来|以后).{0,8}(?:交流|沟通|聊|都用|用|回答|回复|都说|说|都讲|讲)/i.test(content) ||
         /(?:都用|改用|换用|用).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content) ||
         /(?:中文|英文|日文|english|chinese|japanese).{0,8}(?:就行|即可|就好|就可以)/i.test(content)
       );
@@ -180,6 +197,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     disposition: 'auto_commit',
     strong_inputs: [
       '请把回答控制在三句话内',
+      '控制在三句内',
       '三句话内就行',
       '三句就够',
       '最多三句话',
@@ -273,10 +291,21 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '回答风格简洁直接',
       '回复风格简洁直接',
       '简洁直接一点',
+      '说话干脆一点',
+      '说话干脆点',
+      '说话利索点',
+      '讲话干脆点',
+      '讲话利索点',
+      '表达干脆点',
+      '表达利落点',
+      '讲干脆点',
+      '讲利索点',
+      '说得利索点',
     ],
     weak_inputs: [
       '尽量简洁直接',
       '尽量说话干脆一点',
+      '尽量说话干脆点',
       '最好简洁直接一点',
       '优先简洁直接回答',
     ],
@@ -288,11 +317,15 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     canonical_content: '请简洁直接回答',
     disposition: 'review',
     strong_inputs: [
-      '说话干脆一点',
+      '说话直接一点',
+      '说话直接点',
+      '讲话直接点',
+      '讲直接点',
     ],
     weak_inputs: [
       '尽量简洁直接',
-      '尽量说话干脆一点',
+      '尽量说话直接一点',
+      '尽量说话直接点',
       '最好简洁直接一点',
       '优先简洁直接回答',
     ],
@@ -315,13 +348,11 @@ export const V2_CONTRACT_PROFILE_RULE_ALIAS_SETS: V2ContractProfileRuleAliasSet[
 );
 
 const PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = V2_CONTRACT_PROFILE_RULE_ALIAS_SETS.flatMap(
-  ({ attribute_key, strong_inputs }) => strong_inputs.map(input => ({
+  ({ attribute_key, strong_inputs, disposition }) => strong_inputs.map(input => ({
     input,
     requested_kind: 'profile_rule' as const,
     written_kind: 'profile_rule' as const,
-    disposition: attribute_key === 'response_style' && input === '说话干脆一点'
-      ? 'review'
-      : 'auto_commit',
+    disposition,
     attribute_key,
     relation_predicate: null,
     output: `profile_rule(subject_key=user, attribute_key=${attribute_key})`,
@@ -405,9 +436,46 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     input: '先收一下 recall 那块',
     requested_kind: 'task_state',
     written_kind: 'task_state',
+    disposition: 'auto_commit',
     state_key: 'refactor_status',
     relation_predicate: null,
     output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
+    input: '当前任务是部署 Cortex',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'deployment_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=deployment_status)',
+  },
+  {
+    input: '先做部署',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'deployment_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=deployment_status)',
+  },
+  {
+    input: '当前任务是迁移 Cortex',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'migration_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=migration_status)',
+  },
+  {
+    input: '先迁移一下',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'migration_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=migration_status)',
   },
   {
     input: '最近也许会考虑换方案',

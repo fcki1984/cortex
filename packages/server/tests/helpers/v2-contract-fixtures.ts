@@ -186,7 +186,7 @@ export function createReviewInboxResponseStyleMockLLM(): LLMProvider {
   return {
     name: 'review-inbox-response-style-mock',
     complete: vi.fn().mockImplementation(async (prompt: string) => {
-      if (prompt.includes('说话干脆一点')) {
+      if (prompt.includes('说话直接一点') || prompt.includes('说话干脆一点')) {
         return JSON.stringify({
           records: [{
             kind: 'profile_rule',

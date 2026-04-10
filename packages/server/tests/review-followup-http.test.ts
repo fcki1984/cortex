@@ -202,7 +202,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-live-followup-response-style-mismatch',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -259,7 +259,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-live-followup-response-style-restate',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -531,7 +531,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-mixed-active-pending-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -614,7 +614,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-keep-active-language-reject-pending-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -778,7 +778,7 @@ describe('Review follow-up HTTP integration', () => {
 
     const batch = server.reviewInbox.createLiveBatch({
       agent_id: 'http-keep-active-language-clear-cross-bucket-noise',
-      source_preview: '我在 OpenAI 工作\n说话干脆一点',
+      source_preview: '我在 OpenAI 工作\n说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'http_reject_pending_organization_when_keep_language_cross_bucket',
@@ -792,7 +792,7 @@ describe('Review follow-up HTTP integration', () => {
         createReviewAssistRecordPayload({
           candidate_id: 'http_reject_pending_response_style_when_keep_language_cross_bucket',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -888,12 +888,12 @@ describe('Review follow-up HTTP integration', () => {
 
     const styleBatch = server.reviewInbox.createLiveBatch({
       agent_id: agentId,
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'http_reject_pending_response_style_when_keep_language_cross_batch',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
@@ -995,7 +995,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-keep-active-task-reject-pending-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -1080,7 +1080,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-keep-active-location-reject-pending-style',
-        user_message: '说话干脆一点',
+        user_message: '说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -1154,7 +1154,7 @@ describe('Review follow-up HTTP integration', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         agent_id: 'http-mixed-auto-review-routing',
-        user_message: '后续交流中文就行。说话干脆一点',
+        user_message: '后续交流中文就行。说话直接一点',
         assistant_message: '收到',
       }),
     });
@@ -1169,7 +1169,7 @@ describe('Review follow-up HTTP integration', () => {
     };
     expect(ingestBody.auto_committed_count).toBe(1);
     expect(ingestBody.review_pending_count).toBe(1);
-    expect(ingestBody.review_source_preview).toBe('说话干脆一点');
+    expect(ingestBody.review_source_preview).toBe('说话直接一点');
     expect(ingestBody.records).toEqual([
       expect.objectContaining({
         content: '请用中文回答',
@@ -1189,13 +1189,13 @@ describe('Review follow-up HTTP integration', () => {
         };
       }>;
     };
-    expect(detailBody.batch.source_preview).toBe('说话干脆一点');
+    expect(detailBody.batch.source_preview).toBe('说话直接一点');
     expect(detailBody.summary.pending).toBe(1);
     expect(detailBody.items).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
         }),
       }),
     ]);
@@ -1316,12 +1316,12 @@ describe('Review follow-up HTTP integration', () => {
 
     const batch = server.reviewInbox.createLiveBatch({
       agent_id: 'http-mixed-active-pending-drop-all',
-      source_preview: '说话干脆一点',
+      source_preview: '说话直接一点',
       items: [
         createReviewAssistRecordPayload({
           candidate_id: 'http_drop_pending_style',
           content: '请简洁直接回答',
-          source_excerpt: '说话干脆一点',
+          source_excerpt: '说话直接一点',
           attribute_key: 'response_style',
         }),
       ],
