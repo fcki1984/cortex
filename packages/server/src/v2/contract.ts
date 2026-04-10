@@ -192,6 +192,18 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     ),
   },
   {
+    attribute_key: 'language_preference',
+    canonical_content: '日本語で答えてください',
+    disposition: 'auto_commit',
+    strong_inputs: [
+      '日本語で答えて',
+      '日本語で答えてください',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => /日本語で(?:答えて|答えてください|回答して|返答して)(?:ください)?/iu.test(content),
+    matches_attribute: (content: string) => /日本語で(?:答えて|答えてください|回答して|返答して)(?:ください)?/iu.test(content),
+  },
+  {
     attribute_key: 'response_length',
     canonical_content: '请把回答控制在三句话内',
     disposition: 'auto_commit',
@@ -498,14 +510,14 @@ export const V2_CONTRACT_REFERENCE_EXAMPLES: Array<{ input: string; output: stri
 
 const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看情况|大概|probably)/i;
 const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
-const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese)/i;
+const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese|日本語)/i;
 const ZH_SENTENCE_RE = /((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?)(?:内|以内)?/i;
 const EN_SENTENCE_RE = /(?:within|in|under|limit(?:ed)? to|keep(?: answers?)?(?: within)?|answer in)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
 const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|就可以吧|够(?:了)?吧|更好|最好|尽量|优先|简单(?:一点|一些|些)?吧|轻量(?:一点)?吧)/i;
 const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
-const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese)/i;
-const SHORT_USER_LANGUAGE_COMPACT_REWRITE_RE = /^(?:改|换)\s*(中文|英文|日文|english|chinese|japanese)$/i;
+const SHORT_USER_LANGUAGE_REWRITE_RE = /(?:改成|换成|改为|换为|改用|换用|用)\s*(中文|英文|日文|english|chinese|japanese|日本語)/i;
+const SHORT_USER_LANGUAGE_COMPACT_REWRITE_RE = /^(?:改|换)\s*(中文|英文|日文|english|chinese|japanese|日本語)$/i;
 const SHORT_USER_RESPONSE_LENGTH_REWRITE_RE = /(?:改成|换成|改为|换为|控制在|限制在)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)/i;
 const SHORT_USER_RESPONSE_LENGTH_COMPACT_REWRITE_RE = /^(?:改|换)\s*((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?(?:内|以内)?)$/i;
 const SHORT_USER_LOCATION_COMPACT_REWRITE_RE = /^(?:改成|换成|改为|换为|改到|换到|改|换)\s*((?:[\u4e00-\u9fff]{1,12})|(?:[A-Za-z][A-Za-z0-9_\-]{0,47}))$/iu;
@@ -775,7 +787,7 @@ function normalizeShortUserContextualValue(value: string | undefined): string | 
 }
 
 function mentionsLanguagePreference(content: string): boolean {
-  return /(中文|英文|日文|english|chinese|japanese)/i.test(content);
+  return /(中文|英文|日文|english|chinese|japanese|日本語)/i.test(content);
 }
 
 function mentionsResponseLength(content: string): boolean {
@@ -799,7 +811,7 @@ function mentionsOrganizationFact(content: string): boolean {
 }
 
 function dropsLanguagePreference(content: string): boolean {
-  return /(?:别|不要|别用|取消|去掉|删掉).{0,8}(?:中文|英文|日文|english|chinese|japanese)/i.test(content);
+  return /(?:别|不要|别用|取消|去掉|删掉).{0,8}(?:中文|英文|日文|english|chinese|japanese|日本語)/i.test(content);
 }
 
 function dropsResponseLength(content: string): boolean {

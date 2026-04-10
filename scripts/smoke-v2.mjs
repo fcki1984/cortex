@@ -188,6 +188,7 @@ async function runRound(round) {
   const organizationVariantAgentId = `${probeAgentId}-org`;
   const reviewImportAgentId = `${probeAgentId}-review`;
   const futureLanguageAgentId = `${probeAgentId}-future-language`;
+  const japaneseLanguageAgentId = `${probeAgentId}-japanese-language`;
   const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
   const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
   const mixedReviewAgentId = `${probeAgentId}-review-mixed-routing`;
@@ -217,6 +218,7 @@ async function runRound(round) {
     organizationVariantAgentId,
     reviewImportAgentId,
     futureLanguageAgentId,
+    japaneseLanguageAgentId,
     reviewStyleAutoAgentId,
     reviewStyleReviewAgentId,
     mixedReviewAgentId,
@@ -529,6 +531,31 @@ async function runRound(round) {
     assert(
       (futureLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '请用中文回答'),
       'future speech-language preference did not persist the canonical language truth',
+    );
+
+    const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '日本語で答えて',
+        assistant_message: '了解です',
+        agent_id: japaneseLanguageAgentId,
+      },
+    });
+    assert(japaneseLanguageIngest.response.status === 201, `POST /api/v2/ingest japanese language preference returned ${japaneseLanguageIngest.response.status}`);
+    assert(japaneseLanguageIngest.json?.auto_committed_count === 1, 'japanese language preference did not auto-commit exactly one item');
+    assert(japaneseLanguageIngest.json?.review_pending_count === 0, 'japanese language preference should not leave review work behind');
+    assert(
+      JSON.stringify((japaneseLanguageIngest.json?.records || []).map((item) => item.content)) === JSON.stringify(['日本語で答えてください']),
+      'japanese language preference did not write the canonical language rule',
+    );
+
+    const japaneseLanguageRecords = await request('list explicit japanese language records', 'GET', `/api/v2/records${query({
+      agent_id: japaneseLanguageAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(japaneseLanguageRecords.response.status === 200, `GET /api/v2/records japanese language preference returned ${japaneseLanguageRecords.response.status}`);
+    assert(
+      (japaneseLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '日本語で答えてください'),
+      'japanese language preference did not persist the canonical language truth',
     );
 
     const reviewInboxAutoStyleImport = await request('auto-commit short-form colloquial response-style import', 'POST', '/api/v2/review-inbox/import', {

@@ -206,6 +206,12 @@ describe('V2 shared atomic contract', () => {
         content: '请用中文回答',
       },
       {
+        input: '日本語で答えて',
+        written_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '日本語で答えてください',
+      },
+      {
         input: '三句话内就可以',
         written_kind: 'profile_rule',
         attribute_key: 'response_length',
@@ -492,6 +498,12 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('中文就好')).toEqual(expect.objectContaining({
       attribute_key: 'language_preference',
       canonical_content: '请用中文回答',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('日本語で答えて')).toEqual(expect.objectContaining({
+      attribute_key: 'language_preference',
+      canonical_content: '日本語で答えてください',
       disposition: 'auto_commit',
     }));
 

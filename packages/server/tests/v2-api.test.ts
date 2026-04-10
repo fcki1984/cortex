@@ -740,6 +740,63 @@ describe('API V2 Integration', () => {
     ]);
   });
 
+  it('auto-commits explicit japanese language preferences as durable profile rules', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-japanese-language-preview',
+        format: 'text',
+        content: '日本語で答えて',
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        requested_kind: 'profile_rule',
+        normalized_kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '日本語で答えてください',
+      }),
+    ]);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: '日本語で答えて',
+        assistant_message: '了解です',
+        agent_id: 'api-japanese-language-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(1);
+    expect(ingestBody.review_pending_count).toBe(0);
+    expect(ingestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '日本語で答えてください',
+      }),
+    ]);
+
+    const stored = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=api-japanese-language-ingest',
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(JSON.parse(stored.payload).items).toEqual([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '日本語で答えてください',
+      }),
+    ]);
+  });
+
   it('rejects compound manual writes on the public records API', async () => {
     const created = await app.inject({
       method: 'POST',
