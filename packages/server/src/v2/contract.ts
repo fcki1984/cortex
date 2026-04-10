@@ -80,9 +80,28 @@ function matchesAnchoredConversationalResponseStyle(
   ).test(content.trim());
 }
 
+function matchesAnchoredEnglishExplicitResponseStyle(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    /^(?:please\s+)?be\s+(?:more\s+)?(?:concise|brief)\s+and\s+(?:direct|directly)$/i.test(trimmed) ||
+    /^(?:please\s+)?keep\s+(?:answers?|replies?|responses?)\s+(?:concise|brief)\s+and\s+(?:direct|directly)$/i.test(trimmed) ||
+    /^(?:please\s+)?(?:reply|respond)\s+(?:more\s+)?(?:concisely|briefly)\s+and\s+directly$/i.test(trimmed)
+  );
+}
+
+function matchesAnchoredEnglishReviewResponseStyle(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    /^(?:please\s+)?be\s+(?:more\s+)?direct$/i.test(trimmed) ||
+    /^(?:please\s+)?(?:reply|respond)\s+(?:more\s+)?directly$/i.test(trimmed)
+  );
+}
+
 function matchesCanonicalResponseStyle(content: string): boolean {
   return (
     matchesAnchoredConversationalResponseStyle(content, '直接|干脆|利索|利落') ||
+    matchesAnchoredEnglishExplicitResponseStyle(content) ||
+    matchesAnchoredEnglishReviewResponseStyle(content) ||
     matchesExplicitCanonicalResponseStyle(content) ||
     /(?:说话|表达).*(?:干脆|直接|简洁|简短|精简|利索|利落)/i.test(content) ||
     /(?:干脆|直接|简洁|简短|精简|利索|利落).*(?:说话|表达)/i.test(content)
@@ -96,6 +115,7 @@ const CORTEX_MIGRATION_KEYWORD_RE = /(?:迁移|migrat(?:e|ion|ing))/i;
 function matchesExplicitCanonicalResponseStyle(content: string): boolean {
   return (
     matchesAnchoredConversationalResponseStyle(content, '干脆|利索|利落') ||
+    matchesAnchoredEnglishExplicitResponseStyle(content) ||
     /^(?:请)?(?:说话|表达).{0,4}(?:干脆|利索|利落)(?:(?:一)?点|一些|些)?$/i.test(content.trim()) ||
     (
       /(?:直接|干脆|利索|利落)/i.test(content) &&
@@ -129,6 +149,10 @@ export function matchesColloquialRecallRefactorTask(content: string): boolean {
   return /(?:先(?:收|看|处理|搞)(?:一下|下)?|先把).{0,12}\brecall\b.{0,8}(?:那块|这块|这边)?/i.test(content);
 }
 
+export function matchesExplicitEnglishRecallRefactorTask(content: string): boolean {
+  return /^current task is recall (?:refactor|rewrite)$/i.test(content.trim());
+}
+
 export function matchesColloquialCortexWorkflowTask(
   content: string,
   stateKey: 'deployment_status' | 'migration_status',
@@ -143,6 +167,7 @@ export function matchesColloquialCortexWorkflowTask(
 export function matchesImplicitCortexTaskSubject(content: string): boolean {
   return (
     matchesColloquialRecallRefactorTask(content) ||
+    matchesExplicitEnglishRecallRefactorTask(content) ||
     matchesColloquialCortexWorkflowTask(content, 'deployment_status') ||
     matchesColloquialCortexWorkflowTask(content, 'migration_status')
   );
@@ -377,7 +402,19 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '最好简洁直接一点',
       '优先简洁直接回答',
     ],
-    matches_conversational: (content: string) => matchesExplicitCanonicalResponseStyle(content),
+    matches_conversational: (content: string) => !/[A-Za-z]/.test(content) && matchesExplicitCanonicalResponseStyle(content),
+    matches_attribute: (content: string) => !/[A-Za-z]/.test(content) && matchesResponseStyleAttribute(content),
+  },
+  {
+    attribute_key: 'response_style',
+    canonical_content: 'Please keep responses concise and direct',
+    disposition: 'auto_commit',
+    strong_inputs: [
+      'Be concise and direct',
+      'Keep responses concise and direct',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => /[A-Za-z]/.test(content) && matchesExplicitCanonicalResponseStyle(content),
     matches_attribute: (content: string) => matchesResponseStyleAttribute(content),
   },
   {
@@ -398,10 +435,27 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '优先简洁直接回答',
     ],
     matches_conversational: (content: string) => (
+      !/[A-Za-z]/.test(content) &&
       !matchesExplicitCanonicalResponseStyle(content) &&
       matchesCanonicalResponseStyle(content)
     ),
-    matches_attribute: (content: string) => matchesResponseStyleAttribute(content),
+    matches_attribute: (content: string) => !/[A-Za-z]/.test(content) && matchesResponseStyleAttribute(content),
+  },
+  {
+    attribute_key: 'response_style',
+    canonical_content: 'Please keep responses concise and direct',
+    disposition: 'review',
+    strong_inputs: [
+      'Be direct',
+      'Reply more directly',
+    ],
+    weak_inputs: [],
+    matches_conversational: (content: string) => (
+      /[A-Za-z]/.test(content) &&
+      !matchesExplicitCanonicalResponseStyle(content) &&
+      matchesCanonicalResponseStyle(content)
+    ),
+    matches_attribute: (content: string) => /[A-Za-z]/.test(content) && matchesResponseStyleAttribute(content),
   },
 ];
 
@@ -583,6 +637,15 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
   {
     input: 'Current task is refactoring Cortex recall',
+    requested_kind: 'task_state',
+    written_kind: 'task_state',
+    disposition: 'auto_commit',
+    state_key: 'refactor_status',
+    relation_predicate: null,
+    output: 'task_state(subject_key=cortex, state_key=refactor_status)',
+  },
+  {
+    input: 'Current task is recall refactor',
     requested_kind: 'task_state',
     written_kind: 'task_state',
     disposition: 'auto_commit',
@@ -854,6 +917,7 @@ function canonicalTaskStateContent(stateKey: string, content: string, subjectKey
     case 'refactor_status':
       if (
         !matchesColloquialRecallRefactorTask(content) &&
+        !matchesExplicitEnglishRecallRefactorTask(content) &&
         (!/cortex/i.test(content) || !/recall/i.test(content) || !CORTEX_REFACTOR_KEYWORD_RE.test(content))
       ) {
         return null;

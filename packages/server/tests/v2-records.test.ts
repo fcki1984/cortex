@@ -408,6 +408,31 @@ describe('CortexRecordsV2', () => {
     expect(located.record.content).toBe('I live in Tokyo');
   });
 
+  it('stores English explicit response-style writes using canonical durable content', async () => {
+    const style = await service.remember({
+      agent_id: 'colloquial-profile-style-agent-en',
+      kind: 'profile_rule',
+      content: 'Be concise and direct',
+    });
+
+    expect(style.record.kind).toBe('profile_rule');
+    expect(style.record.attribute_key).toBe('response_style');
+    expect(style.record.content).toBe('Please keep responses concise and direct');
+  });
+
+  it('stores English shorthand recall-refactor task writes using canonical durable content', async () => {
+    const task = await service.remember({
+      agent_id: 'colloquial-task-agent-en',
+      kind: 'task_state',
+      content: 'Current task is recall refactor',
+    });
+
+    expect(task.record.kind).toBe('task_state');
+    expect(task.record.subject_key).toBe('cortex');
+    expect(task.record.state_key).toBe('refactor_status');
+    expect(task.record.content).toBe('当前任务是重构 Cortex recall');
+  });
+
   it('stores additional constraint-style colloquial profile-rule writes using canonical durable content', async () => {
     const length = await service.remember({
       agent_id: 'colloquial-profile-rule-agent-2',

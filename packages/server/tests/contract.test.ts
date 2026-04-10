@@ -158,6 +158,12 @@ describe('V2 shared atomic contract', () => {
         content: 'Please avoid complex solutions',
       },
       {
+        input: 'Be concise and direct',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: 'Please keep responses concise and direct',
+      },
+      {
         input: "Don't make it too complex",
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
@@ -377,6 +383,13 @@ describe('V2 shared atomic contract', () => {
       },
       {
         input: 'Current task is refactoring Cortex recall',
+        written_kind: 'task_state',
+        attribute_key: null,
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      },
+      {
+        input: 'Current task is recall refactor',
         written_kind: 'task_state',
         attribute_key: null,
         state_key: 'refactor_status',
@@ -747,6 +760,12 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('Be concise and direct')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: 'Please keep responses concise and direct',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('说话直接一点')).toEqual(expect.objectContaining({
       attribute_key: 'response_style',
       canonical_content: '请简洁直接回答',
@@ -768,6 +787,18 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('讲话直接点')).toEqual(expect.objectContaining({
       attribute_key: 'response_style',
       canonical_content: '请简洁直接回答',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('Be direct')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: 'Please keep responses concise and direct',
+      disposition: 'review',
+    }));
+
+    expect(matchConversationalProfileRule!('Reply more directly')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: 'Please keep responses concise and direct',
       disposition: 'review',
     }));
 

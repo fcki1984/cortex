@@ -191,6 +191,8 @@ async function runRound(round) {
   const englishColloquialProfileAgentId = `${probeAgentId}-profile-en`;
   const englishColloquialExpansionAgentId = `${probeAgentId}-profile-en-extended`;
   const englishLocationAgentId = `${probeAgentId}-location-en`;
+  const englishResponseStyleAgentId = `${probeAgentId}-style-en`;
+  const englishRecallTaskAgentId = `${probeAgentId}-task-en`;
   const japaneseLanguageAgentId = `${probeAgentId}-japanese-language`;
   const reviewStyleAutoAgentId = `${probeAgentId}-review-style-auto`;
   const reviewStyleReviewAgentId = `${probeAgentId}-review-style-review`;
@@ -228,6 +230,8 @@ async function runRound(round) {
     englishColloquialProfileAgentId,
     englishColloquialExpansionAgentId,
     englishLocationAgentId,
+    englishResponseStyleAgentId,
+    englishRecallTaskAgentId,
     japaneseLanguageAgentId,
     reviewStyleAutoAgentId,
     reviewStyleReviewAgentId,
@@ -677,6 +681,52 @@ async function runRound(round) {
         'I live in Tokyo',
       ]),
       'english living-location variants did not converge to the canonical location truth',
+    );
+
+    const englishResponseStyleIngest = await request('auto-commit english explicit response-style', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Be concise and direct',
+        assistant_message: 'Understood',
+        agent_id: englishResponseStyleAgentId,
+      },
+    });
+    assert(englishResponseStyleIngest.response.status === 201, `POST /api/v2/ingest english explicit response-style returned ${englishResponseStyleIngest.response.status}`);
+    assert(englishResponseStyleIngest.json?.auto_committed_count === 1, 'english explicit response-style did not auto-commit exactly one item');
+    assert(englishResponseStyleIngest.json?.review_pending_count === 0, 'english explicit response-style should not leave review work behind');
+
+    const englishResponseStyleRecords = await request('list english response-style durable records', 'GET', `/api/v2/records${query({
+      agent_id: englishResponseStyleAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishResponseStyleRecords.response.status === 200, `GET /api/v2/records english response-style durables returned ${englishResponseStyleRecords.response.status}`);
+    assert(
+      JSON.stringify((englishResponseStyleRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        'Please keep responses concise and direct',
+      ]),
+      'english explicit response-style did not persist the canonical response-style truth',
+    );
+
+    const englishRecallTaskIngest = await request('auto-commit english shorthand recall-refactor task', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Current task is recall refactor',
+        assistant_message: 'Understood',
+        agent_id: englishRecallTaskAgentId,
+      },
+    });
+    assert(englishRecallTaskIngest.response.status === 201, `POST /api/v2/ingest english shorthand recall-refactor task returned ${englishRecallTaskIngest.response.status}`);
+    assert(englishRecallTaskIngest.json?.auto_committed_count === 1, 'english shorthand recall-refactor task did not auto-commit exactly one item');
+    assert(englishRecallTaskIngest.json?.review_pending_count === 0, 'english shorthand recall-refactor task should not leave review work behind');
+
+    const englishRecallTaskRecords = await request('list english shorthand recall-refactor task records', 'GET', `/api/v2/records${query({
+      agent_id: englishRecallTaskAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(englishRecallTaskRecords.response.status === 200, `GET /api/v2/records english shorthand recall-refactor tasks returned ${englishRecallTaskRecords.response.status}`);
+    assert(
+      JSON.stringify((englishRecallTaskRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        '当前任务是重构 Cortex recall',
+      ]),
+      'english shorthand recall-refactor task did not persist the canonical task truth',
     );
 
     const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {

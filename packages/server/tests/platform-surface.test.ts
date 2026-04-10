@@ -131,6 +131,12 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain('user_message: "I\'m located in Tokyo"');
     expect(smoke).toContain("englishLocatedLocationIngest.json?.auto_committed_count === 0");
     expect(smoke).toContain("(englishLocationRecords.json?.items || []).map((item) => item.content).sort()");
+    expect(smoke).toContain('auto-commit english explicit response-style');
+    expect(smoke).toContain("user_message: 'Be concise and direct'");
+    expect(smoke).toContain("(englishResponseStyleRecords.json?.items || []).map((item) => item.content).sort()");
+    expect(smoke).toContain('auto-commit english shorthand recall-refactor task');
+    expect(smoke).toContain("user_message: 'Current task is recall refactor'");
+    expect(smoke).toContain("(englishRecallTaskRecords.json?.items || []).map((item) => item.content).sort()");
     expect(smoke).toContain('auto-commit explicit japanese language preference');
     expect(smoke).toContain("user_message: '日本語で答えて'");
     expect(smoke).toContain("japaneseLanguageIngest.json?.auto_committed_count === 1");

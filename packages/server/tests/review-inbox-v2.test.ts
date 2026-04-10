@@ -2151,6 +2151,51 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('routes English direct-only response-style ingest into review without auto-committing a durable', async () => {
+    const setup = await createApp({ responseStyleReview: true });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-english-direct-only',
+        user_message: 'Be direct',
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(0);
+    expect(body.review_pending_count).toBe(1);
+    expect(typeof body.review_batch_id).toBe('string');
+    expect(body.records).toEqual([]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/v2/review-inbox/${body.review_batch_id}`,
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(JSON.parse(detail.payload)).toEqual(expect.objectContaining({
+      batch: expect.objectContaining({
+        status: 'pending',
+        source_preview: 'Be direct',
+      }),
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          status: 'pending',
+          payload: expect.objectContaining({
+            attribute_key: 'response_style',
+            content: 'Please keep responses concise and direct',
+            source_excerpt: 'Be direct',
+          }),
+        }),
+      ]),
+    }));
+  });
+
   it('auto-commits short-form colloquial response-style imports without creating a review batch', async () => {
     const setup = await createApp();
     app = setup.app;

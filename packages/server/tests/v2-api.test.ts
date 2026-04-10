@@ -2777,6 +2777,94 @@ describe('API V2 Integration', () => {
     ]);
   });
 
+  it('keeps English explicit response-style inputs aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-response-style-preview',
+        format: 'text',
+        content: 'Be concise and direct',
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: 'Please keep responses concise and direct',
+      }),
+    ]);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Be concise and direct',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-response-style-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(1);
+    expect(ingestBody.review_pending_count).toBe(0);
+    expect(ingestBody.review_batch_id || null).toBe(null);
+    expect(ingestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please keep responses concise and direct',
+      }),
+    ]);
+  });
+
+  it('keeps English shorthand recall-refactor task inputs aligned across preview and ingest', async () => {
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/api/v2/import/preview',
+      payload: {
+        agent_id: 'api-english-recall-refactor-preview',
+        format: 'text',
+        content: 'Current task is recall refactor',
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    const previewBody = JSON.parse(preview.payload);
+    expect(previewBody.record_candidates).toEqual([
+      expect.objectContaining({
+        normalized_kind: 'task_state',
+        state_key: 'refactor_status',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+
+    const ingested = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        user_message: 'Current task is recall refactor',
+        assistant_message: 'Understood',
+        agent_id: 'api-english-recall-refactor-ingest',
+      },
+    });
+
+    expect(ingested.statusCode).toBe(201);
+    const ingestBody = JSON.parse(ingested.payload);
+    expect(ingestBody.auto_committed_count).toBe(1);
+    expect(ingestBody.review_pending_count).toBe(0);
+    expect(ingestBody.review_batch_id || null).toBe(null);
+    expect(ingestBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
   it('treats synonymous English location facts as canonical no-ops once the truth is already active', async () => {
     const firstIngest = await app.inject({
       method: 'POST',
@@ -3030,6 +3118,46 @@ describe('API V2 Integration', () => {
         expect.objectContaining({
           written_kind: 'profile_rule',
           content: '请用中文回答',
+        }),
+      ]);
+    } finally {
+      cortex.recordsV2 = originalRecordsV2;
+    }
+  });
+
+  it('routes English direct-only response-style inputs to review in mixed ingest results', async () => {
+    const originalRecordsV2 = cortex.recordsV2;
+    cortex.recordsV2 = new CortexRecordsV2(createReviewInboxResponseStyleMockLLM(), cortex.embeddingProvider);
+    await cortex.recordsV2.initialize();
+
+    try {
+      const ingested = await app.inject({
+        method: 'POST',
+        url: '/api/v2/ingest',
+        payload: {
+          user_message: 'Use English from now on. Be direct',
+          assistant_message: 'Understood',
+          agent_id: 'api-review-routing-english-direct-mixed',
+        },
+      });
+
+      expect(ingested.statusCode).toBe(201);
+      const ingestBody = JSON.parse(ingested.payload);
+      expect(ingestBody.auto_committed_count).toBe(1);
+      expect(ingestBody.review_pending_count).toBe(1);
+      expect(ingestBody.review_batch_id).toBeTruthy();
+      expect(ingestBody.review_source_preview).toBe('Be direct');
+      expect(ingestBody.review_summary).toEqual({
+        total: 1,
+        pending: 1,
+        accepted: 0,
+        rejected: 0,
+        failed: 0,
+      });
+      expect(ingestBody.records).toEqual([
+        expect.objectContaining({
+          written_kind: 'profile_rule',
+          content: 'Please answer in English',
         }),
       ]);
     } finally {
