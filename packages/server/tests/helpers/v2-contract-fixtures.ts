@@ -207,6 +207,31 @@ export function createReviewInboxResponseStyleMockLLM(): LLMProvider {
   };
 }
 
+export function createShortOrganizationRewriteDriftMockLLM(): LLMProvider {
+  return {
+    name: 'short-organization-rewrite-drift-mock',
+    complete: vi.fn().mockImplementation(async (prompt: string) => {
+      if (prompt.includes('换 腾讯')) {
+        return JSON.stringify({
+          records: [{
+            kind: 'profile_rule',
+            source_type: 'user_explicit',
+            owner_scope: 'user',
+            subject_key: 'user',
+            attribute_key: 'response_style',
+            value_text: '回答尽量简洁直接',
+            priority: 0.7,
+            confidence: 0.81,
+          }],
+          nothing_extracted: false,
+        });
+      }
+
+      return '{"records":[],"nothing_extracted":true}';
+    }),
+  };
+}
+
 export function createReviewInboxCompoundDurableMockLLM(): LLMProvider {
   return {
     name: 'review-inbox-compound-durable-mock',

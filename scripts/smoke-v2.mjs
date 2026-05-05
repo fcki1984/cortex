@@ -9,10 +9,11 @@ const resolvedBaseUrl = resolveSmokeBaseUrl({
   defaultBaseUrl: 'http://localhost:21100',
 });
 const authToken = process.env.CORTEX_AUTH_TOKEN || '';
-const baseAgentId = process.env.CORTEX_AGENT_ID || `smoke-v2-${Date.now()}`;
+const baseAgentId = process.env.CORTEX_AGENT_ID || `sv2-${Date.now().toString(36)}`;
 const smokeRounds = Math.max(1, Number(process.env.SMOKE_ROUNDS || process.argv[3] || '1'));
 const baseUrl = resolvedBaseUrl.baseUrl;
 const baseUrlSource = resolvedBaseUrl.source;
+const MAX_AGENT_ID_LENGTH = 64;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -59,6 +60,7 @@ async function deleteById(pathPrefix, items) {
       label: `cleanup ${pathPrefix}`,
       method: 'DELETE',
       path: `${pathPrefix}/${encodeURIComponent(item.id)}`,
+      retryable: true,
       smokePhase: 'cleanup',
     });
   }
@@ -263,6 +265,11 @@ async function runRound(round) {
     priorityMissionAgentId,
     missionKeyedAgentId,
   ];
+  const tooLongAgentIds = cleanupAgentIds.filter((agentId) => agentId.length > MAX_AGENT_ID_LENGTH);
+  assert(
+    tooLongAgentIds.length === 0,
+    `Smoke agent ids exceed ${MAX_AGENT_ID_LENGTH} chars: ${tooLongAgentIds.join(', ')}`,
+  );
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus, smokePhase } = {}) {
     return runSmokeRequest({
@@ -1765,9 +1772,18 @@ async function runRound(round) {
       },
     });
     assert(organizationRewriteFollowup.response.status === 201, `POST /api/v2/ingest organization rewrite returned ${organizationRewriteFollowup.response.status}`);
-    assert(organizationRewriteFollowup.json?.auto_committed_count === 1, 'organization rewrite did not auto-commit exactly one item');
-    assert(organizationRewriteFollowup.json?.review_pending_count === 0, 'organization rewrite left pending items behind');
-    assert(organizationRewriteFollowup.json?.records?.[0]?.content === '我在 腾讯 工作', 'organization rewrite did not produce the canonical Tencent fact');
+    assert(
+      organizationRewriteFollowup.json?.auto_committed_count === 1,
+      `organization rewrite did not auto-commit exactly one item; organization rewrite response: ${JSON.stringify(organizationRewriteFollowup.json)}`,
+    );
+    assert(
+      organizationRewriteFollowup.json?.review_pending_count === 0,
+      `organization rewrite left pending items behind; organization rewrite response: ${JSON.stringify(organizationRewriteFollowup.json)}`,
+    );
+    assert(
+      organizationRewriteFollowup.json?.records?.[0]?.content === '我在 腾讯 工作',
+      `organization rewrite did not produce the canonical Tencent fact; organization rewrite response: ${JSON.stringify(organizationRewriteFollowup.json)}`,
+    );
 
     const organizationRewriteListed = await request('list rewritten organization truth', 'GET', `/api/v2/records${query({
       agent_id: organizationRewriteAgentId,

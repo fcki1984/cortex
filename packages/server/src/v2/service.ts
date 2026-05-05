@@ -486,6 +486,12 @@ function routeDetailByRetainMission(
   };
 }
 
+function shouldTryActiveTruthShortRewrite(details: CollectedCandidateDetail[]): boolean {
+  if (details.length === 0) return true;
+  if (details.every((detail) => detail.candidate.written_kind === 'session_note')) return true;
+  return details.every((detail) => classifySharedDetailDisposition(detail) !== 'auto_commit');
+}
+
 function isAtomicDeterministicInput(content: string): boolean {
   return !/[\n\r,，;；]/.test(content);
 }
@@ -2333,7 +2339,7 @@ export class CortexRecordsV2 {
       }
     }
 
-    if (!skipActiveTruthResolution && (normalizedCandidates.length === 0 || normalizedCandidates.every(candidate => candidate.written_kind === 'session_note'))) {
+    if (!skipActiveTruthResolution && shouldTryActiveTruthShortRewrite(candidateDetails)) {
       const rewritten = resolveShortUserRewriteAgainstDurables({
         agentId,
         userContent: user,

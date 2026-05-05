@@ -13,6 +13,7 @@ import {
   createContractDriftMockLLM,
   createNoOpLLM,
   createPrecisionFirstDriftMockLLM,
+  createShortOrganizationRewriteDriftMockLLM,
   createWeakColloquialProfileRuleDriftMockLLM,
 } from './helpers/v2-contract-fixtures.js';
 
@@ -1593,6 +1594,62 @@ describe('V2 Import / Export', () => {
     expect(relations.listCandidates({ agent_id: 'ingest-active-truth-organization-rewrite-compact' }).items.map((item) => item.object_key)).toEqual([
       'anthropic',
     ]);
+  });
+
+  it('prefers active organization truth rewrite over deep extraction review drift', async () => {
+    const { records, relations } = await createServices(createShortOrganizationRewriteDriftMockLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-organization-rewrite-deep-drift',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-organization-rewrite-deep-drift',
+      user_message: '换 腾讯',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.source_type).toBe('user_explicit');
+    expect(ingested.records[0]?.content).toBe('我在 腾讯 工作');
+    expect(ingested.review_record_candidates).toHaveLength(0);
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-organization-rewrite-deep-drift' }).items.map((record) => record.content)).toEqual([
+      '我在 腾讯 工作',
+    ]);
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-organization-rewrite-deep-drift' }).items.map((item) => item.object_key)).toEqual([
+      '腾讯',
+    ]);
+  });
+
+  it('does not let active organization rewrite override a fresh deterministic location fact', async () => {
+    const { records, relations } = await createServices(createNoOpLLM());
+
+    await records.remember({
+      agent_id: 'ingest-active-truth-organization-with-new-location',
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+    });
+
+    const ingested = await records.ingest({
+      agent_id: 'ingest-active-truth-organization-with-new-location',
+      user_message: '我住东京',
+      assistant_message: '收到',
+    });
+
+    expect(ingested.records).toHaveLength(1);
+    expect(ingested.records[0]?.written_kind).toBe('fact_slot');
+    expect(ingested.records[0]?.content).toBe('我住东京');
+    expect(records.listRecords({ agent_id: 'ingest-active-truth-organization-with-new-location' }).items.map((record) => record.content).sort()).toEqual([
+      '我住东京',
+      '我在 OpenAI 工作',
+    ].sort());
+    expect(relations.listCandidates({ agent_id: 'ingest-active-truth-organization-with-new-location' }).items.map((item) => item.object_key).sort()).toEqual([
+      'openai',
+      '东京',
+    ].sort());
   });
 
   it('rewrites a contextual short location follow-up against the current active truth into the updated fact winner', async () => {

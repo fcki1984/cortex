@@ -77,6 +77,11 @@ describe('Platform surface migration', () => {
     const releasePlan = fs.readFileSync(RELEASE_PLAN, 'utf8');
 
     expect(smoke).toContain('SMOKE_ROUNDS');
+    expect(smoke).toContain("`sv2-${Date.now().toString(36)}`");
+    expect(smoke).toContain('MAX_AGENT_ID_LENGTH = 64');
+    expect(smoke).toContain('Smoke agent ids exceed');
+    expect(smoke).toContain('retryable: true');
+    expect(smoke).toContain('organization rewrite response: ${JSON.stringify(organizationRewriteFollowup.json)}');
     expect(smoke).toContain('for (let round = 1; round <= smokeRounds; round += 1)');
     expect(smoke).toContain('我住大阪。请用中文回答。当前任务是重构 Cortex recall');
     expect(smoke).toContain('最近也许会考虑换方案。现在住东京');
