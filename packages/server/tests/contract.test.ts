@@ -140,6 +140,18 @@ describe('V2 shared atomic contract', () => {
         content: 'Please keep answers within three sentences',
       },
       {
+        input: 'Please answer within three sentences',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      },
+      {
+        input: 'Keep replies to three sentences',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      },
+      {
         input: '方案简单点',
         written_kind: 'profile_rule',
         attribute_key: 'solution_complexity',
@@ -159,6 +171,12 @@ describe('V2 shared atomic contract', () => {
       },
       {
         input: 'Be concise and direct',
+        written_kind: 'profile_rule',
+        attribute_key: 'response_style',
+        content: 'Please keep responses concise and direct',
+      },
+      {
+        input: 'Respond directly and concisely',
         written_kind: 'profile_rule',
         attribute_key: 'response_style',
         content: 'Please keep responses concise and direct',
@@ -301,6 +319,18 @@ describe('V2 shared atomic contract', () => {
         attribute_key: 'solution_complexity',
         content: '不要复杂方案',
       },
+      {
+        input: 'Use the simplest approach',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
+      },
+      {
+        input: 'Keep the approach lightweight',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+        content: 'Please avoid complex solutions',
+      },
     ] as const;
 
     for (const sample of samples) {
@@ -341,6 +371,20 @@ describe('V2 shared atomic contract', () => {
       },
       {
         input: "I'm located in Tokyo",
+        written_kind: 'fact_slot',
+        attribute_key: 'location',
+        state_key: null,
+        content: 'I live in Tokyo',
+      },
+      {
+        input: 'I reside in Tokyo',
+        written_kind: 'fact_slot',
+        attribute_key: 'location',
+        state_key: null,
+        content: 'I live in Tokyo',
+      },
+      {
+        input: 'Currently residing in Tokyo',
         written_kind: 'fact_slot',
         attribute_key: 'location',
         state_key: null,
@@ -402,6 +446,20 @@ describe('V2 shared atomic contract', () => {
         state_key: 'refactor_status',
         content: '当前任务是重构 Cortex recall',
       },
+      {
+        input: "I'm employed by OpenAI",
+        written_kind: 'fact_slot',
+        attribute_key: 'organization',
+        state_key: null,
+        content: 'I work at OpenAI',
+      },
+      {
+        input: 'Currently employed at OpenAI',
+        written_kind: 'fact_slot',
+        attribute_key: 'organization',
+        state_key: null,
+        content: 'I work at OpenAI',
+      },
     ] as const;
 
     for (const sample of samples) {
@@ -431,6 +489,24 @@ describe('V2 shared atomic contract', () => {
 
   it('keeps deployment and migration task-state samples in the shared canonical contract examples', () => {
     expect(V2_CONTRACT_CANONICAL_CASES).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        input: '方案尽量简单点',
+        requested_kind: 'profile_rule',
+        written_kind: 'profile_rule',
+        attribute_key: 'solution_complexity',
+      }),
+      expect.objectContaining({
+        input: '在 OpenAI 上班',
+        requested_kind: 'fact_slot',
+        written_kind: 'fact_slot',
+        attribute_key: 'organization',
+      }),
+      expect.objectContaining({
+        input: '目前在 OpenAI 上班',
+        requested_kind: 'fact_slot',
+        written_kind: 'fact_slot',
+        attribute_key: 'organization',
+      }),
       expect.objectContaining({
         input: '当前任务是部署 Cortex',
         requested_kind: 'task_state',
@@ -539,6 +615,18 @@ describe('V2 shared atomic contract', () => {
     }));
 
     expect(matchConversationalProfileRule!('Three sentences max')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: 'Please keep answers within three sentences',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Please answer within three sentences')).toEqual(expect.objectContaining({
+      attribute_key: 'response_length',
+      canonical_content: 'Please keep answers within three sentences',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Keep replies to three sentences')).toEqual(expect.objectContaining({
       attribute_key: 'response_length',
       canonical_content: 'Please keep answers within three sentences',
       disposition: 'auto_commit',
@@ -688,6 +776,18 @@ describe('V2 shared atomic contract', () => {
       disposition: 'auto_commit',
     }));
 
+    expect(matchConversationalProfileRule!('Use the simplest approach')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: 'Please avoid complex solutions',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Keep the approach lightweight')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: 'Please avoid complex solutions',
+      disposition: 'auto_commit',
+    }));
+
     expect(matchConversationalProfileRule!('轻量方案就可以')).toEqual(expect.objectContaining({
       attribute_key: 'solution_complexity',
       canonical_content: '不要复杂方案',
@@ -695,6 +795,12 @@ describe('V2 shared atomic contract', () => {
     }));
 
     expect(matchConversationalProfileRule!('轻量方案就好')).toEqual(expect.objectContaining({
+      attribute_key: 'solution_complexity',
+      canonical_content: '不要复杂方案',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('方案尽量简单点')).toEqual(expect.objectContaining({
       attribute_key: 'solution_complexity',
       canonical_content: '不要复杂方案',
       disposition: 'auto_commit',
@@ -761,6 +867,12 @@ describe('V2 shared atomic contract', () => {
     }));
 
     expect(matchConversationalProfileRule!('Be concise and direct')).toEqual(expect.objectContaining({
+      attribute_key: 'response_style',
+      canonical_content: 'Please keep responses concise and direct',
+      disposition: 'auto_commit',
+    }));
+
+    expect(matchConversationalProfileRule!('Respond directly and concisely')).toEqual(expect.objectContaining({
       attribute_key: 'response_style',
       canonical_content: 'Please keep responses concise and direct',
       disposition: 'auto_commit',
@@ -843,6 +955,7 @@ describe('V2 shared atomic contract', () => {
     expect(matchConversationalProfileRule!('回答短一点')).toBe(null);
     expect(matchConversationalProfileRule!('回复短一点')).toBe(null);
     expect(matchConversationalProfileRule!('简单些就行')).toBe(null);
+    expect(matchConversationalProfileRule!('先别搞复杂')).toBe(null);
     expect(matchConversationalProfileRule!('直接讲中文')).toBe(null);
     expect(matchConversationalProfileRule!('直接点说')).toBe(null);
     expect(matchConversationalProfileRule!('先说重点')).toBe(null);
@@ -927,6 +1040,14 @@ describe('V2 shared atomic contract', () => {
     const samples = [
       {
         input: '目前任职于 OpenAI',
+        content: '我在 OpenAI 工作',
+      },
+      {
+        input: '在 OpenAI 上班',
+        content: '我在 OpenAI 工作',
+      },
+      {
+        input: '目前在 OpenAI 上班',
         content: '我在 OpenAI 工作',
       },
       {

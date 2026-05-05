@@ -188,6 +188,62 @@ describe('V2 review inbox', () => {
     ]));
   });
 
+  it('auto-commits stable colloquial Chinese solution-complexity and organization facts without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const complexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-complexity',
+        user_message: '方案尽量简单点',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(complexity.statusCode).toBe(201);
+    const complexityBody = JSON.parse(complexity.payload);
+    expect(complexityBody.auto_committed_count).toBe(1);
+    expect(complexityBody.review_pending_count).toBe(0);
+    expect(complexityBody.review_batch_id || null).toBe(null);
+    expect(complexityBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: '不要复杂方案',
+      }),
+    ]);
+
+    const organization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-colloquial-organization',
+        user_message: '目前在 OpenAI 上班',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(organization.statusCode).toBe(201);
+    const organizationBody = JSON.parse(organization.payload);
+    expect(organizationBody.auto_committed_count).toBe(1);
+    expect(organizationBody.review_pending_count).toBe(0);
+    expect(organizationBody.review_batch_id || null).toBe(null);
+    expect(organizationBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: '我在 OpenAI 工作',
+      }),
+    ]);
+
+    const inbox = await app.inject({
+      method: 'GET',
+      url: '/api/v2/review-inbox?agent_id=review-auto-colloquial-organization',
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
   it('auto-commits stable short colloquial response-style inputs without creating a review batch', async () => {
     const setup = await createApp();
     app = setup.app;
@@ -218,6 +274,144 @@ describe('V2 review inbox', () => {
     });
     expect(inbox.statusCode).toBe(200);
     expect(JSON.parse(inbox.payload).items).toHaveLength(0);
+  });
+
+  it('auto-commits explicit English response-length inputs without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-english-length',
+        user_message: 'Please answer within three sentences',
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.review_batch_id || null).toBe(null);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please keep answers within three sentences',
+      }),
+    ]);
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-auto-english-length',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'response_length',
+        content: 'Please keep answers within three sentences',
+      }),
+    ]));
+  });
+
+  it('auto-commits explicit English residence and employment facts without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const residence = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-english-residence',
+        user_message: 'I reside in Tokyo',
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(residence.statusCode).toBe(201);
+    const residenceBody = JSON.parse(residence.payload);
+    expect(residenceBody.auto_committed_count).toBe(1);
+    expect(residenceBody.review_pending_count).toBe(0);
+    expect(residenceBody.review_batch_id || null).toBe(null);
+    expect(residenceBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I live in Tokyo',
+      }),
+    ]);
+
+    const employment = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-english-employment',
+        user_message: "I'm employed by OpenAI",
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(employment.statusCode).toBe(201);
+    const employmentBody = JSON.parse(employment.payload);
+    expect(employmentBody.auto_committed_count).toBe(1);
+    expect(employmentBody.review_pending_count).toBe(0);
+    expect(employmentBody.review_batch_id || null).toBe(null);
+    expect(employmentBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'fact_slot',
+        content: 'I work at OpenAI',
+      }),
+    ]);
+  });
+
+  it('auto-commits additional explicit English style and complexity inputs without creating a review batch', async () => {
+    const setup = await createApp();
+    app = setup.app;
+
+    const style = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-english-style-2',
+        user_message: 'Respond directly and concisely',
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(style.statusCode).toBe(201);
+    const styleBody = JSON.parse(style.payload);
+    expect(styleBody.auto_committed_count).toBe(1);
+    expect(styleBody.review_pending_count).toBe(0);
+    expect(styleBody.review_batch_id || null).toBe(null);
+    expect(styleBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please keep responses concise and direct',
+      }),
+    ]);
+
+    const complexity = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-auto-english-complexity-2',
+        user_message: 'Use the simplest approach',
+        assistant_message: 'Understood',
+      },
+    });
+
+    expect(complexity.statusCode).toBe(201);
+    const complexityBody = JSON.parse(complexity.payload);
+    expect(complexityBody.auto_committed_count).toBe(1);
+    expect(complexityBody.review_pending_count).toBe(0);
+    expect(complexityBody.review_batch_id || null).toBe(null);
+    expect(complexityBody.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'profile_rule',
+        content: 'Please avoid complex solutions',
+      }),
+    ]);
   });
 
   it('filters out-of-scope ingest durables by the global retain mission and reports mission_filtered_count', async () => {
@@ -454,6 +648,88 @@ describe('V2 review inbox', () => {
       }),
       expect.objectContaining({
         attribute_key: 'response_length',
+      }),
+    ]));
+  });
+
+  it('treats natural current-priority-task missions as in-scope for task-state auto-commit', async () => {
+    const setup = await createApp({
+      globalMission: '保留长期偏好、稳定背景和当前重点任务',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/ingest',
+      payload: {
+        agent_id: 'review-mission-priority-task-ingest',
+        user_message: '当前任务是重构 Cortex recall',
+        assistant_message: '收到',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.auto_committed_count).toBe(1);
+    expect(body.review_pending_count).toBe(0);
+    expect(body.mission_filtered_count).toBe(0);
+    expect(body.records).toEqual([
+      expect.objectContaining({
+        written_kind: 'task_state',
+        content: '当前任务是重构 Cortex recall',
+      }),
+    ]);
+  });
+
+  it('uses natural key-level mission wording to retain only communication language and work-company durables', async () => {
+    const setup = await createApp({
+      globalMission: '只保留沟通语言和工作公司',
+    });
+    app = setup.app;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v2/review-inbox/import',
+      payload: {
+        agent_id: 'review-mission-natural-keyed-import',
+        format: 'text',
+        content: '后续交流中文就行。我住东京。我在 OpenAI 工作',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.payload);
+    expect(body.batch_id || null).toBe(null);
+    expect(body.auto_committed_count).toBe(2);
+    expect(body.mission_filtered_count).toBe(1);
+    expect(body.summary).toEqual(expect.objectContaining({
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      failed: 0,
+    }));
+
+    const records = await app.inject({
+      method: 'GET',
+      url: '/api/v2/records?agent_id=review-mission-natural-keyed-import',
+    });
+    expect(records.statusCode).toBe(200);
+    expect(JSON.parse(records.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'profile_rule',
+        attribute_key: 'language_preference',
+        content: '请用中文回答',
+      }),
+      expect.objectContaining({
+        kind: 'fact_slot',
+        attribute_key: 'organization',
+        content: '我在 OpenAI 工作',
+      }),
+    ]));
+    expect(JSON.parse(records.payload).items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute_key: 'location',
       }),
     ]));
   });

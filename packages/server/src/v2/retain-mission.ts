@@ -30,11 +30,11 @@ type ParsedRetainMission = {
 const STRICT_LONG_TERM_RE = /(?:长期|长期有复用价值|真正长期|复用价值|可复用|reusable|long[-\s]?term)/i;
 const ONLY_MODE_RE = /(?:只保留|仅保留|只留下|only retain|retain only)/i;
 const NEGATION_RE = '(?:不保留|不要|排除|过滤|忽略|别留|别记|skip|exclude|omit|drop)';
-const TASK_STATE_EXCLUDE_RE = /(?:(?:不保留|不要|排除|过滤|忽略).{0,8}(?:短期|当前|临时|任务|项目|todo|待办|进度|状态)|(?:短期|当前|临时).{0,6}(?:任务|项目).{0,8}(?:不保留|不要))/i;
-const TASK_STATE_INCLUDE_RE = /(?:(?:持续|长期|ongoing|persistent).{0,6}(?:任务|项目|todo|待办|进度)|(?:任务|项目|todo|待办|进度).{0,8}(?:保留|记录|retain))/i;
+const TASK_STATE_EXCLUDE_RE = /(?:(?:不保留|不要|排除|过滤|忽略|别留|别记).{0,12}(?:短期|当前|临时|手头|眼前)?.{0,6}(?:任务|项目|todo|待办|进度|状态|工作|事项|事情|在做的事)|(?:短期|当前|临时|手头|眼前).{0,6}(?:任务|项目|工作|事项|事情|在做的事).{0,12}(?:不保留|不要|排除|过滤|忽略|别留|别记))/i;
+const TASK_STATE_INCLUDE_RE = /(?:(?:持续|长期|当前重点|重点|ongoing|persistent|priority).{0,6}(?:任务|项目|todo|待办|进度|工作)|(?:任务|项目|todo|待办|进度|工作).{0,8}(?:保留|记录|retain)|(?:保留|记录|retain).{0,8}(?:当前重点|重点)?(?:任务|项目|todo|待办|进度|工作))/i;
 const GENERIC_PROFILE_RULE_RE = /(?:长期偏好|用户偏好|通用偏好|整体偏好|preferences?|profile rules?)/i;
 const GENERIC_FACT_SLOT_RE = /(?:稳定背景|背景事实|背景信息|background facts?|stable background|facts?)/i;
-const GENERIC_TASK_STATE_RE = /(?:持续任务|长期任务|任务状态|项目进度|ongoing tasks?|project status)/i;
+const GENERIC_TASK_STATE_RE = /(?:持续任务|长期任务|重点任务|任务状态|项目进度|当前重点任务|ongoing tasks?|priority tasks?|project status)/i;
 
 type MissionKeyMatcher = {
   key: RetainMissionKey;
@@ -61,33 +61,33 @@ function buildNegationRegex(pattern: string): RegExp[] {
 const KEY_MATCHERS: MissionKeyMatcher[] = [
   {
     key: 'profile_rule:language_preference',
-    include: [/(?:语言偏好|language(?: preference)?|中文|英文)/i],
-    exclude: buildNegationRegex('(?:语言偏好|language(?: preference)?|中文|英文)'),
+    include: [/(?:语言偏好|沟通语言|回复语言|回答语言|交流语言|language(?: preference)?|answer language|reply language|中文|英文)/i],
+    exclude: buildNegationRegex('(?:语言偏好|沟通语言|回复语言|回答语言|交流语言|language(?: preference)?|answer language|reply language|中文|英文)'),
   },
   {
     key: 'profile_rule:response_length',
-    include: [/(?:回答长度|回复长度|句数|三句话|篇幅|length)/i],
-    exclude: buildNegationRegex('(?:回答长度|回复长度|句数|三句话|篇幅|length)'),
+    include: [/(?:回答长度|回复长度|答案长度|答案字数|字数|句数|句数限制|三句话|篇幅|length)/i],
+    exclude: buildNegationRegex('(?:回答长度|回复长度|答案长度|答案字数|字数|句数|句数限制|三句话|篇幅|length)'),
   },
   {
     key: 'profile_rule:solution_complexity',
-    include: [/(?:方案复杂度|方案简单|简单方案|复杂方案|复杂度|solution complexity|complexity)/i],
-    exclude: buildNegationRegex('(?:方案复杂度|方案简单|简单方案|复杂方案|复杂度|solution complexity|complexity)'),
+    include: [/(?:方案复杂度|方案简单|简单方案|简化方案|简单做法|处理方式|做法偏好|执行方式|复杂方案|复杂度|solution complexity|complexity|lightweight approach)/i],
+    exclude: buildNegationRegex('(?:方案复杂度|方案简单|简单方案|简化方案|简单做法|处理方式|做法偏好|执行方式|复杂方案|复杂度|solution complexity|complexity|lightweight approach)'),
   },
   {
     key: 'profile_rule:response_style',
-    include: [/(?:回答风格|回复风格|说话方式|语气|表达风格|response style|style)/i],
-    exclude: buildNegationRegex('(?:回答风格|回复风格|说话方式|语气|表达风格|response style|style)'),
+    include: [/(?:回答风格|回复风格|说话方式|沟通方式|语气|表达风格|response style|style)/i],
+    exclude: buildNegationRegex('(?:回答风格|回复风格|说话方式|沟通方式|语气|表达风格|response style|style)'),
   },
   {
     key: 'fact_slot:location',
-    include: [/(?:住址|居住地|住在哪|住哪|location|address|城市|地点)/i],
-    exclude: buildNegationRegex('(?:住址|居住地|住在哪|住哪|location|address|城市|地点)'),
+    include: [/(?:住址|居住地|居住城市|居住信息|住在哪|住哪|location|address|城市|地点)/i],
+    exclude: buildNegationRegex('(?:住址|居住地|居住城市|居住信息|住在哪|住哪|location|address|城市|地点)'),
   },
   {
     key: 'fact_slot:organization',
-    include: [/(?:工作背景|工作单位|任职背景|公司背景|组织背景|organization|employer|公司|任职)/i],
-    exclude: buildNegationRegex('(?:工作背景|工作单位|任职背景|公司背景|组织背景|organization|employer|公司|任职)'),
+    include: [/(?:工作背景|职业背景|职业信息|工作单位|工作公司|任职背景|任职公司|公司背景|组织背景|organization|employer|company|公司|任职|雇主)/i],
+    exclude: buildNegationRegex('(?:工作背景|职业背景|职业信息|工作单位|工作公司|任职背景|任职公司|公司背景|组织背景|organization|employer|company|公司|任职|雇主)'),
   },
   {
     key: 'task_state:refactor_status',

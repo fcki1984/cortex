@@ -190,6 +190,7 @@ async function runRound(round) {
   const futureLanguageAgentId = `${probeAgentId}-future-language`;
   const englishColloquialProfileAgentId = `${probeAgentId}-profile-en`;
   const englishColloquialExpansionAgentId = `${probeAgentId}-profile-en-extended`;
+  const colloquialChineseExpansionAgentId = `${probeAgentId}-profile-zh-extended`;
   const englishLocationAgentId = `${probeAgentId}-location-en`;
   const englishResponseStyleAgentId = `${probeAgentId}-style-en`;
   const englishRecallTaskAgentId = `${probeAgentId}-task-en`;
@@ -217,6 +218,8 @@ async function runRound(round) {
   const taskRewriteAgentId = `${probeAgentId}-task-rewrite`;
   const organizationRewriteAgentId = `${probeAgentId}-organization-rewrite`;
   const reviewFollowupMismatchAgentId = `${probeAgentId}-review-followup-mismatch`;
+  const priorityMissionAgentId = `${probeAgentId}-mission-priority-task`;
+  const missionKeyedAgentId = `${probeAgentId}-mission-language-org`;
   const cleanupAgentIds = [
     probeAgentId,
     roundtripSourceAgentId,
@@ -229,6 +232,7 @@ async function runRound(round) {
     futureLanguageAgentId,
     englishColloquialProfileAgentId,
     englishColloquialExpansionAgentId,
+    colloquialChineseExpansionAgentId,
     englishLocationAgentId,
     englishResponseStyleAgentId,
     englishRecallTaskAgentId,
@@ -256,6 +260,8 @@ async function runRound(round) {
     taskRewriteAgentId,
     organizationRewriteAgentId,
     reviewFollowupMismatchAgentId,
+    priorityMissionAgentId,
+    missionKeyedAgentId,
   ];
 
   async function request(label, method, path, { body, headers, retryable = false, expectedStatus, smokePhase } = {}) {
@@ -609,6 +615,21 @@ async function runRound(round) {
     assert(extendedEnglishLengthIngest.json?.auto_committed_count === 1, 'extended english colloquial response length did not auto-commit exactly one item');
     assert(extendedEnglishLengthIngest.json?.review_pending_count === 0, 'extended english colloquial response length should not leave review work behind');
 
+    const synonymEnglishLengthIngest = await request('no-op english colloquial response-length synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Keep replies to three sentences',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(synonymEnglishLengthIngest.response.status === 201, `POST /api/v2/ingest english colloquial response-length synonym returned ${synonymEnglishLengthIngest.response.status}`);
+    assert(synonymEnglishLengthIngest.json?.auto_committed_count === 0, 'english colloquial response-length synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymEnglishLengthIngest.json?.review_pending_count === 0, 'english colloquial response-length synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymEnglishLengthIngest.json?.records || []) === JSON.stringify([]),
+      'english colloquial response-length synonym should not emit a duplicate record once the canonical length truth is already active',
+    );
+
     const extendedEnglishComplexityIngest = await request('auto-commit extended english colloquial solution complexity', 'POST', '/api/v2/ingest', {
       body: {
         user_message: 'Use a simple approach',
@@ -620,6 +641,71 @@ async function runRound(round) {
     assert(extendedEnglishComplexityIngest.json?.auto_committed_count === 1, 'extended english colloquial solution complexity did not auto-commit exactly one item');
     assert(extendedEnglishComplexityIngest.json?.review_pending_count === 0, 'extended english colloquial solution complexity should not leave review work behind');
 
+    const synonymEnglishComplexityIngest = await request('no-op english strongest solution-complexity synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Use the simplest approach',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(synonymEnglishComplexityIngest.response.status === 201, `POST /api/v2/ingest english strongest solution-complexity synonym returned ${synonymEnglishComplexityIngest.response.status}`);
+    assert(synonymEnglishComplexityIngest.json?.auto_committed_count === 0, 'english strongest solution-complexity synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymEnglishComplexityIngest.json?.review_pending_count === 0, 'english strongest solution-complexity synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymEnglishComplexityIngest.json?.records || []) === JSON.stringify([]),
+      'english strongest solution-complexity synonym should not emit a duplicate record once the canonical solution-complexity truth is already active',
+    );
+
+    const colloquialChineseComplexityIngest = await request('auto-commit colloquial chinese solution complexity', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '方案尽量简单点',
+        assistant_message: '收到',
+        agent_id: colloquialChineseExpansionAgentId,
+      },
+    });
+    assert(colloquialChineseComplexityIngest.response.status === 201, `POST /api/v2/ingest colloquial chinese solution complexity returned ${colloquialChineseComplexityIngest.response.status}`);
+    assert(colloquialChineseComplexityIngest.json?.auto_committed_count === 1, 'colloquial chinese solution complexity did not auto-commit exactly one item');
+    assert(colloquialChineseComplexityIngest.json?.review_pending_count === 0, 'colloquial chinese solution complexity should not leave review work behind');
+
+    const colloquialChineseOrganizationIngest = await request('auto-commit colloquial chinese organization fact', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '在 OpenAI 上班',
+        assistant_message: '收到',
+        agent_id: colloquialChineseExpansionAgentId,
+      },
+    });
+    assert(colloquialChineseOrganizationIngest.response.status === 201, `POST /api/v2/ingest colloquial chinese organization fact returned ${colloquialChineseOrganizationIngest.response.status}`);
+    assert(colloquialChineseOrganizationIngest.json?.auto_committed_count === 1, 'colloquial chinese organization fact did not auto-commit exactly one item');
+    assert(colloquialChineseOrganizationIngest.json?.review_pending_count === 0, 'colloquial chinese organization fact should not leave review work behind');
+
+    const synonymColloquialChineseOrganizationIngest = await request('no-op colloquial chinese current-organization synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: '目前在 OpenAI 上班',
+        assistant_message: '收到',
+        agent_id: colloquialChineseExpansionAgentId,
+      },
+    });
+    assert(synonymColloquialChineseOrganizationIngest.response.status === 201, `POST /api/v2/ingest colloquial chinese current-organization synonym returned ${synonymColloquialChineseOrganizationIngest.response.status}`);
+    assert(synonymColloquialChineseOrganizationIngest.json?.auto_committed_count === 0, 'colloquial chinese current-organization synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymColloquialChineseOrganizationIngest.json?.review_pending_count === 0, 'colloquial chinese current-organization synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymColloquialChineseOrganizationIngest.json?.records || []) === JSON.stringify([]),
+      'colloquial chinese current-organization synonym should not emit a duplicate record once the canonical organization truth is already active',
+    );
+
+    const colloquialChineseExpansionRecords = await request('list colloquial chinese durable records', 'GET', `/api/v2/records${query({
+      agent_id: colloquialChineseExpansionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(colloquialChineseExpansionRecords.response.status === 200, `GET /api/v2/records colloquial chinese durables returned ${colloquialChineseExpansionRecords.response.status}`);
+    assert(
+      JSON.stringify((colloquialChineseExpansionRecords.json?.items || []).map((item) => item.content).sort()) === JSON.stringify([
+        '不要复杂方案',
+        '我在 OpenAI 工作',
+      ]),
+      'colloquial chinese durable inputs did not persist the canonical truths',
+    );
+
     const extendedEnglishOrganizationIngest = await request('auto-commit extended english colloquial organization fact', 'POST', '/api/v2/ingest', {
       body: {
         user_message: "I'm working at OpenAI",
@@ -630,6 +716,21 @@ async function runRound(round) {
     assert(extendedEnglishOrganizationIngest.response.status === 201, `POST /api/v2/ingest extended english colloquial organization fact returned ${extendedEnglishOrganizationIngest.response.status}`);
     assert(extendedEnglishOrganizationIngest.json?.auto_committed_count === 1, 'extended english colloquial organization fact did not auto-commit exactly one item');
     assert(extendedEnglishOrganizationIngest.json?.review_pending_count === 0, 'extended english colloquial organization fact should not leave review work behind');
+
+    const synonymEnglishOrganizationIngest = await request('no-op english employed-organization synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Currently employed at OpenAI',
+        assistant_message: 'Understood',
+        agent_id: englishColloquialExpansionAgentId,
+      },
+    });
+    assert(synonymEnglishOrganizationIngest.response.status === 201, `POST /api/v2/ingest english employed-organization synonym returned ${synonymEnglishOrganizationIngest.response.status}`);
+    assert(synonymEnglishOrganizationIngest.json?.auto_committed_count === 0, 'english employed-organization synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymEnglishOrganizationIngest.json?.review_pending_count === 0, 'english employed-organization synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymEnglishOrganizationIngest.json?.records || []) === JSON.stringify([]),
+      'english employed-organization synonym should not emit a duplicate record once the canonical organization truth is already active',
+    );
 
     const englishColloquialExpansionRecords = await request('list extended english colloquial durable records', 'GET', `/api/v2/records${query({
       agent_id: englishColloquialExpansionAgentId,
@@ -671,6 +772,21 @@ async function runRound(round) {
       'english located-location fact should not emit a duplicate record once the canonical location truth is already active',
     );
 
+    const synonymEnglishResidenceIngest = await request('no-op english residing-location synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Currently residing in Tokyo',
+        assistant_message: 'Understood',
+        agent_id: englishLocationAgentId,
+      },
+    });
+    assert(synonymEnglishResidenceIngest.response.status === 201, `POST /api/v2/ingest english residing-location synonym returned ${synonymEnglishResidenceIngest.response.status}`);
+    assert(synonymEnglishResidenceIngest.json?.auto_committed_count === 0, 'english residing-location synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymEnglishResidenceIngest.json?.review_pending_count === 0, 'english residing-location synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymEnglishResidenceIngest.json?.records || []) === JSON.stringify([]),
+      'english residing-location synonym should not emit a duplicate record once the canonical location truth is already active',
+    );
+
     const englishLocationRecords = await request('list english location durable records', 'GET', `/api/v2/records${query({
       agent_id: englishLocationAgentId,
       limit: 20,
@@ -693,6 +809,21 @@ async function runRound(round) {
     assert(englishResponseStyleIngest.response.status === 201, `POST /api/v2/ingest english explicit response-style returned ${englishResponseStyleIngest.response.status}`);
     assert(englishResponseStyleIngest.json?.auto_committed_count === 1, 'english explicit response-style did not auto-commit exactly one item');
     assert(englishResponseStyleIngest.json?.review_pending_count === 0, 'english explicit response-style should not leave review work behind');
+
+    const synonymEnglishResponseStyleIngest = await request('no-op english reordered explicit response-style synonym', 'POST', '/api/v2/ingest', {
+      body: {
+        user_message: 'Respond directly and concisely',
+        assistant_message: 'Understood',
+        agent_id: englishResponseStyleAgentId,
+      },
+    });
+    assert(synonymEnglishResponseStyleIngest.response.status === 201, `POST /api/v2/ingest english reordered explicit response-style synonym returned ${synonymEnglishResponseStyleIngest.response.status}`);
+    assert(synonymEnglishResponseStyleIngest.json?.auto_committed_count === 0, 'english reordered explicit response-style synonym should converge to the active canonical truth without a duplicate auto-commit');
+    assert(synonymEnglishResponseStyleIngest.json?.review_pending_count === 0, 'english reordered explicit response-style synonym should not leave review work behind');
+    assert(
+      JSON.stringify(synonymEnglishResponseStyleIngest.json?.records || []) === JSON.stringify([]),
+      'english reordered explicit response-style synonym should not emit a duplicate record once the canonical response-style truth is already active',
+    );
 
     const englishResponseStyleRecords = await request('list english response-style durable records', 'GET', `/api/v2/records${query({
       agent_id: englishResponseStyleAgentId,
@@ -729,6 +860,85 @@ async function runRound(round) {
       'english shorthand recall-refactor task did not persist the canonical task truth',
     );
 
+    const priorityMissionAgent = await request('create natural retain-mission priority-task agent', 'POST', '/api/v2/agents', {
+      body: {
+        id: priorityMissionAgentId,
+        name: priorityMissionAgentId,
+        config_override: {
+          sieve: {
+            retainMission: '保留长期偏好、稳定背景和当前重点任务',
+          },
+        },
+      },
+    });
+    assert(priorityMissionAgent.response.status === 201, `POST /api/v2/agents priority-task mission returned ${priorityMissionAgent.response.status}`);
+
+    const priorityMissionIngest = await request('auto-commit natural retain-mission priority task', 'POST', '/api/v2/ingest', {
+      body: {
+        agent_id: priorityMissionAgentId,
+        user_message: '当前任务是重构 Cortex recall',
+        assistant_message: '收到',
+      },
+    });
+    assert(priorityMissionIngest.response.status === 201, `POST /api/v2/ingest priority-task mission returned ${priorityMissionIngest.response.status}`);
+    assert(priorityMissionIngest.json?.auto_committed_count === 1, 'priority-task retain mission did not auto-commit exactly one task-state');
+    assert(priorityMissionIngest.json?.review_pending_count === 0, 'priority-task retain mission should not leave review work behind');
+    assert(priorityMissionIngest.json?.mission_filtered_count === 0, 'priority-task retain mission unexpectedly filtered the task-state');
+
+    const priorityMissionRecords = await request('list natural retain-mission priority-task records', 'GET', `/api/v2/records${query({
+      agent_id: priorityMissionAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(priorityMissionRecords.response.status === 200, `GET /api/v2/records priority-task mission returned ${priorityMissionRecords.response.status}`);
+    assert(
+      (priorityMissionRecords.json?.items || []).some((item) => item.kind === 'task_state' && item.content === '当前任务是重构 Cortex recall'),
+      'priority-task retain mission did not persist the canonical task-state',
+    );
+
+    const missionKeyedAgent = await request('create natural retain-mission keyed agent', 'POST', '/api/v2/agents', {
+      body: {
+        id: missionKeyedAgentId,
+        name: missionKeyedAgentId,
+        config_override: {
+          sieve: {
+            retainMission: '只保留沟通语言和工作公司',
+          },
+        },
+      },
+    });
+    assert(missionKeyedAgent.response.status === 201, `POST /api/v2/agents keyed mission returned ${missionKeyedAgent.response.status}`);
+
+    const missionKeyedImport = await request('auto-route natural keyed retain-mission import', 'POST', '/api/v2/review-inbox/import', {
+      body: {
+        agent_id: missionKeyedAgentId,
+        format: 'text',
+        content: '后续交流中文就行。我住东京。我在 OpenAI 工作',
+      },
+    });
+    assert(missionKeyedImport.response.status === 201, `POST /api/v2/review-inbox/import keyed mission returned ${missionKeyedImport.response.status}`);
+    assert(missionKeyedImport.json?.batch_id == null, 'natural keyed retain-mission import should not create a review batch');
+    assert(missionKeyedImport.json?.auto_committed_count === 2, 'natural keyed retain-mission import did not auto-commit exactly two records');
+    assert(missionKeyedImport.json?.mission_filtered_count === 1, 'natural keyed retain-mission import should filter exactly one durable');
+    assert(missionKeyedImport.json?.summary?.pending === 0, 'natural keyed retain-mission import left unexpected pending items');
+
+    const missionKeyedRecords = await request('list natural keyed retain-mission records', 'GET', `/api/v2/records${query({
+      agent_id: missionKeyedAgentId,
+      limit: 20,
+    })}`, { retryable: true });
+    assert(missionKeyedRecords.response.status === 200, `GET /api/v2/records keyed mission returned ${missionKeyedRecords.response.status}`);
+    assert(
+      (missionKeyedRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '请用中文回答'),
+      'natural keyed retain-mission import did not keep the canonical language preference',
+    );
+    assert(
+      (missionKeyedRecords.json?.items || []).some((item) => item.attribute_key === 'organization' && item.content === '我在 OpenAI 工作'),
+      'natural keyed retain-mission import did not keep the canonical organization fact',
+    );
+    assert(
+      !(missionKeyedRecords.json?.items || []).some((item) => item.attribute_key === 'location'),
+      'natural keyed retain-mission import should filter out the location fact',
+    );
+
     const japaneseLanguageIngest = await request('auto-commit explicit japanese language preference', 'POST', '/api/v2/ingest', {
       body: {
         user_message: '日本語で答えて',
@@ -753,6 +963,7 @@ async function runRound(round) {
       (japaneseLanguageRecords.json?.items || []).some((item) => item.attribute_key === 'language_preference' && item.content === '日本語で答えてください'),
       'japanese language preference did not persist the canonical language truth',
     );
+    logStep('retain mission', 'natural priority-task ingest and keyed import routing passed');
 
     const reviewInboxAutoStyleImport = await request('auto-commit short-form colloquial response-style import', 'POST', '/api/v2/review-inbox/import', {
       body: {

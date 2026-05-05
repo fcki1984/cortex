@@ -85,7 +85,8 @@ function matchesAnchoredEnglishExplicitResponseStyle(content: string): boolean {
   return (
     /^(?:please\s+)?be\s+(?:more\s+)?(?:concise|brief)\s+and\s+(?:direct|directly)$/i.test(trimmed) ||
     /^(?:please\s+)?keep\s+(?:answers?|replies?|responses?)\s+(?:concise|brief)\s+and\s+(?:direct|directly)$/i.test(trimmed) ||
-    /^(?:please\s+)?(?:reply|respond)\s+(?:more\s+)?(?:concisely|briefly)\s+and\s+directly$/i.test(trimmed)
+    /^(?:please\s+)?(?:reply|respond)\s+(?:more\s+)?(?:concisely|briefly)\s+and\s+directly$/i.test(trimmed) ||
+    /^(?:please\s+)?(?:reply|respond)\s+(?:more\s+)?directly\s+and\s+(?:concisely|briefly)$/i.test(trimmed)
   );
 }
 
@@ -127,6 +128,11 @@ function matchesExplicitCanonicalResponseStyle(content: string): boolean {
     /(?:回答|回复|风格).*(?:简洁|简短|精简).*(?:直接|干脆|利索|利落)/i.test(content) ||
     (
       /(?:answer|reply|response|style)/i.test(content) &&
+      /(?:concise|brief)/i.test(content) &&
+      /direct/i.test(content)
+    ) ||
+    (
+      /(?:respond|reply)/i.test(content) &&
       /(?:concise|brief)/i.test(content) &&
       /direct/i.test(content)
     )
@@ -302,15 +308,19 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     strong_inputs: [
       'Three sentences max',
       'Keep answers under three sentences',
+      'Please answer within three sentences',
+      'Keep replies to three sentences',
     ],
     weak_inputs: [],
     matches_conversational: (content: string) => (
       /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content)
-      || /keep\s+(?:answers?|replies?|responses?)\s+(?:under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+      || /keep\s+(?:answers?|replies?|responses?)\s+(?:to|under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+      || /(?:answer|reply|respond)\s+(?:within|in)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
     ),
     matches_attribute: (content: string) => (
       /(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?\s+(?:max|maximum)/i.test(content)
-      || /keep\s+(?:answers?|replies?|responses?)\s+(?:under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+      || /keep\s+(?:answers?|replies?|responses?)\s+(?:to|under|within)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
+      || /(?:answer|reply|respond)\s+(?:within|in)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+sentences?/i.test(content)
     ),
   },
   {
@@ -321,6 +331,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '不要复杂方案',
       '别整复杂方案',
       '方案简单点',
+      '方案尽量简单点',
       '简单方案就行',
       '简单方案即可',
       '轻量方案就行',
@@ -348,7 +359,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
       '轻量方案就好吧',
     ],
     matches_conversational: (content: string) => (
-      /(?:方案简单点|方案简单一点|方案简单一些|方案简单些|方案轻量一点|简单点|轻量点|简单方案就行|简单方案即可|简单方案就好|简单方案就可以|轻量方案就行|轻量方案即可|轻量方案就好|轻量方案就可以|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案)/i.test(content)
+      /(?:方案尽量简单点|方案简单点|方案简单一点|方案简单一些|方案简单些|方案轻量一点|简单点|轻量点|简单方案就行|简单方案即可|简单方案就好|简单方案就可以|轻量方案就行|轻量方案即可|轻量方案就好|轻量方案就可以|别搞太复杂|别整复杂方案|别太复杂|不要复杂方案)/i.test(content)
     ),
     matches_attribute: (content: string) => (
       /(?:简单|轻量|零配置|simple|lightweight|low maintenance).*(部署|方案|实现|deployment|solution|setup)/i.test(content) ||
@@ -364,14 +375,16 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     strong_inputs: [
       'Keep it simple',
       'Use a simple approach',
+      'Use the simplest approach',
+      'Keep the approach lightweight',
       "Don't make it too complex",
     ],
     weak_inputs: [],
     matches_conversational: (content: string) => (
-      /(?:keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
+      /(?:(?:please\s+)?use the simplest approach|keep (?:the )?approach lightweight|keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
     ),
     matches_attribute: (content: string) => (
-      /(?:keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
+      /(?:(?:please\s+)?use the simplest approach|keep (?:the )?approach lightweight|keep it simple|avoid complex solutions?|use a simple approach|don't make (?:it|things|the approach|the solution) too complex)/i.test(content)
     ),
   },
   {
@@ -412,6 +425,7 @@ const PROFILE_RULE_ALIAS_SPECS: InternalProfileRuleAliasSpec[] = [
     strong_inputs: [
       'Be concise and direct',
       'Keep responses concise and direct',
+      'Respond directly and concisely',
     ],
     weak_inputs: [],
     matches_conversational: (content: string) => /[A-Za-z]/.test(content) && matchesExplicitCanonicalResponseStyle(content),
@@ -501,6 +515,24 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
     output: 'fact_slot(entity_key=user, attribute_key=organization)',
   },
   {
+    input: '在 OpenAI 上班',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
+    input: '目前在 OpenAI 上班',
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
     input: '现在住东京',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
@@ -520,6 +552,15 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
   {
     input: "I'm living in Tokyo",
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'location',
+    relation_predicate: 'lives_in',
+    output: 'fact_slot(entity_key=user, attribute_key=location)',
+  },
+  {
+    input: 'I reside in Tokyo',
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
     disposition: 'auto_commit',
@@ -556,6 +597,15 @@ const NON_PROFILE_RULE_CANONICAL_CASES: V2ContractCanonicalCase[] = [
   },
   {
     input: "I'm working at OpenAI",
+    requested_kind: 'fact_slot',
+    written_kind: 'fact_slot',
+    disposition: 'auto_commit',
+    attribute_key: 'organization',
+    relation_predicate: 'works_at',
+    output: 'fact_slot(entity_key=user, attribute_key=organization)',
+  },
+  {
+    input: "I'm employed by OpenAI",
     requested_kind: 'fact_slot',
     written_kind: 'fact_slot',
     disposition: 'auto_commit',
@@ -685,7 +735,7 @@ const SPECULATIVE_CONTENT_RE = /(?:也许|可能|maybe|might|perhaps|考虑|看�
 const CLAUSE_BOUNDARY_RE = /[。！？.!?;；]+/;
 const LANGUAGE_LABEL_RE = /(中文|英文|日文|english|chinese|japanese|日本語)/i;
 const ZH_SENTENCE_RE = /((?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*句(?:话)?)(?:内|以内)?/i;
-const EN_SENTENCE_RE = /(?:within|in|under|limit(?:ed)? to|keep(?: answers?)?(?: within)?|answer in)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
+const EN_SENTENCE_RE = /(?:within|in|under|to|limit(?:ed)? to|keep(?:\s+(?:answers?|replies?|responses?))?(?:\s+(?:to|under|within))?|(?:answer|reply|respond)(?:\s+(?:in|within))?)?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))\s+sentences?(?:\s*(?:max|maximum))?/i;
 const CONVERSATIONAL_PROFILE_RULE_HEDGE_RE = /(?:就行吧|就好吧|即可吧|就可以吧|够(?:了)?吧|更好|最好|尽量|优先|简单(?:一点|一些|些)?吧|轻量(?:一点)?吧)/i;
 const SHORT_USER_CONFIRMATION_RE = /^(?:好(?:的)?|行|可以|没问题|收到|确认|同意|ok(?:ay)?)(?:[，,、 ]*(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了))?$|^(?:就这么定|就这样(?:吧)?|按这个来|按这个办|照这个来|这么办|定了)$/i;
 const SHORT_USER_REJECTION_RE = /^(?:不(?:要|用)?|先别|别这样|不是这个|换一个|换种|先别这样吧)(?:[，,、 ]*(?:吧|了|这个|这种|那样))?$/i;
@@ -847,6 +897,9 @@ function canonicalProfileRuleContent(attributeKey: string, content: string, owne
 }
 
 export function isWeakConversationalProfileRule(content: string): boolean {
+  if (/^方案尽量简单(?:点|一点|一些|些)$/i.test(content.trim())) {
+    return false;
+  }
   return isSpeculativeContent(content) || CONVERSATIONAL_PROFILE_RULE_HEDGE_RE.test(content);
 }
 
@@ -1341,8 +1394,8 @@ function matchProfileRuleAttribute(content: string, ownerScope: 'user' | 'agent'
 
 function matchFactSlotAttribute(content: string): string | null {
   if (matchesConversationalLocationFact(content)) return 'location';
-  if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|based in|located in|位于|来自|from/i.test(content)) return 'location';
-  if (/(?:我|用户)?在.+工作|(?:现在|目前|如今)?在.+工作|任职于|就职于|供职于|i work (?:at|for|in)|works? at|i(?:'m| am)(?: currently)? working (?:at|for|in)/i.test(content)) return 'organization';
+  if (/(?:我|用户)?住(?:在)?|live(?:s|d)? in|living in|resid(?:e|ed|ing) in|based in|located in|位于|来自|from/i.test(content)) return 'location';
+  if (/(?:我|用户)?在.+(?:工作|上班)|(?:现在|目前|如今)?在.+(?:工作|上班)|任职于|就职于|供职于|i work (?:at|for|in)|works? at|i(?:'m| am)(?: currently)? working (?:at|for|in)|employed (?:at|by)/i.test(content)) return 'organization';
   if (/我是.+(?:工程师|开发者|设计师|学生|老师|医生|研究员)|i(?:'m| am) (?:a |an )?(?:developer|engineer|designer|student|teacher|doctor|researcher)/i.test(content)) {
     return 'occupation';
   }
@@ -1379,6 +1432,7 @@ export function extractFactRelationObjectValue(attributeKey: string | null | und
         /(?:现在|目前|如今|currently|now)\s*(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /(?:我|用户)?住(?:在)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /\bliv(?:e|es|ed|ing)\s+in\s+([a-z0-9_\- ]+)/i,
+        /\bresid(?:e|ed|ing)\s+in\s+([a-z0-9_\- ]+)/i,
         /\blocated in\s+([a-z0-9_\- ]+)/i,
         /\bbased in\s+([a-z0-9_\- ]+)/i,
         /\bfrom\s+([a-z0-9_\- ]+)/i,
@@ -1387,11 +1441,14 @@ export function extractFactRelationObjectValue(attributeKey: string | null | und
       ]);
     case 'organization':
       return matchRelationObjectValue(trimmed, [
+        /(?:现在|目前|如今)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*上班/i,
+        /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*上班/i,
         /(?:现在|目前|如今)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
         /(?:我|用户)?在\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)\s*工作/i,
         /(?:现在|目前|如今)?(?:任职于|就职于|供职于)\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /(?:我|用户)?(?:任职于|就职于|供职于)\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/i,
         /\bwork(?:s|ed|ing)?\s+(?:at|for|in)\s+([a-z0-9_\- ]+)/i,
+        /\bemployed\s+(?:at|by)\s+([a-z0-9_\- ]+)/i,
       ]);
     case 'occupation':
       return matchRelationObjectValue(trimmed, [

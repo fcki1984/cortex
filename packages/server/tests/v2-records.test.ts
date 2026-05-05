@@ -386,6 +386,92 @@ describe('CortexRecordsV2', () => {
     expect(organization.record.content).toBe('I work at OpenAI');
   });
 
+  it('stores additional explicit English response-length variants using canonical durable content', async () => {
+    const answerWithin = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-3',
+      kind: 'profile_rule',
+      content: 'Please answer within three sentences',
+    });
+
+    const repliesTo = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-3',
+      kind: 'profile_rule',
+      content: 'Keep replies to three sentences',
+    });
+
+    expect(answerWithin.record.kind).toBe('profile_rule');
+    expect(answerWithin.record.attribute_key).toBe('response_length');
+    expect(answerWithin.record.content).toBe('Please keep answers within three sentences');
+
+    expect(repliesTo.record.kind).toBe('profile_rule');
+    expect(repliesTo.record.attribute_key).toBe('response_length');
+    expect(repliesTo.record.content).toBe('Please keep answers within three sentences');
+  });
+
+  it('stores additional explicit English solution-complexity and response-style variants using canonical durable content', async () => {
+    const simplest = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-4',
+      kind: 'profile_rule',
+      content: 'Use the simplest approach',
+    });
+
+    const lightweight = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-4',
+      kind: 'profile_rule',
+      content: 'Keep the approach lightweight',
+    });
+
+    const style = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-en-4',
+      kind: 'profile_rule',
+      content: 'Respond directly and concisely',
+    });
+
+    expect(simplest.record.kind).toBe('profile_rule');
+    expect(simplest.record.attribute_key).toBe('solution_complexity');
+    expect(simplest.record.content).toBe('Please avoid complex solutions');
+
+    expect(lightweight.record.kind).toBe('profile_rule');
+    expect(lightweight.record.attribute_key).toBe('solution_complexity');
+    expect(lightweight.record.content).toBe('Please avoid complex solutions');
+
+    expect(style.record.kind).toBe('profile_rule');
+    expect(style.record.attribute_key).toBe('response_style');
+    expect(style.record.content).toBe('Please keep responses concise and direct');
+  });
+
+  it('stores additional colloquial Chinese solution-complexity and organization fact variants using canonical durable content', async () => {
+    const complexity = await service.remember({
+      agent_id: 'colloquial-profile-rule-agent-zh-5',
+      kind: 'profile_rule',
+      content: '方案尽量简单点',
+    });
+
+    const working = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-zh-3',
+      kind: 'fact_slot',
+      content: '在 OpenAI 上班',
+    });
+
+    const currentWorking = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-zh-4',
+      kind: 'fact_slot',
+      content: '目前在 OpenAI 上班',
+    });
+
+    expect(complexity.record.kind).toBe('profile_rule');
+    expect(complexity.record.attribute_key).toBe('solution_complexity');
+    expect(complexity.record.content).toBe('不要复杂方案');
+
+    expect(working.record.kind).toBe('fact_slot');
+    expect(working.record.attribute_key).toBe('organization');
+    expect(working.record.content).toBe('我在 OpenAI 工作');
+
+    expect(currentWorking.record.kind).toBe('fact_slot');
+    expect(currentWorking.record.attribute_key).toBe('organization');
+    expect(currentWorking.record.content).toBe('我在 OpenAI 工作');
+  });
+
   it('stores English living-location fact variants using canonical durable content', async () => {
     const living = await service.remember({
       agent_id: 'colloquial-fact-slot-agent-en',
@@ -406,6 +492,28 @@ describe('CortexRecordsV2', () => {
     expect(located.record.kind).toBe('fact_slot');
     expect(located.record.attribute_key).toBe('location');
     expect(located.record.content).toBe('I live in Tokyo');
+  });
+
+  it('stores English residence and employment fact variants using canonical durable content', async () => {
+    const residing = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-en-2',
+      kind: 'fact_slot',
+      content: 'I reside in Tokyo',
+    });
+
+    const employed = await service.remember({
+      agent_id: 'colloquial-fact-slot-agent-en-2',
+      kind: 'fact_slot',
+      content: "I'm employed by OpenAI",
+    });
+
+    expect(residing.record.kind).toBe('fact_slot');
+    expect(residing.record.attribute_key).toBe('location');
+    expect(residing.record.content).toBe('I live in Tokyo');
+
+    expect(employed.record.kind).toBe('fact_slot');
+    expect(employed.record.attribute_key).toBe('organization');
+    expect(employed.record.content).toBe('I work at OpenAI');
   });
 
   it('stores English explicit response-style writes using canonical durable content', async () => {
