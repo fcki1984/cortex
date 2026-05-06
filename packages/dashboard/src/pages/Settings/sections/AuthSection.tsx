@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../../../i18n/index.js';
-import { changeAuthToken, getAuthStatus } from '../../../api/client.js';
+import { changeAuthToken, getAuthStatus, setupAuthToken } from '../../../api/client.js';
 
 interface AuthStatus {
   authRequired: boolean;
@@ -33,6 +33,7 @@ export default function AuthSection() {
     e.preventDefault();
     setError('');
     setSuccess('');
+    const setupMode = !!status?.setupRequired;
 
     if (newToken !== confirmToken) {
       setError(t('settings.authTokenMismatch'));
@@ -45,15 +46,19 @@ export default function AuthSection() {
 
     setLoading(true);
     try {
-      await changeAuthToken(oldToken, newToken);
+      if (setupMode) {
+        await setupAuthToken(newToken);
+      } else {
+        await changeAuthToken(oldToken, newToken);
+      }
       localStorage.setItem('cortex_auth_token', newToken);
-      setSuccess(t('settings.authTokenChanged'));
+      setSuccess(setupMode ? t('settings.authTokenConfigured') : t('settings.authTokenChanged'));
       setOldToken('');
       setNewToken('');
       setConfirmToken('');
       fetchStatus();
-    } catch {
-      setError(t('login.networkError'));
+    } catch (err: any) {
+      setError(err?.message || t('login.networkError'));
     } finally {
       setLoading(false);
     }
@@ -97,23 +102,27 @@ export default function AuthSection() {
       {status.mutable ? (
         <form onSubmit={handleChange}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {!status.setupRequired && (
+              <div>
+                <label htmlFor="auth-current-token" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
+                  {t('settings.authCurrentToken')}
+                </label>
+                <input
+                  id="auth-current-token"
+                  type="password"
+                  value={oldToken}
+                  onChange={e => setOldToken(e.target.value)}
+                  placeholder={t('settings.authCurrentTokenPlaceholder')}
+                  style={{ width: '100%', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
             <div>
-              <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                {t('settings.authCurrentToken')}
-              </label>
-              <input
-                type="password"
-                value={oldToken}
-                onChange={e => setOldToken(e.target.value)}
-                placeholder={t('settings.authCurrentTokenPlaceholder')}
-                style={{ width: '100%', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
+              <label htmlFor="auth-new-token" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
                 {t('settings.authNewToken')}
               </label>
               <input
+                id="auth-new-token"
                 type="password"
                 value={newToken}
                 onChange={e => setNewToken(e.target.value)}
@@ -122,10 +131,11 @@ export default function AuthSection() {
               />
             </div>
             <div>
-              <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
+              <label htmlFor="auth-confirm-token" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>
                 {t('settings.authConfirmToken')}
               </label>
               <input
+                id="auth-confirm-token"
                 type="password"
                 value={confirmToken}
                 onChange={e => setConfirmToken(e.target.value)}
@@ -156,15 +166,15 @@ export default function AuthSection() {
 
           <button
             type="submit"
-            disabled={loading || !oldToken || !newToken || !confirmToken}
+            disabled={loading || (!status.setupRequired && !oldToken) || !newToken || !confirmToken}
             style={{
               marginTop: 12, padding: '8px 20px', fontSize: 13, fontWeight: 600,
               background: 'var(--primary)', color: '#fff', border: 'none',
               borderRadius: 'var(--radius)', cursor: loading ? 'wait' : 'pointer',
-              opacity: loading || !oldToken || !newToken || !confirmToken ? 0.6 : 1,
+              opacity: loading || (!status.setupRequired && !oldToken) || !newToken || !confirmToken ? 0.6 : 1,
             }}
           >
-            {loading ? t('settings.authChanging') : t('settings.authChangeButton')}
+            {loading ? t('settings.authChanging') : status.setupRequired ? t('settings.authSetupButton') : t('settings.authChangeButton')}
           </button>
         </form>
       ) : (

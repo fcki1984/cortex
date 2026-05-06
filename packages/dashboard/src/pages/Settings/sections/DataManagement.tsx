@@ -27,6 +27,48 @@ function maskSensitive(obj: any): any {
   return obj;
 }
 
+function sanitizeProviderConfig(source: any): any | null {
+  if (!source || typeof source !== 'object') return null;
+  const output: any = {};
+  for (const key of ['provider', 'model', 'baseUrl', 'timeoutMs', 'apiKey']) {
+    if (source[key] !== undefined) output[key] = source[key];
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
+export function buildImportableConfigForSettingsUpdate(parsed: any): any {
+  const importableConfig: any = {};
+
+  const extraction = sanitizeProviderConfig(parsed?.llm?.extraction);
+  if (extraction) {
+    importableConfig.llm = {
+      extraction,
+    };
+  }
+
+  if (parsed?.embedding && typeof parsed.embedding === 'object') {
+    const embedding: any = {};
+    for (const key of ['provider', 'model', 'dimensions', 'baseUrl', 'timeoutMs', 'apiKey']) {
+      if (parsed.embedding[key] !== undefined) embedding[key] = parsed.embedding[key];
+    }
+    if (Object.keys(embedding).length > 0) importableConfig.embedding = embedding;
+  }
+
+  if (parsed?.lifecycle && Object.prototype.hasOwnProperty.call(parsed.lifecycle, 'schedule')) {
+    importableConfig.lifecycle = {
+      schedule: parsed.lifecycle.schedule,
+    };
+  }
+
+  if (parsed?.sieve && typeof parsed.sieve.retainMission === 'string') {
+    importableConfig.sieve = {
+      retainMission: parsed.sieve.retainMission,
+    };
+  }
+
+  return importableConfig;
+}
+
 export default function DataManagement({ config, setConfig, setToast, t }: DataManagementProps) {
   const navigate = useNavigate();
   const [showConfig, setShowConfig] = useState(false);
@@ -83,6 +125,12 @@ export default function DataManagement({ config, setConfig, setToast, t }: DataM
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('settings.rebuildHint')}</span>
             )}
           </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+            <button className="btn" onClick={() => navigate('/quality')}>
+              {t('reviewInbox.runQualityLink')}
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('settings.qualityCenterHint')}</span>
+          </div>
         </div>
       </div>
 
@@ -108,47 +156,7 @@ export default function DataManagement({ config, setConfig, setToast, t }: DataM
                   try {
                     const text = await file.text();
                     const parsed = JSON.parse(text);
-                    delete parsed.port;
-                    delete parsed.host;
-                    delete parsed.runtime;
-                    delete parsed.storage;
-                    delete parsed.auth;
-                    delete parsed.cors;
-                    delete parsed.rateLimit;
-                    delete parsed.vectorBackend;
-                    delete parsed.gate;
-                    delete parsed.search;
-                    delete parsed.sieve;
-                    delete parsed.layers;
-                    delete parsed.flush;
-                    delete parsed.markdownExport;
-                    for (const key of ['extraction', 'lifecycle']) {
-                      if (parsed.llm?.[key]?.hasApiKey !== undefined) {
-                        delete parsed.llm[key].hasApiKey;
-                        if (!parsed.llm[key].apiKey) delete parsed.llm[key].apiKey;
-                      }
-                    }
-                    if (parsed.llm?.lifecycle) {
-                      delete parsed.llm.lifecycle;
-                    }
-                    if (parsed.embedding?.hasApiKey !== undefined) {
-                      delete parsed.embedding.hasApiKey;
-                      if (!parsed.embedding.apiKey) delete parsed.embedding.apiKey;
-                    }
-                    const importableConfig: any = {};
-                    if (parsed.llm?.extraction) {
-                      importableConfig.llm = {
-                        extraction: parsed.llm.extraction,
-                      };
-                    }
-                    if (parsed.embedding) {
-                      importableConfig.embedding = parsed.embedding;
-                    }
-                    if (parsed.lifecycle?.schedule) {
-                      importableConfig.lifecycle = {
-                        schedule: parsed.lifecycle.schedule,
-                      };
-                    }
+                    const importableConfig = buildImportableConfigForSettingsUpdate(parsed);
                     if (!confirm(t('settings.confirmImportConfig'))) return;
                     await updateConfig(importableConfig);
                     const refreshed = await getConfig();

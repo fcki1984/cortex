@@ -186,7 +186,7 @@ function StepBlock({ step, title, description, code, children, isLast }: {
   );
 }
 
-type IntegrationTabKey = 'api' | 'mcp' | 'openclaw';
+type IntegrationTabKey = 'api' | 'mcp';
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
@@ -518,7 +518,6 @@ export default function AgentDetail() {
     const subTabs: { key: IntegrationTabKey; label: string }[] = [
       { key: 'api', label: t('agentDetail.integrationApi') },
       { key: 'mcp', label: t('agentDetail.integrationMcp') },
-      { key: 'openclaw', label: t('agentDetail.integrationOpenclaw') },
     ];
 
     const authNotice = (
@@ -772,75 +771,6 @@ def ingest(user_msg: str, assistant_msg: str):
       </div>
     );
 
-    const renderOpenclawTab = () => (
-      <div>
-        {authNotice}
-        <StepBlock
-          step={1}
-          title={t('agentDetail.openclawStep1Title')}
-          description={t('agentDetail.openclawStep1Desc')}
-          code="openclaw plugins install @cortexmem/cortex-bridge"
-        />
-        <StepBlock
-          step={2}
-          title={t('agentDetail.openclawStep2Title')}
-          description={t('agentDetail.openclawStep2Desc')}
-        >
-          {/* Method A: openclaw.json (recommended) */}
-          <div style={{ marginBottom: 16, padding: 14, background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{t('agentDetail.openclawJsonMethod')}</div>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>{t('agentDetail.openclawJsonMethodDesc')}</p>
-            <CodeSnippet title="openclaw.json" code={`{
-  "plugins": {
-    "cortex-bridge": {
-      "enabled": true,
-      "config": {
-        "cortexUrl": "${cortexUrl}",${authEnabled ? `\n        "authToken": "YOUR_TOKEN",` : ''}
-        "agentId": "${agentId}"
-      }
-    }
-  }
-}`} />
-          </div>
-          {/* Method B: .env */}
-          <div style={{ padding: 14, background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{t('agentDetail.openclawEnvMethod')}</div>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>{t('agentDetail.openclawEnvMethodDesc')}</p>
-            <CodeSnippet title=".env" code={`CORTEX_URL=${cortexUrl}${authEnabled ? `\nCORTEX_AUTH_TOKEN=YOUR_TOKEN` : ''}\nCORTEX_AGENT_ID=${agentId}`} />
-          </div>
-          {/* Method C: shell profile */}
-          <div style={{ marginTop: 16, padding: 14, background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{t('agentDetail.openclawShellMethod')}</div>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>{t('agentDetail.openclawShellMethodDesc')}</p>
-            <CodeSnippet title="~/.zshrc / ~/.bashrc" code={`echo 'export CORTEX_URL=${cortexUrl}' >> ~/.zshrc${authEnabled ? `\necho 'export CORTEX_AUTH_TOKEN=YOUR_TOKEN' >> ~/.zshrc` : ''}\necho 'export CORTEX_AGENT_ID=${agentId}' >> ~/.zshrc`} />
-          </div>
-        </StepBlock>
-        <StepBlock
-          step={3}
-          title={t('agentDetail.openclawStep3Title')}
-          description={t('agentDetail.openclawStep3Desc')}
-        >
-          <ul style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0 0', paddingLeft: 20, lineHeight: 2 }}>
-            <li>{t('agentDetail.openclawHookBefore')}</li>
-            <li>{t('agentDetail.openclawHookAfter')}</li>
-            <li>{t('agentDetail.openclawHookCompaction')}</li>
-            <li>{t('agentDetail.openclawToolRecall')}</li>
-            <li>{t('agentDetail.openclawToolRemember')}</li>
-            <li>{t('agentDetail.openclawCommand')}</li>
-            <li>{t('agentDetail.openclawCommandSearch')}</li>
-            <li>{t('agentDetail.openclawCommandRemember')}</li>
-            <li>{t('agentDetail.openclawCommandRecent')}</li>
-          </ul>
-        </StepBlock>
-        <StepBlock
-          step={4}
-          title={t('agentDetail.openclawStep4Title')}
-          description={t('agentDetail.openclawStep4Desc')}
-          isLast
-        />
-      </div>
-    );
-
     return (
       <div>
         {/* Sub-tabs */}
@@ -859,7 +789,6 @@ def ingest(user_msg: str, assistant_msg: str):
         {/* Tab content */}
         {integrationTab === 'api' && renderApiTab()}
         {integrationTab === 'mcp' && renderMcpTab()}
-        {integrationTab === 'openclaw' && renderOpenclawTab()}
       </div>
     );
   };

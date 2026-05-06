@@ -155,4 +155,18 @@ describe('AgentDetail retain mission override', () => {
       }));
     });
   });
+
+  it('does not show OpenClaw as an integration option', async () => {
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await screen.findByRole('button', { name: '集成' });
+    await user.click(screen.getByRole('button', { name: '集成' }));
+
+    expect(screen.getByRole('button', { name: 'REST API' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'MCP' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'OpenClaw' })).toBeNull();
+    expect(screen.queryByText(/openclaw/i)).toBeNull();
+  });
 });

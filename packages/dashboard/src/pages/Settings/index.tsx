@@ -4,7 +4,6 @@ import {
   updateConfig,
   testLLM,
   testEmbedding,
-  testReranker,
   getLogLevel,
   setLogLevel as apiSetLogLevel,
 } from '../../api/client.js';
@@ -13,21 +12,17 @@ import {
   SectionKey,
   LLM_PROVIDERS,
   EMBEDDING_PROVIDERS,
-  RERANKER_PROVIDERS,
   EMBEDDING_DIMENSIONS,
   CUSTOM_MODEL,
   ProviderPreset,
-  parseDuration,
   SCHEDULE_PRESETS,
   SCHEDULE_CUSTOM,
 } from './types.js';
 import LlmSection from './sections/LlmSection.js';
-import SearchSection from './sections/SearchSection.js';
-import GateSection from './sections/GateSection.js';
-import SieveSection from './sections/SieveSection.js';
 import LifecycleSection from './sections/LifecycleSection.js';
 import DataManagement from './sections/DataManagement.js';
 import AuthSection from './sections/AuthSection.js';
+import AutomaticMemorySection from './sections/AutomaticMemorySection.js';
 
 type SettingsView = 'basic' | 'expert';
 
@@ -118,17 +113,6 @@ export default function Settings() {
     });
   };
 
-  const humanizeDuration = (value: string): string => {
-    const { num, unit } = parseDuration(value);
-    if (!num) return value || '-';
-    const labels: Record<string, string> = {
-      m: t('settings.unitMinutes'),
-      h: t('settings.unitHours'),
-      d: t('settings.unitDays'),
-    };
-    return `${num} ${labels[unit] || unit}`;
-  };
-
   const humanizeCron = (value: string): string => humanizeCronValue(value, t);
 
   const displayRow = (label: string, value: React.ReactNode, desc?: string) => (
@@ -148,93 +132,6 @@ export default function Settings() {
   const fieldDesc = (text: string) => (
     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
       {text}
-    </div>
-  );
-
-  const renderNumberField = (label: string, desc: string, path: string, min?: number, max?: number) => (
-    <div className="form-group" style={{ marginBottom: 14 }}>
-      <label>{label}</label>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step="any"
-        value={getDraftValue(path) ?? ''}
-        onChange={e => updateDraft(path, e.target.value === '' ? '' : Number(e.target.value))}
-      />
-      {fieldDesc(desc)}
-    </div>
-  );
-
-  const renderToggleField = (label: string, desc: string, path: string) => (
-    <div className="form-group" style={{ marginBottom: 14 }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <input
-          type="checkbox"
-          checked={!!getDraftValue(path)}
-          onChange={e => updateDraft(path, e.target.checked)}
-        />
-        <span>{label}</span>
-      </label>
-      {fieldDesc(desc)}
-    </div>
-  );
-
-  const renderSlider = (label: string, desc: string, path: string, min: number, max: number, step: number) => {
-    const value = Number(getDraftValue(path) ?? min);
-    return (
-      <div className="form-group" style={{ marginBottom: 14 }}>
-        <label>{label} — {value.toFixed(step < 0.1 ? 2 : 1)}</label>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={e => updateDraft(path, Number(e.target.value))}
-          style={{ width: '100%' }}
-        />
-        {fieldDesc(desc)}
-      </div>
-    );
-  };
-
-  const renderLinkedWeights = () => {
-    const vectorWeight = Number(getDraftValue('vectorWeight') ?? 0.7);
-    const textWeight = Number(getDraftValue('textWeight') ?? 0.3);
-    return (
-      <div className="form-group" style={{ marginBottom: 14 }}>
-        <label>
-          {t('settings.searchBalance')} — {t('settings.vectorWeight')}: {(vectorWeight * 100).toFixed(0)}% / {t('settings.textWeight')}: {(textWeight * 100).toFixed(0)}%
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={vectorWeight}
-          onChange={e => {
-            const nextVector = Number(e.target.value);
-            updateDraft('vectorWeight', nextVector);
-            updateDraft('textWeight', Number((1 - nextVector).toFixed(2)));
-          }}
-          style={{ width: '100%' }}
-        />
-        {fieldDesc(t('settings.searchBalanceDesc'))}
-      </div>
-    );
-  };
-
-  const renderDuration = (label: string, desc: string, path: string) => (
-    <div className="form-group" style={{ marginBottom: 14 }}>
-      <label>{label}</label>
-      <input
-        type="text"
-        value={getDraftValue(path) ?? ''}
-        placeholder="7d"
-        onChange={e => updateDraft(path, e.target.value)}
-      />
-      {fieldDesc(desc)}
     </div>
   );
 
@@ -282,12 +179,13 @@ export default function Settings() {
 
   const sectionHeader = (title: string, section: SectionKey) => {
     const editable = liveEditableSections.has(section);
+    const statusText = editable ? t('settings.liveApply') : t('settings.deployOnly');
     return (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
         <div>
           <h3 style={{ marginBottom: 6 }}>{title}</h3>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {editable ? t('settings.liveApply') : t('settings.deployOnly')}
+            {statusText}
           </div>
         </div>
         {editable ? (
@@ -323,16 +221,6 @@ export default function Settings() {
           timeoutMs: config.llm?.extraction?.timeoutMs ?? '',
           hasApiKey: config.llm?.extraction?.hasApiKey ?? false,
         },
-        lifecycle: {
-          provider: config.llm?.lifecycle?.provider ?? 'openai',
-          model: config.llm?.lifecycle?.model ?? '',
-          customModel: '',
-          useCustomModel: false,
-          apiKey: '',
-          baseUrl: config.llm?.lifecycle?.baseUrl ?? '',
-          timeoutMs: config.llm?.lifecycle?.timeoutMs ?? '',
-          hasApiKey: config.llm?.lifecycle?.hasApiKey ?? false,
-        },
         embedding: {
           provider: config.embedding?.provider ?? 'openai',
           model: config.embedding?.model ?? '',
@@ -344,19 +232,9 @@ export default function Settings() {
           timeoutMs: config.embedding?.timeoutMs ?? '',
           hasApiKey: config.embedding?.hasApiKey ?? false,
         },
-        reranker: {
-          provider: config.search?.reranker?.provider ?? 'none',
-          model: config.search?.reranker?.model ?? '',
-          customModel: '',
-          useCustomModel: false,
-          apiKey: '',
-          baseUrl: config.search?.reranker?.baseUrl ?? '',
-          timeoutMs: config.search?.reranker?.timeoutMs ?? '',
-          hasApiKey: config.search?.reranker?.hasApiKey ?? false,
-        },
       };
 
-      for (const key of ['extraction', 'lifecycle'] as const) {
+      for (const key of ['extraction'] as const) {
         const provider = nextDraft[key].provider;
         const presets = LLM_PROVIDERS[provider]?.models ?? [];
         if (nextDraft[key].model && !presets.includes(nextDraft[key].model)) {
@@ -371,42 +249,7 @@ export default function Settings() {
         nextDraft.embedding.customModel = nextDraft.embedding.model;
       }
 
-      const rerankerPresets = RERANKER_PROVIDERS[nextDraft.reranker.provider]?.models ?? [];
-      if (nextDraft.reranker.model && !rerankerPresets.includes(nextDraft.reranker.model)) {
-        nextDraft.reranker.useCustomModel = true;
-        nextDraft.reranker.customModel = nextDraft.reranker.model;
-      }
-
       setDraft(nextDraft);
-      setEditingSection(section);
-      return;
-    }
-
-    if (section === 'gate') {
-      setDraft({
-        fixedInjectionTokens: config.gate?.fixedInjectionTokens ?? 500,
-        maxInjectionTokens: config.gate?.maxInjectionTokens ?? 1000,
-        relationInjection: config.gate?.relationInjection ?? false,
-        relationBudget: config.gate?.relationBudget ?? 100,
-        searchLimit: config.gate?.searchLimit ?? 30,
-        skipSmallTalk: config.gate?.skipSmallTalk ?? false,
-        cliffAbsolute: config.gate?.cliffAbsolute ?? 0.4,
-        cliffGap: config.gate?.cliffGap ?? 0.6,
-        cliffFloor: config.gate?.cliffFloor ?? 0.05,
-        queryExpansionTimeoutMs: config.gate?.queryExpansionTimeoutMs ?? 5000,
-        rerankerTimeoutMs: config.gate?.rerankerTimeoutMs ?? 8000,
-        relationTimeoutMs: config.gate?.relationTimeoutMs ?? 5000,
-        relevanceGate: {
-          enabled: config.gate?.relevanceGate?.enabled ?? true,
-          inspectTopK: config.gate?.relevanceGate?.inspectTopK ?? 3,
-          minSemanticScore: config.gate?.relevanceGate?.minSemanticScore ?? 0.55,
-          minFusedScoreNoOverlap: config.gate?.relevanceGate?.minFusedScoreNoOverlap ?? 0.15,
-        },
-        queryExpansion: {
-          enabled: config.gate?.queryExpansion?.enabled ?? false,
-          maxVariants: config.gate?.queryExpansion?.maxVariants ?? 3,
-        },
-      });
       setEditingSection(section);
       return;
     }
@@ -419,38 +262,6 @@ export default function Settings() {
       });
       setEditingSection(section);
       return;
-    }
-
-    if (section === 'search') {
-      setDraft({
-        hybrid: config.search?.hybrid ?? true,
-        vectorWeight: config.search?.vectorWeight ?? 0.7,
-        textWeight: config.search?.textWeight ?? 0.3,
-        minSimilarity: config.search?.minSimilarity ?? 0.2,
-        recencyBoostWindow: config.search?.recencyBoostWindow ?? '7d',
-        reranker: {
-          enabled: config.search?.reranker?.enabled ?? false,
-          topN: config.search?.reranker?.topN ?? 10,
-          weight: config.search?.reranker?.weight ?? 0.5,
-        },
-      });
-      setEditingSection(section);
-      return;
-    }
-
-    if (section === 'sieve') {
-      setDraft({
-        fastChannelEnabled: config.sieve?.fastChannelEnabled ?? true,
-        contextMessages: config.sieve?.contextMessages ?? 4,
-        maxConversationChars: config.sieve?.maxConversationChars ?? 4000,
-        smartUpdate: config.sieve?.smartUpdate ?? true,
-        similarityThreshold: config.sieve?.similarityThreshold ?? 0.35,
-        exactDupThreshold: config.sieve?.exactDupThreshold ?? 0.08,
-        relationExtraction: config.sieve?.relationExtraction ?? true,
-        extractionLogPreviewCharsPerMessage: config.sieve?.extractionLogPreviewCharsPerMessage ?? 60,
-        extractionLogPreviewMaxChars: config.sieve?.extractionLogPreviewMaxChars ?? 300,
-      });
-      setEditingSection(section);
     }
   };
 
@@ -484,10 +295,9 @@ export default function Settings() {
 
   const saveSection = async (section: SectionKey) => {
     if (!config) return;
-    const v2Only = !config.runtime?.legacyMode;
 
     if (section === 'llm') {
-      for (const value of [draft.extraction?.timeoutMs, draft.lifecycle?.timeoutMs, draft.embedding?.timeoutMs, draft.reranker?.timeoutMs]) {
+      for (const value of [draft.extraction?.timeoutMs, draft.embedding?.timeoutMs]) {
         if (value === '' || value === null || value === undefined) continue;
         const parsed = Number(value);
         if (Number.isNaN(parsed) || parsed < 500 || parsed > 120000) {
@@ -518,66 +328,6 @@ export default function Settings() {
           baseUrl: draft.embedding.baseUrl || '',
           timeoutMs: parseOptionalNumber(draft.embedding.timeoutMs),
           ...(draft.embedding.apiKey ? { apiKey: draft.embedding.apiKey } : {}),
-        },
-        search: {
-          reranker: {
-            ...(config.search?.reranker ?? {}),
-            provider: draft.reranker.provider ?? 'none',
-            ...(draft.reranker.useCustomModel ? { model: draft.reranker.customModel } : draft.reranker.model ? { model: draft.reranker.model } : {}),
-            ...(draft.reranker.apiKey ? { apiKey: draft.reranker.apiKey } : {}),
-            ...(draft.reranker.baseUrl ? { baseUrl: draft.reranker.baseUrl } : {}),
-            timeoutMs: parseOptionalNumber(draft.reranker.timeoutMs),
-          },
-        },
-      };
-
-      if (!v2Only) {
-        payload.llm.lifecycle = buildProviderPayload(draft.lifecycle);
-      } else {
-        delete payload.search;
-      }
-
-      try {
-        const response = await updateConfig(payload);
-        await handleConfigSaveSuccess(response);
-      } catch (e: any) {
-        setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
-      }
-      return;
-    }
-
-    if (section === 'gate') {
-      const timeoutValues = [draft.queryExpansionTimeoutMs, draft.rerankerTimeoutMs, draft.relationTimeoutMs];
-      if (timeoutValues.some((value: any) => Number.isNaN(Number(value)) || Number(value) < 500 || Number(value) > 30000)) {
-        setToast({ message: t('settings.validationTimeoutRange', { min: 500, max: 30000 }), type: 'error' });
-        return;
-      }
-
-      const payload = {
-        gate: {
-          ...config.gate,
-          fixedInjectionTokens: Number(draft.fixedInjectionTokens),
-          maxInjectionTokens: Number(draft.maxInjectionTokens),
-          relationInjection: !!draft.relationInjection,
-          relationBudget: Number(draft.relationBudget),
-          searchLimit: Number(draft.searchLimit),
-          skipSmallTalk: !!draft.skipSmallTalk,
-          cliffAbsolute: Number(draft.cliffAbsolute),
-          cliffGap: Number(draft.cliffGap),
-          cliffFloor: Number(draft.cliffFloor),
-          queryExpansionTimeoutMs: Number(draft.queryExpansionTimeoutMs),
-          rerankerTimeoutMs: Number(draft.rerankerTimeoutMs),
-          relationTimeoutMs: Number(draft.relationTimeoutMs),
-          relevanceGate: {
-            enabled: !!draft.relevanceGate?.enabled,
-            inspectTopK: Number(draft.relevanceGate?.inspectTopK),
-            minSemanticScore: Number(draft.relevanceGate?.minSemanticScore),
-            minFusedScoreNoOverlap: Number(draft.relevanceGate?.minFusedScoreNoOverlap),
-          },
-          queryExpansion: {
-            enabled: !!draft.queryExpansion?.enabled,
-            maxVariants: Number(draft.queryExpansion?.maxVariants ?? 3),
-          },
         },
       };
 
@@ -610,71 +360,9 @@ export default function Settings() {
       }
       return;
     }
-
-    if (section === 'search') {
-      const vectorWeight = Number(draft.vectorWeight);
-      const textWeight = Number(draft.textWeight);
-      if (Number.isNaN(vectorWeight) || Number.isNaN(textWeight) || vectorWeight < 0 || vectorWeight > 1 || textWeight < 0 || textWeight > 1) {
-        setToast({ message: t('settings.validationWeightRange'), type: 'error' });
-        return;
-      }
-      if (!/^\d+[mhd]$/i.test(draft.recencyBoostWindow || '')) {
-        setToast({ message: t('settings.validationDurationFormat'), type: 'error' });
-        return;
-      }
-
-      const payload = {
-        search: {
-          ...config.search,
-          hybrid: !!draft.hybrid,
-          vectorWeight,
-          textWeight,
-          minSimilarity: Number(draft.minSimilarity),
-          recencyBoostWindow: draft.recencyBoostWindow,
-          reranker: {
-            ...(config.search?.reranker ?? {}),
-            enabled: !!draft.reranker?.enabled,
-            topN: Number(draft.reranker?.topN ?? 10),
-            weight: Number(draft.reranker?.weight ?? 0.5),
-          },
-        },
-      };
-
-      try {
-        const response = await updateConfig(payload);
-        await handleConfigSaveSuccess(response);
-      } catch (e: any) {
-        setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
-      }
-      return;
-    }
-
-    if (section === 'sieve') {
-      const payload = {
-        sieve: {
-          ...config.sieve,
-          fastChannelEnabled: !!draft.fastChannelEnabled,
-          contextMessages: Number(draft.contextMessages),
-          maxConversationChars: Number(draft.maxConversationChars),
-          smartUpdate: !!draft.smartUpdate,
-          similarityThreshold: Number(draft.similarityThreshold),
-          exactDupThreshold: Number(draft.exactDupThreshold),
-          relationExtraction: !!draft.relationExtraction,
-          extractionLogPreviewCharsPerMessage: Number(draft.extractionLogPreviewCharsPerMessage),
-          extractionLogPreviewMaxChars: Number(draft.extractionLogPreviewMaxChars),
-        },
-      };
-
-      try {
-        const response = await updateConfig(payload);
-        await handleConfigSaveSuccess(response);
-      } catch (e: any) {
-        setToast({ message: t('settings.toastSaveFailed', { message: e.message }), type: 'error' });
-      }
-    }
   };
 
-  const handleTestLLM = async (target: 'extraction' | 'lifecycle') => {
+  const handleTestLLM = async (target: 'extraction') => {
     const key = `llm.${target}`;
     setTestState(prev => ({ ...prev, [key]: { status: 'testing' } }));
     try {
@@ -703,20 +391,6 @@ export default function Settings() {
     }
   };
 
-  const handleTestReranker = async () => {
-    setTestState(prev => ({ ...prev, reranker: { status: 'testing' } }));
-    try {
-      const res = await testReranker();
-      if (res.ok) {
-        setTestState(prev => ({ ...prev, reranker: { status: 'success', latency: res.latency_ms } }));
-      } else {
-        setTestState(prev => ({ ...prev, reranker: { status: 'error', message: res.error || 'Unknown error' } }));
-      }
-    } catch (e: any) {
-      setTestState(prev => ({ ...prev, reranker: { status: 'error', message: e.message } }));
-    }
-  };
-
   const renderProviderBlock = useMemo(() => {
     const localizeProviderLabel = (key: string, label: string) => {
       if (key === 'none') return t('settings.disabled');
@@ -737,9 +411,7 @@ export default function Settings() {
       const models = preset?.models ?? [];
       const isCustomModel = value.useCustomModel;
       const isDisabled = provider === 'none';
-      const timeoutDesc = prefix === 'reranker'
-        ? t('settings.providerTimeoutRerankerDesc')
-        : t('settings.providerTimeoutDesc');
+      const timeoutDesc = t('settings.providerTimeoutDesc');
 
       const handleProviderChange = (nextProvider: string) => {
         updateDraft(`${prefix}.provider`, nextProvider);
@@ -1052,7 +724,14 @@ export default function Settings() {
             testState={testState}
             handleTestLLM={handleTestLLM}
             handleTestEmbedding={handleTestEmbedding}
-            handleTestReranker={handleTestReranker}
+            t={t}
+          />
+
+          <AutomaticMemorySection
+            missionDraft={sieveMissionDraft}
+            missionSaving={savingSieveMission}
+            onMissionDraftChange={setSieveMissionDraft}
+            onMissionSave={saveSieveMission}
             t={t}
           />
 
@@ -1088,6 +767,37 @@ export default function Settings() {
             </div>
           </div>
 
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <h3 style={{ marginBottom: 6 }}>{t('settings.v2DeploymentReferenceTitle')}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {t('settings.v2RuntimeDeploymentReference')}
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('settings.readOnly')}</span>
+            </div>
+            <table>
+              <tbody>
+                <tr>
+                  <td>{t('settings.vectorBackend')}</td>
+                  <td>{config.vectorBackend?.provider ?? 'sqlite-vec'}</td>
+                </tr>
+                <tr>
+                  <td>{t('settings.embeddingDimensions')}</td>
+                  <td>{config.embedding?.dimensions ?? '-'}</td>
+                </tr>
+                <tr>
+                  <td>{t('settings.runtimeMode')}</td>
+                  <td>{config.runtime?.legacyMode ? t('settings.runtimeLegacy') : t('settings.runtimeV2Only')}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginTop: 12 }}>
+              {t('settings.v2DeploymentReferenceHint')}
+            </div>
+          </div>
+
           <LifecycleSection
             config={config}
             editing={editingSection === 'lifecycle'}
@@ -1095,47 +805,6 @@ export default function Settings() {
             displayRow={displayRow}
             renderSchedule={renderSchedule}
             humanizeCron={humanizeCron}
-            t={t}
-          />
-
-          <GateSection
-            config={config}
-            editing={editingSection === 'gate'}
-            draft={draft}
-            setDraft={setDraft}
-            sectionHeader={sectionHeader}
-            displayRow={displayRow}
-            renderNumberField={renderNumberField}
-            renderToggleField={renderToggleField}
-            t={t}
-          />
-
-          <SearchSection
-            config={config}
-            editing={editingSection === 'search'}
-            draft={draft}
-            setDraft={setDraft}
-            sectionHeader={sectionHeader}
-            displayRow={displayRow}
-            renderToggleField={renderToggleField}
-            renderLinkedWeights={renderLinkedWeights}
-            renderDuration={renderDuration}
-            humanizeDuration={humanizeDuration}
-            t={t}
-          />
-
-          <SieveSection
-            config={config}
-            editing={editingSection === 'sieve'}
-            sectionHeader={sectionHeader}
-            displayRow={displayRow}
-            renderToggleField={renderToggleField}
-            renderNumberField={renderNumberField}
-            renderSlider={renderSlider}
-            missionDraft={sieveMissionDraft}
-            missionSaving={savingSieveMission}
-            onMissionDraftChange={setSieveMissionDraft}
-            onMissionSave={saveSieveMission}
             t={t}
           />
         </>

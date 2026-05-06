@@ -1,5 +1,5 @@
 import React from 'react';
-import { SectionKey, LLM_PROVIDERS, EMBEDDING_PROVIDERS, RERANKER_PROVIDERS, ProviderPreset } from '../types.js';
+import { SectionKey, LLM_PROVIDERS, EMBEDDING_PROVIDERS, ProviderPreset } from '../types.js';
 
 interface LlmSectionProps {
   config: any;
@@ -7,18 +7,16 @@ interface LlmSectionProps {
   sectionHeader: (title: string, section: SectionKey) => React.ReactNode;
   renderProviderBlock: (title: string, prefix: string, providerMap: Record<string, ProviderPreset>) => React.ReactNode;
   testState: Record<string, { status: 'idle' | 'testing' | 'success' | 'error'; message?: string; latency?: number }>;
-  handleTestLLM: (target: 'extraction' | 'lifecycle') => void;
+  handleTestLLM: (target: 'extraction') => void;
   handleTestEmbedding: () => void;
-  handleTestReranker: () => void;
   t: (key: string, params?: any) => string;
 }
 
 export default function LlmSection({
-  config, editing, sectionHeader, renderProviderBlock, testState, handleTestLLM, handleTestEmbedding, handleTestReranker, t,
+  config, editing, sectionHeader, renderProviderBlock, testState, handleTestLLM, handleTestEmbedding, t,
 }: LlmSectionProps) {
   const formatProvider = (provider?: string, model?: string, timeoutMs?: number) =>
     `${provider}${model ? ` / ${model}` : ''}${timeoutMs ? ` · ${timeoutMs}ms` : ''}`;
-  const v2Only = !config.runtime?.legacyMode;
 
   return (
     <div className="card">
@@ -27,16 +25,9 @@ export default function LlmSection({
         <>
           {renderProviderBlock(t('settings.extractionLlm'), 'extraction', LLM_PROVIDERS)}
           {renderProviderBlock(t('settings.embedding'), 'embedding', EMBEDDING_PROVIDERS)}
-          {v2Only ? (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginTop: 8 }}>
-              {t('settings.llmV2OnlyHint')}
-            </div>
-          ) : (
-            <>
-              {renderProviderBlock(t('settings.lifecycleLlm'), 'lifecycle', LLM_PROVIDERS)}
-              {renderProviderBlock(t('settings.rerankerTitle'), 'reranker', RERANKER_PROVIDERS)}
-            </>
-          )}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginTop: 8 }}>
+            {t('settings.llmV2OnlyHint')}
+          </div>
         </>
       ) : (
         <table>
@@ -62,32 +53,6 @@ export default function LlmSection({
               </td>
             </tr>
             <tr>
-              <td>{t('settings.lifecycleLlm')}</td>
-              <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{formatProvider(config.llm?.lifecycle?.provider, config.llm?.lifecycle?.model, config.llm?.lifecycle?.timeoutMs)}</span>
-                {v2Only ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('settings.notUsedInV2')}</span>
-                ) : (
-                  <>
-                    <button
-                      className="btn"
-                      style={{ fontSize: 11, padding: '2px 8px' }}
-                      disabled={testState['llm.lifecycle']?.status === 'testing'}
-                      onClick={() => handleTestLLM('lifecycle')}
-                    >
-                      {testState['llm.lifecycle']?.status === 'testing' ? t('settings.testing') : t('settings.testConnection')}
-                    </button>
-                    {testState['llm.lifecycle']?.status === 'success' && (
-                      <span style={{ fontSize: 11, color: 'var(--success)' }}>{t('settings.testSuccess', { latency: testState['llm.lifecycle'].latency ?? 0 })}</span>
-                    )}
-                    {testState['llm.lifecycle']?.status === 'error' && (
-                      <span style={{ fontSize: 11, color: 'var(--danger)' }}>{t('settings.testFailed', { message: testState['llm.lifecycle'].message ?? '' })}</span>
-                    )}
-                  </>
-                )}
-              </td>
-            </tr>
-            <tr>
               <td>{t('settings.embedding')}</td>
               <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>{formatProvider(config.embedding?.provider, config.embedding?.model, config.embedding?.timeoutMs)}</span>
@@ -108,40 +73,6 @@ export default function LlmSection({
               </td>
             </tr>
             <tr><td>{t('settings.embeddingDimensions')}</td><td>{config.embedding?.dimensions}</td></tr>
-            <tr>
-              <td>{t('settings.rerankerTitle')}</td>
-              <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>
-                  {config.search?.reranker?.provider === 'none' || !config.search?.reranker?.provider
-                    ? t('settings.disabled')
-                    : config.search?.reranker?.provider === 'llm'
-                      ? `${t('settings.rerankerLlmLabel')}${config.search?.reranker?.timeoutMs ? ` · ${config.search.reranker.timeoutMs}ms` : ''}`
-                      : formatProvider(config.search.reranker.provider, config.search.reranker.model, config.search.reranker.timeoutMs)
-                  }
-                </span>
-                {!v2Only && config.search?.reranker?.provider && config.search.reranker.provider !== 'none' && (
-                  <>
-                    <button
-                      className="btn"
-                      style={{ fontSize: 11, padding: '2px 8px' }}
-                      disabled={testState['reranker']?.status === 'testing'}
-                      onClick={() => handleTestReranker()}
-                    >
-                      {testState['reranker']?.status === 'testing' ? t('settings.testing') : t('settings.testConnection')}
-                    </button>
-                    {testState['reranker']?.status === 'success' && (
-                      <span style={{ fontSize: 11, color: 'var(--success)' }}>{t('settings.testSuccess', { latency: testState['reranker'].latency ?? 0 })}</span>
-                    )}
-                    {testState['reranker']?.status === 'error' && (
-                      <span style={{ fontSize: 11, color: 'var(--danger)' }}>{t('settings.testFailed', { message: testState['reranker'].message ?? '' })}</span>
-                    )}
-                  </>
-                )}
-                {v2Only && (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('settings.notUsedInV2')}</span>
-                )}
-              </td>
-            </tr>
           </tbody>
         </table>
       )}
