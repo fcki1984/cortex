@@ -6,6 +6,8 @@
 <p align="center"><strong>你的 AI 会遗忘，Cortex 不会。</strong></p>
 <p align="center"><sub>会生长、会学习、会回忆的记忆系统。</sub></p>
 
+> Cortex V2.0 是可发布产品线：`/review-inbox` 是默认入口，`/quality` 运行召回质量探针，`pnpm release:gate:v2` 是本地发布总门槛。
+
 <p align="center">
   <a href="https://github.com/fcki1984/cortex/releases"><img src="https://img.shields.io/github/v/release/fcki1984/cortex?style=flat-square&color=6366f1" alt="Release" /></a>
   <a href="https://github.com/fcki1984/cortex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/fcki1984/cortex?style=flat-square" alt="License" /></a>
@@ -62,6 +64,16 @@
 | **成本** | ~¥4/月 | $99+/月 | $49+/月 | 不等 |
 
 ## 核心特性
+
+### Cortex V2.0 产品闭环
+
+Cortex V2.0 把自动提取、人工审查、retain mission 和召回质量验收收成一条闭环：
+
+- `/review-inbox` 是默认产品入口，用于集中处理不确定候选。
+- Retain mission 支持全局默认和 agent 覆写，只决定 durable 候选 keep/review/drop，不改变 truth 判定。
+- `/quality` 使用独立 probe agent 检查 location、organization、language preference、task_state、note-only negative 和 newest winner 召回场景。
+- `pnpm recall-eval:v2` 与 `pnpm release:gate:v2` 是 V2.0 召回质量和发布前总 gate。
+- OpenClaw 保持独立宿主机签收边界；Cortex core gate 通过后，不因 OpenClaw 未签收而阻塞核心 V2.0 发布。
 
 ### 🧬 V2 结构化记录 + 会话笔记保留
 

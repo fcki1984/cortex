@@ -128,8 +128,7 @@ describe('AgentDetail retain mission override', () => {
 
     await user.click(within(configCard as HTMLElement).getByRole('button', { name: '编辑' }));
     await user.click(within(configCard as HTMLElement).getByLabelText('使用智能体专属 Mission'));
-    const missionField = within(configCard as HTMLElement).getByLabelText('智能体专属 Mission');
-    await user.type(missionField, '只保留长期偏好和稳定背景，不保留短期任务');
+    await user.click(within(configCard as HTMLElement).getByRole('button', { name: '长期偏好和稳定背景，不保留短期任务' }));
     await user.click(within(configCard as HTMLElement).getByRole('button', { name: '保存' }));
 
     await waitFor(() => {

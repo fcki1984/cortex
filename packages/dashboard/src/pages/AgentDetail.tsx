@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getAgent, updateAgent, deleteAgent, getAgentConfig, checkAuth, getConfig } from '../api/client.js';
 import { useI18n } from '../i18n/index.js';
 import { formatAgentDescriptionLabel, formatAgentNameLabel, formatRecordKindLabel, formatSourceTypeLabel } from '../utils/v2Display.js';
+import { RETAIN_MISSION_PRESETS, labelRetainMissionPreset } from '../utils/missionPresets.js';
 
 function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -312,6 +313,14 @@ export default function AgentDetail() {
       obj[keys[keys.length - 1]!] = value;
       return next;
     });
+  };
+
+  const applyRetainMissionPreset = (preset: string) => {
+    setConfigDraft((prev: any) => ({
+      ...prev,
+      retainMissionMode: 'override',
+      retainMission: preset,
+    }));
   };
 
   const saveConfig = async () => {
@@ -1094,6 +1103,18 @@ def ingest(user_msg: str, assistant_msg: str):
                   {configDraft.retainMissionMode === 'override' && (
                     <div className="form-group" style={{ marginBottom: 12 }}>
                       <label>{t('agentDetail.agentMissionLabel')}</label>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                        {RETAIN_MISSION_PRESETS.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className="btn"
+                            onClick={() => applyRetainMissionPreset(preset)}
+                          >
+                            {labelRetainMissionPreset(preset)}
+                          </button>
+                        ))}
+                      </div>
                       <textarea
                         aria-label={t('agentDetail.agentMissionLabel')}
                         rows={4}

@@ -1099,6 +1099,123 @@ describe('CortexRecordsV2', () => {
     expect((recall.meta as any).relevance_basis).toEqual([]);
   });
 
+  it('keeps recall injection precise across canonical durable query intents', async () => {
+    const agentId = 'recall-quality-matrix-agent';
+    await service.remember({
+      agent_id: agentId,
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    await service.remember({
+      agent_id: agentId,
+      kind: 'fact_slot',
+      content: '我在 OpenAI 工作',
+      entity_key: 'user',
+      attribute_key: 'organization',
+    });
+    await service.remember({
+      agent_id: agentId,
+      kind: 'profile_rule',
+      content: '请用中文回答',
+      attribute_key: 'language_preference',
+    });
+    await service.remember({
+      agent_id: agentId,
+      kind: 'task_state',
+      content: '当前任务是重构 Cortex recall',
+      subject_key: 'cortex',
+      state_key: 'refactor_status',
+    });
+    await service.remember({
+      agent_id: agentId,
+      kind: 'session_note',
+      content: '最近也许会考虑换方案',
+    });
+
+    const location = await service.recall({ query: 'Where does the user live?', agent_id: agentId });
+    expect(location.facts.map(record => record.attribute_key)).toEqual(['location']);
+    expect(location.facts[0]?.content).toContain('大阪');
+    expect(location.rules).toHaveLength(0);
+    expect(location.task_state).toHaveLength(0);
+    expect(location.session_notes).toHaveLength(0);
+    expect(location.context).toContain('[Fact]');
+    expect(location.context).not.toContain('[Rule]');
+    expect(location.context).not.toContain('[Task]');
+    expect((location.meta as any).normalized_intents?.attributes).toContain('location');
+    expect((location.meta as any).relevance_basis).toEqual([
+      expect.objectContaining({
+        kind: 'fact_slot',
+        intent_match: expect.arrayContaining(['attribute:location']),
+      }),
+    ]);
+
+    const organization = await service.recall({ query: 'Where does the user work?', agent_id: agentId });
+    expect(organization.facts.map(record => record.attribute_key)).toEqual(['organization']);
+    expect(organization.facts[0]?.content).toContain('OpenAI');
+    expect(organization.rules).toHaveLength(0);
+    expect(organization.task_state).toHaveLength(0);
+    expect(organization.session_notes).toHaveLength(0);
+    expect(organization.context).toContain('OpenAI');
+    expect(organization.context).not.toContain('大阪');
+    expect((organization.meta as any).normalized_intents?.attributes).toContain('organization');
+
+    const language = await service.recall({ query: 'How should you answer?', agent_id: agentId });
+    expect(language.rules.map(record => record.attribute_key)).toEqual(['language_preference']);
+    expect(language.rules[0]?.content).toContain('中文');
+    expect(language.facts).toHaveLength(0);
+    expect(language.task_state).toHaveLength(0);
+    expect(language.session_notes).toHaveLength(0);
+    expect(language.context).toContain('[Rule]');
+    expect(language.context).not.toContain('[Fact]');
+    expect((language.meta as any).normalized_intents?.attributes).toContain('language_preference');
+
+    const task = await service.recall({ query: 'What is the current task?', agent_id: agentId });
+    expect(task.task_state.map(record => record.state_key)).toEqual(['refactor_status']);
+    expect(task.task_state[0]?.content).toContain('重构 Cortex recall');
+    expect(task.rules).toHaveLength(0);
+    expect(task.facts).toHaveLength(0);
+    expect(task.session_notes).toHaveLength(0);
+    expect(task.context).toContain('[Task]');
+    expect(task.context).not.toContain('[Rule]');
+    expect(task.context).not.toContain('[Fact]');
+    expect((task.meta as any).normalized_intents?.states).toContain('current_task');
+
+    const noteOnly = await service.recall({ query: '最近是否要换方案？', agent_id: agentId });
+    expect(noteOnly.context).toBe('');
+    expect(noteOnly.rules).toHaveLength(0);
+    expect(noteOnly.facts).toHaveLength(0);
+    expect(noteOnly.task_state).toHaveLength(0);
+    expect(noteOnly.session_notes).toHaveLength(0);
+    expect(noteOnly.meta.reason).toBe('low_relevance');
+    expect((noteOnly.meta as any).relevance_basis).toEqual([]);
+  });
+
+  it('recalls only the newest active stable-key winner', async () => {
+    const firstLocation = await service.remember({
+      agent_id: 'recall-newest-winner-agent',
+      kind: 'fact_slot',
+      content: '我住大阪',
+      entity_key: 'user',
+      attribute_key: 'location',
+    });
+    const secondLocation = await service.remember({
+      agent_id: 'recall-newest-winner-agent',
+      kind: 'fact_slot',
+      content: '现在住东京',
+    });
+
+    expect(firstLocation.decision).toBe('inserted');
+    expect(secondLocation.decision).toBe('superseded');
+
+    const recall = await service.recall({ query: 'Where does the user live?', agent_id: 'recall-newest-winner-agent' });
+    expect(recall.facts).toHaveLength(1);
+    expect(recall.facts[0]?.content).toContain('东京');
+    expect(recall.context).toContain('东京');
+    expect(recall.context).not.toContain('大阪');
+  });
+
   it('keeps agent persona available even when regular recall is skipped', async () => {
     await service.remember({
       agent_id: 'persona-agent',

@@ -1,9 +1,11 @@
-# Cortex v2.0 Release Candidate 发布测试计划
+# Cortex V2.0 Release Candidate 发布测试计划
 
 > 目标：先完成 Cortex v2 核心服务的生产候选验收，再对 OpenClaw 做独立宿主机签收。
 
 ## 额外发布门槛
 
+- `pnpm release:gate:v2` 作为本地发布前总 gate，聚合 server test/lint/build、dashboard test/build、`SMOKE_ROUNDS=3 pnpm smoke:v2`、`RECALL_EVAL_ROUNDS=3 pnpm recall-eval:v2`。
+- `RECALL_EVAL_ROUNDS=3 pnpm recall-eval:v2` 必须覆盖 location、organization、language preference、task_state、note-only negative、newest winner。
 - `SMOKE_ROUNDS=3 pnpm smoke:v2` 必须连续三轮通过，每轮使用独立 probe agent 并完成清理。
 - 浏览器侧还需完整跑一轮主链验收，不接受一次 `fetch failed` 或页面卡死就视作通过。
 

@@ -132,6 +132,26 @@ describe('ReviewInbox page', () => {
     expect(screen.getByText('这条候选已经归一到当前 V2 contract，可直接接受；如表述不顺手，再做轻微改写即可。')).toBeTruthy();
   });
 
+  it('shows a product-ready empty state and automation summary when there is no review work', async () => {
+    apiMocks.listReviewInboxBatchesV2.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      sync: {
+        mode: 'full',
+        cursor: 'cursor_empty',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('当前自动化状态')).toBeTruthy();
+    expect(await screen.findByText('当前没有待处理批次。')).toBeTruthy();
+    expect(screen.getByText('先配置 retain mission，再接入 ingest 或把 text / MEMORY.md 发送到审查箱。')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '配置 Mission' }).getAttribute('href')).toBe('/settings');
+    expect(screen.getByRole('link', { name: '发送导入到审查箱' }).getAttribute('href')).toBe('/import-export');
+    expect(screen.getByRole('link', { name: '运行召回质量检查' }).getAttribute('href')).toBe('/quality');
+  });
+
   it('honors the batch query parameter when opening a specific review batch', async () => {
     const secondBatchSummary = {
       ...batchSummary,

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import fs from 'node:fs';
 import { getDb } from '../db/index.js';
 import { getConfig, updateConfig } from '../utils/config.js';
 import { createLogger, getLogLevel as _getLogLevel, setLogLevel as _setLogLevel, getLogBuffer } from '../utils/logger.js';
@@ -8,30 +9,9 @@ import type { Memory } from '../db/queries.js';
 import type { SearchResult } from '../search/hybrid.js';
 import { restartLifecycleScheduler } from '../core/scheduler.js';
 import { observedRoute } from './observability.js';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { CURRENT_VERSION } from '../utils/version.js';
 
 const log = createLogger('system');
-
-// Read version from root package.json at startup
-function getPackageVersion(): string {
-  try {
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    // Try multiple possible locations (dev vs built)
-    for (const rel of ['../../../../package.json', '../../../package.json', '../../package.json']) {
-      const p = path.resolve(__dirname, rel);
-      if (fs.existsSync(p)) {
-        const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (pkg.name === 'cortex' || pkg.name === '@cortex/root') return pkg.version;
-        if (pkg.version) return pkg.version;
-      }
-    }
-  } catch {}
-  return '0.0.0';
-}
-
-const CURRENT_VERSION = getPackageVersion();
 
 /** Returns true if `latest` is strictly newer than `current` (semver comparison) */
 function isNewerVersion(latest: string, current: string): boolean {

@@ -192,7 +192,7 @@ const ATTRIBUTE_INTENT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
   { key: 'response_style', patterns: [/\banswer style\b/i, /\bresponse style\b/i, /\brespond\b/i, /\breply\b/i, /\btone\b/i, /怎么回答/i, /如何回答/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /简洁/i, /简短/i] },
   { key: 'persona_style', patterns: [/\bpersona\b/i, /\bresponse style\b/i, /\bassistant style\b/i, /人设/i, /回答方式/i, /回复方式/i, /回答风格/i, /回复风格/i, /助手风格/i] },
   { key: 'response_length', patterns: [/\bverbose\b/i, /\blong\b/i, /\bshort\b/i, /\bbrief\b/i, /\bconcise\b/i, /长篇/i, /冗长/i, /简洁/i, /简短/i] },
-  { key: 'language_preference', patterns: [/\blanguage\b/i, /\benglish\b/i, /\bchinese\b/i, /\bjapanese\b/i, /语言/i, /中文/i, /英文/i, /日文/i] },
+  { key: 'language_preference', patterns: [/\blanguage\b/i, /\benglish\b/i, /\bchinese\b/i, /\bjapanese\b/i, /\bhow should (you|the assistant) (answer|respond|reply)\b/i, /语言/i, /中文/i, /英文/i, /日文/i] },
   { key: 'solution_complexity', patterns: [/\bsimple\b/i, /\blightweight\b/i, /\bcomplex\b/i, /\bsetup\b/i, /\bdeployment\b/i, /\bsolution\b/i, /简单/i, /复杂/i, /部署/i, /解决方案/i, /部署方案/i] },
   { key: 'risk_tolerance', patterns: [/\brisk\b/i, /\btolerance\b/i, /\bprofile\b/i, /风险/i] },
   { key: 'persona_boundary', patterns: [/\bconstraint\b/i, /\brequirement\b/i, /\bmust\b/i, /\bmust not\b/i, /\bavoid\b/i, /不要/i, /必须/i, /约束/i, /要求/i] },

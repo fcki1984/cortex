@@ -167,8 +167,7 @@ describe('Settings retain mission', () => {
     const missionField = within(sieveCard as HTMLElement).getByLabelText('保留 Mission') as HTMLTextAreaElement;
     expect(missionField.value).toBe('保留长期偏好、稳定背景和持续任务');
 
-    await user.clear(missionField);
-    await user.type(missionField, '只保留长期偏好和稳定背景，不保留短期任务');
+    await user.click(within(sieveCard as HTMLElement).getByRole('button', { name: '长期偏好和稳定背景，不保留短期任务' }));
     await user.click(within(sieveCard as HTMLElement).getByRole('button', { name: '保存 Mission' }));
 
     await waitFor(() => {

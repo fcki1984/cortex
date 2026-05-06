@@ -4,6 +4,7 @@ import { MCPServer, type MCPServerDeps } from '../mcp/server.js';
 import { ensureAgent } from '../db/index.js';
 import { getV2Stats } from '../v2/store.js';
 import { observedRoute } from './observability.js';
+import { CURRENT_VERSION } from '../utils/version.js';
 
 export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void {
   const deps: MCPServerDeps = {
@@ -97,6 +98,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
   }, async () => {
     return {
       name: 'cortex',
+      version: CURRENT_VERSION,
       protocol: 'jsonrpc',
       endpoints: {
         jsonrpc_post: '/mcp',
@@ -116,7 +118,7 @@ export function registerMCPRoutes(app: FastifyInstance, cortex: CortexApp): void
     });
 
     // Send server info
-    reply.raw.write(`data: ${JSON.stringify({ type: 'server_info', name: 'cortex', version: '0.1.0' })}\n\n`);
+    reply.raw.write(`data: ${JSON.stringify({ type: 'server_info', name: 'cortex', version: CURRENT_VERSION })}\n\n`);
 
     // Send tools list
     reply.raw.write(`data: ${JSON.stringify({ type: 'tools', tools: mcpServer.getTools() })}\n\n`);

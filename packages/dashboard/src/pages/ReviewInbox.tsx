@@ -561,6 +561,17 @@ export default function ReviewInbox() {
     [actionableItems],
   );
   const selectedDetail = detail && detail.batch.id === selectedBatchId ? detail : null;
+  const automationSummary = useMemo(() => {
+    return batches.reduce((summary, batch) => ({
+      pendingBatches: summary.pendingBatches + (isActionableSummary(batch.summary) ? 1 : 0),
+      pendingItems: summary.pendingItems + batch.summary.pending,
+      failedItems: summary.failedItems + batch.summary.failed,
+    }), {
+      pendingBatches: 0,
+      pendingItems: 0,
+      failedItems: 0,
+    });
+  }, [batches]);
 
   useEffect(() => {
     if (error || !selectedBatchId || !selectedDetail) return;
@@ -703,6 +714,40 @@ export default function ReviewInbox() {
         <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7 }}>
           {t('reviewInbox.intro')}
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>{t('reviewInbox.automationStatusTitle')}</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg)' }}>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{automationSummary.pendingBatches}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('reviewInbox.pendingBatchMetric')}</div>
+          </div>
+          <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg)' }}>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{automationSummary.pendingItems}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('reviewInbox.pendingItemMetric')}</div>
+          </div>
+          <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg)' }}>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{automationSummary.failedItems}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('reviewInbox.failedItemMetric')}</div>
+          </div>
+        </div>
+        {batches.length === 0 ? (
+          <div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7, marginBottom: 10 }}>
+              {t('reviewInbox.emptyGuide')}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <a className="btn" href="/settings" style={{ textDecoration: 'none' }}>{t('reviewInbox.configureMissionLink')}</a>
+              <a className="btn" href="/import-export" style={{ textDecoration: 'none' }}>{t('reviewInbox.importToInboxLink')}</a>
+              <a className="btn" href="/quality" style={{ textDecoration: 'none' }}>{t('reviewInbox.runQualityLink')}</a>
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+            {t('reviewInbox.automationStatusHint')}
+          </div>
+        )}
       </div>
 
       {error && (

@@ -1,5 +1,6 @@
 import React from 'react';
 import { SectionKey } from '../types.js';
+import { RETAIN_MISSION_PRESETS, labelRetainMissionPreset } from '../../../utils/missionPresets.js';
 
 interface SieveSectionProps {
   config: any;
@@ -64,6 +65,18 @@ export default function SieveSection({
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('settings.retainMissionLabel')}</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: 10 }}>
           {t('settings.retainMissionDesc')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          {RETAIN_MISSION_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className="btn"
+              onClick={() => onMissionDraftChange(preset)}
+            >
+              {labelRetainMissionPreset(preset)}
+            </button>
+          ))}
         </div>
         <textarea
           aria-label={t('settings.retainMissionLabel')}

@@ -1,14 +1,16 @@
 {
   "name": "cortex",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Cortex - Universal AI Agent Memory Service",
   "scripts": {
     "dev": "pnpm --filter @cortex/server dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "smoke:v2": "node scripts/smoke-v2.mjs"
+    "smoke:v2": "node scripts/smoke-v2.mjs",
+    "recall-eval:v2": "node scripts/recall-eval-v2.mjs",
+    "release:gate:v2": "node scripts/release-gate-v2.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

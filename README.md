@@ -6,6 +6,8 @@
 <p align="center"><strong>Your AI forgets. Cortex doesn't.</strong></p>
 <p align="center"><sub>Memory that lives, learns, and recalls.</sub></p>
 
+> Cortex V2.0 is the product-ready release line: `/review-inbox` is the default entry, `/quality` runs recall quality probes, and `pnpm release:gate:v2` is the local release gate.
+
 <p align="center">
   <a href="https://github.com/fcki1984/cortex/releases"><img src="https://img.shields.io/github/v/release/fcki1984/cortex?style=flat-square&color=6366f1" alt="Release" /></a>
   <a href="https://github.com/fcki1984/cortex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/fcki1984/cortex?style=flat-square" alt="License" /></a>
@@ -62,6 +64,16 @@ No manual tagging. No "save this." It just works.
 | **Cost** | ~$0.55/mo | $99+/mo | $49+/mo | Varies |
 
 ## Key Features
+
+### Cortex V2.0 Product Loop
+
+Cortex V2.0 closes the loop from automatic memory extraction to recall validation:
+
+- `/review-inbox` is the default product entry for human review of uncertain candidates.
+- Retain mission lets global settings or agent overrides route durable candidates to keep, review, or drop without changing truth classification.
+- `/quality` runs isolated probe-agent recall checks for location, organization, language preference, task state, note-only negative, and newest-winner scenarios.
+- `pnpm recall-eval:v2` and `pnpm release:gate:v2` are the release checks for recall quality and full V2.0 readiness.
+- OpenClaw remains an independent host-side signoff boundary and does not block Cortex core V2.0 when the core gate passes.
 
 ### 🧬 V2 Record Model + Note Retention
 V2 separates durable truth from disposable session context.

@@ -4,6 +4,7 @@
  */
 
 import { createLogger } from '../utils/logger.js';
+import { CURRENT_VERSION } from '../utils/version.js';
 
 const log = createLogger('mcp');
 
@@ -203,7 +204,7 @@ export class MCPServer {
           result: {
             protocolVersion: '2024-11-05',
             capabilities: { tools: {} },
-            serverInfo: { name: 'cortex', version: '0.1.0' },
+            serverInfo: { name: 'cortex', version: CURRENT_VERSION },
           },
         };
 

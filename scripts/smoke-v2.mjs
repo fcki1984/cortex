@@ -222,6 +222,7 @@ async function runRound(round) {
   const reviewFollowupMismatchAgentId = `${probeAgentId}-review-followup-mismatch`;
   const priorityMissionAgentId = `${probeAgentId}-mission-priority-task`;
   const missionKeyedAgentId = `${probeAgentId}-mission-language-org`;
+  const recallQualityAgentId = `${probeAgentId}-recall-quality`;
   const cleanupAgentIds = [
     probeAgentId,
     roundtripSourceAgentId,
@@ -264,6 +265,7 @@ async function runRound(round) {
     reviewFollowupMismatchAgentId,
     priorityMissionAgentId,
     missionKeyedAgentId,
+    recallQualityAgentId,
   ];
   const tooLongAgentIds = cleanupAgentIds.filter((agentId) => agentId.length > MAX_AGENT_ID_LENGTH);
   assert(
@@ -355,6 +357,60 @@ async function runRound(round) {
     assert(recall.response.status === 200, `POST /api/v2/recall returned ${recall.response.status}`);
     assert(typeof recall.json?.context === 'string', 'v2 recall did not return context');
     logStep('v2 REST', 'records, ingest, recall all passed');
+
+    const recallQualityLocationSeed = await request('seed recall quality location fact', 'POST', '/api/v2/records', {
+      body: {
+        kind: 'fact_slot',
+        content: '我住大阪',
+        agent_id: recallQualityAgentId,
+      },
+    });
+    assert(recallQualityLocationSeed.response.status === 201, `POST /api/v2/records recall quality location returned ${recallQualityLocationSeed.response.status}`);
+
+    const recallQualityRuleSeed = await request('seed recall quality unrelated rule', 'POST', '/api/v2/records', {
+      body: {
+        kind: 'profile_rule',
+        content: '请用中文回答',
+        agent_id: recallQualityAgentId,
+      },
+    });
+    assert(recallQualityRuleSeed.response.status === 201, `POST /api/v2/records recall quality rule returned ${recallQualityRuleSeed.response.status}`);
+
+    const recallQualityNoteSeed = await request('seed recall quality speculative note', 'POST', '/api/v2/records', {
+      body: {
+        kind: 'session_note',
+        content: '最近也许会考虑换方案',
+        agent_id: recallQualityAgentId,
+      },
+    });
+    assert(recallQualityNoteSeed.response.status === 201, `POST /api/v2/records recall quality note returned ${recallQualityNoteSeed.response.status}`);
+
+    const recallQualityLocation = await request('recall quality location gate', 'POST', '/api/v2/recall', {
+      body: {
+        query: 'Where does the user live?',
+        agent_id: recallQualityAgentId,
+      },
+    });
+    assert(recallQualityLocation.response.status === 200, `POST /api/v2/recall recall quality location returned ${recallQualityLocation.response.status}`);
+    assert((recallQualityLocation.json?.facts || []).length === 1, 'recall quality location should inject exactly one fact');
+    assert(recallQualityLocation.json?.facts?.[0]?.attribute_key === 'location', 'recall quality location injected wrong fact key');
+    assert(String(recallQualityLocation.json?.context || '').includes('大阪'), 'recall quality location did not inject Osaka fact');
+    assert((recallQualityLocation.json?.rules || []).length === 0, 'recall quality location injected unrelated rules');
+    assert((recallQualityLocation.json?.session_notes || []).length === 0, 'recall quality location injected unrelated session note');
+    assert(!String(recallQualityLocation.json?.context || '').includes('中文'), 'recall quality location context included unrelated language rule');
+    logStep('recall quality location gate', 'passed');
+
+    const recallQualityNoteOnly = await request('recall quality note-only gate', 'POST', '/api/v2/recall', {
+      body: {
+        query: '最近是否要换方案？',
+        agent_id: recallQualityAgentId,
+      },
+    });
+    assert(recallQualityNoteOnly.response.status === 200, `POST /api/v2/recall recall quality note-only returned ${recallQualityNoteOnly.response.status}`);
+    assert(recallQualityNoteOnly.json?.context === '', 'recall quality note-only should not inject context');
+    assert((recallQualityNoteOnly.json?.session_notes || []).length === 0, 'recall quality note-only injected session notes');
+    assert(recallQualityNoteOnly.json?.meta?.reason === 'low_relevance', 'recall quality note-only should return reason=low_relevance');
+    logStep('recall quality note-only gate', 'passed');
 
     const compoundWrite = await request('reject compound public record write', 'POST', '/api/v2/records', {
       body: {

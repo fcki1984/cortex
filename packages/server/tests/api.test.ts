@@ -78,7 +78,7 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.status).toBe('ok');
-      expect(body.version).toBe('1.0.0');
+      expect(body.version).toBe('2.0.0');
       expect(body.github).toBe('https://github.com/fcki1984/cortex');
       expect(body.latestRelease).toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();

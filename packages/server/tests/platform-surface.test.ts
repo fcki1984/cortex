@@ -8,8 +8,15 @@ const DOCKERFILE = path.join(ROOT, 'Dockerfile');
 const README = path.join(ROOT, 'README.md');
 const README_ZH = path.join(ROOT, 'README.zh-CN.md');
 const RELEASE_PLAN = path.join(ROOT, 'RELEASE_TEST_PLAN.md');
+const CHANGELOG = path.join(ROOT, 'CHANGELOG.md');
+const ROOT_PACKAGE = path.join(ROOT, 'package.json');
+const SERVER_PACKAGE = path.join(ROOT, 'packages/server/package.json');
+const DASHBOARD_PACKAGE = path.join(ROOT, 'packages/dashboard/package.json');
+const DASHBOARD_APP = path.join(ROOT, 'packages/dashboard/src/App.tsx');
 const SERVER_INDEX = path.join(ROOT, 'packages/server/src/index.ts');
 const SMOKE_SCRIPT = path.join(ROOT, 'scripts/smoke-v2.mjs');
+const RECALL_EVAL_SCRIPT = path.join(ROOT, 'scripts/recall-eval-v2.mjs');
+const RELEASE_GATE_SCRIPT = path.join(ROOT, 'scripts/release-gate-v2.mjs');
 
 describe('Platform surface migration', () => {
   it('moves the OpenClaw bridge off legacy v1 endpoints', () => {
@@ -53,6 +60,47 @@ describe('Platform surface migration', () => {
     }
   });
 
+  it('publishes the V2.0 release surface with versioned gates and docs', () => {
+    const rootPackage = JSON.parse(fs.readFileSync(ROOT_PACKAGE, 'utf8'));
+    const serverPackage = JSON.parse(fs.readFileSync(SERVER_PACKAGE, 'utf8'));
+    const dashboardPackage = JSON.parse(fs.readFileSync(DASHBOARD_PACKAGE, 'utf8'));
+    const readme = fs.readFileSync(README, 'utf8');
+    const readmeZh = fs.readFileSync(README_ZH, 'utf8');
+    const releasePlan = fs.readFileSync(RELEASE_PLAN, 'utf8');
+    const dashboardApp = fs.readFileSync(DASHBOARD_APP, 'utf8');
+
+    expect(rootPackage.version).toBe('2.0.0');
+    expect(serverPackage.version).toBe('2.0.0');
+    expect(dashboardPackage.version).toBe('2.0.0');
+    expect(rootPackage.scripts['recall-eval:v2']).toBe('node scripts/recall-eval-v2.mjs');
+    expect(rootPackage.scripts['release:gate:v2']).toBe('node scripts/release-gate-v2.mjs');
+    expect(fs.existsSync(RELEASE_GATE_SCRIPT)).toBe(true);
+    const releaseGate = fs.readFileSync(RELEASE_GATE_SCRIPT, 'utf8');
+    expect(releaseGate).toContain('packages/server');
+    expect(releaseGate).toContain('packages/dashboard');
+    expect(releaseGate).toContain('CORTEX_DB_PATH');
+    expect(releaseGate).toContain('CORTEX_LLM_EXTRACTION_PROVIDER');
+    expect(releaseGate).toContain('SMOKE_ROUNDS');
+    expect(releaseGate).toContain('RECALL_EVAL_ROUNDS');
+    expect(releaseGate).toContain('CORTEX_BASE_URL');
+    expect(releaseGate).toContain('SIGTERM');
+
+    expect(fs.existsSync(CHANGELOG)).toBe(true);
+    expect(fs.readFileSync(CHANGELOG, 'utf8')).toContain('2.0.0');
+    expect(readme).toContain('Cortex V2.0');
+    expect(readme).toContain('/review-inbox');
+    expect(readme).toContain('/quality');
+    expect(readme).toContain('release:gate:v2');
+    expect(readmeZh).toContain('Cortex V2.0');
+    expect(readmeZh).toContain('/review-inbox');
+    expect(readmeZh).toContain('/quality');
+    expect(readmeZh).toContain('release:gate:v2');
+    expect(releasePlan).toContain('Cortex V2.0');
+    expect(releasePlan).toContain('recall-eval:v2');
+    expect(releasePlan).toContain('OpenClaw');
+    expect(dashboardApp).toContain('/quality');
+  });
+
 
   it('initializes Neo4j only behind the legacy runtime gate', () => {
     const serverIndex = fs.readFileSync(SERVER_INDEX, 'utf8');
@@ -94,6 +142,30 @@ describe('Platform surface migration', () => {
     expect(smoke).toContain("'## Fact Slots'");
     expect(releasePlan).toContain('smoke:v2');
     expect(releasePlan).toContain('3');
+  });
+
+  it('ships a dedicated v2 recall eval gate for release validation', () => {
+    expect(fs.existsSync(RECALL_EVAL_SCRIPT)).toBe(true);
+    const recallEval = fs.readFileSync(RECALL_EVAL_SCRIPT, 'utf8');
+    const smoke = fs.readFileSync(SMOKE_SCRIPT, 'utf8');
+
+    expect(recallEval).toContain('RECALL_EVAL_ROUNDS');
+    expect(recallEval).toContain('CORTEX_BASE_URL');
+    expect(recallEval).toContain('/api/v2/recall');
+    expect(recallEval).toContain('/api/v2/records');
+    expect(recallEval).toContain('/api/v2/relation-candidates');
+    expect(recallEval).toContain('/api/v2/relations');
+    expect(recallEval).toContain('Where does the user live?');
+    expect(recallEval).toContain('Where does the user work?');
+    expect(recallEval).toContain('How should you answer?');
+    expect(recallEval).toContain('What is the current task?');
+    expect(recallEval).toContain('最近是否要换方案？');
+    expect(recallEval).toContain("reason === 'low_relevance'");
+    expect(recallEval).toContain('cleanup records');
+    expect(recallEval).toContain('delete probe agent');
+
+    expect(smoke).toContain('recall quality location gate');
+    expect(smoke).toContain('recall quality note-only gate');
   });
 
   it('keeps smoke preview winner assertions aligned with canonical durable phrasing', () => {

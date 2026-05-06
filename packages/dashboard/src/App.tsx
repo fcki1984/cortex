@@ -12,6 +12,7 @@ import ExtractionLogs from './pages/ExtractionLogs.js';
 import SystemLogs from './pages/SystemLogs.js';
 import ImportExport from './pages/ImportExport.js';
 import ReviewInbox from './pages/ReviewInbox.js';
+import QualityCenter from './pages/QualityCenter.js';
 import { listRecordsV2, verifyToken, setStoredToken, getStoredToken, clearStoredToken, getHealth, getAuthStatus, setupAuthToken } from './api/client.js';
 import { I18nProvider, useI18n } from './i18n/index.js';
 import type { Locale } from './i18n/index.js';
@@ -508,6 +509,7 @@ function AppContent() {
         )}
         <nav onClick={() => setSidebarOpen(false)}>
           <NavLink to="/review-inbox" end className={({ isActive }) => isActive ? 'active' : ''}>📥 {t('nav.reviewInbox')}</NavLink>
+          <NavLink to="/quality" className={({ isActive }) => isActive ? 'active' : ''}>✅ {t('nav.quality')}</NavLink>
           <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'active' : ''}>📊 {t('nav.dashboard')}</NavLink>
           <NavLink to="/memories" className={({ isActive }) => isActive ? 'active' : ''}>🗂️ {t('nav.memories')}</NavLink>
           <NavLink to="/agents" className={({ isActive }) => isActive ? 'active' : ''}>🤖 {t('nav.agents')}</NavLink>
@@ -547,6 +549,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Navigate to="/review-inbox" replace />} />
           <Route path="/review-inbox" element={<ReviewInbox />} />
+          <Route path="/quality" element={<QualityCenter />} />
           <Route path="/dashboard" element={<Stats />} />
           <Route path="/memories" element={<MemoryBrowser />} />
           <Route path="/agents" element={<Agents />} />

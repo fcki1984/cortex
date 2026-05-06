@@ -30,6 +30,9 @@ vi.mock('./pages/Stats.js', () => ({
 vi.mock('./pages/ReviewInbox.js', () => ({
   default: () => <div>Review Inbox Page</div>,
 }));
+vi.mock('./pages/QualityCenter.js', () => ({
+  default: () => <div>Quality Center Page</div>,
+}));
 vi.mock('./pages/MemoryBrowser.js', () => ({
   default: () => <div>Memory Browser Page</div>,
 }));
@@ -72,7 +75,7 @@ describe('App routing', () => {
     apiMocks.verifyToken.mockResolvedValue({ valid: true });
     apiMocks.getStoredToken.mockReturnValue(null);
     apiMocks.getHealth.mockResolvedValue({
-      version: '1.0.0',
+      version: '2.0.0',
       github: 'https://github.com/example/repo',
       latestRelease: null,
     });
@@ -90,5 +93,15 @@ describe('App routing', () => {
 
     expect(await screen.findByText('Review Inbox Page')).toBeTruthy();
     expect(screen.queryByText('Stats Page')).toBeNull();
+  });
+
+  it('exposes the V2.0 quality center route and version in navigation', async () => {
+    window.history.pushState({}, '', '/quality');
+
+    render(<App />);
+
+    expect(await screen.findByText('Quality Center Page')).toBeTruthy();
+    expect(await screen.findByText('v2.0.0')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /质量中心/ })).toBeTruthy();
   });
 });

@@ -1281,6 +1281,118 @@ describe('API V2 Integration', () => {
     expect(taskBody.task_state[0]?.content).toContain('重构 Cortex recall');
   });
 
+  it('keeps recall quality precise for mixed durable and note data through the public API', async () => {
+    const agentId = 'api-recall-quality-matrix';
+    const seeds = [
+      { content: '我住大阪', kind: 'fact_slot' },
+      { content: '我在 OpenAI 工作', kind: 'fact_slot' },
+      { content: '请用中文回答', kind: 'profile_rule' },
+      { content: '当前任务是重构 Cortex recall', kind: 'task_state' },
+      { content: '最近也许会考虑换方案', kind: 'session_note' },
+    ];
+
+    for (const seed of seeds) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v2/records',
+        payload: {
+          agent_id: agentId,
+          ...seed,
+        },
+      });
+      expect(response.statusCode).toBe(201);
+    }
+
+    const location = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user live?', agent_id: agentId },
+    });
+    expect(location.statusCode).toBe(200);
+    const locationBody = JSON.parse(location.payload);
+    expect(locationBody.facts.map((item: any) => item.attribute_key)).toEqual(['location']);
+    expect(locationBody.facts[0]?.content).toContain('大阪');
+    expect(locationBody.rules).toHaveLength(0);
+    expect(locationBody.task_state).toHaveLength(0);
+    expect(locationBody.session_notes).toHaveLength(0);
+    expect(locationBody.context).not.toContain('OpenAI');
+    expect(locationBody.context).not.toContain('中文');
+    expect(locationBody.context).not.toContain('重构 Cortex recall');
+    expect(locationBody.meta.normalized_intents.attributes).toContain('location');
+    expect(locationBody.meta.relevance_basis).toHaveLength(1);
+    expect(locationBody.meta.relevance_basis[0]).toEqual(expect.objectContaining({
+      kind: 'fact_slot',
+      intent_match: expect.arrayContaining(['attribute:location']),
+    }));
+
+    const organization = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'Where does the user work?', agent_id: agentId },
+    });
+    expect(organization.statusCode).toBe(200);
+    const organizationBody = JSON.parse(organization.payload);
+    expect(organizationBody.facts.map((item: any) => item.attribute_key)).toEqual(['organization']);
+    expect(organizationBody.facts[0]?.content).toContain('OpenAI');
+    expect(organizationBody.rules).toHaveLength(0);
+    expect(organizationBody.task_state).toHaveLength(0);
+    expect(organizationBody.session_notes).toHaveLength(0);
+    expect(organizationBody.context).not.toContain('大阪');
+    expect(organizationBody.meta.normalized_intents.attributes).toContain('organization');
+
+    const relationCandidates = await app.inject({
+      method: 'GET',
+      url: `/api/v2/relation-candidates?agent_id=${agentId}&status=pending`,
+    });
+    expect(relationCandidates.statusCode).toBe(200);
+    expect(JSON.parse(relationCandidates.payload).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: 'works_at', object_key: 'openai' }),
+    ]));
+
+    const language = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'How should you answer?', agent_id: agentId },
+    });
+    expect(language.statusCode).toBe(200);
+    const languageBody = JSON.parse(language.payload);
+    expect(languageBody.rules.map((item: any) => item.attribute_key)).toEqual(['language_preference']);
+    expect(languageBody.rules[0]?.content).toContain('中文');
+    expect(languageBody.facts).toHaveLength(0);
+    expect(languageBody.task_state).toHaveLength(0);
+    expect(languageBody.session_notes).toHaveLength(0);
+    expect(languageBody.meta.normalized_intents.attributes).toContain('language_preference');
+
+    const task = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: 'What is the current task?', agent_id: agentId },
+    });
+    expect(task.statusCode).toBe(200);
+    const taskBody = JSON.parse(task.payload);
+    expect(taskBody.task_state.map((item: any) => item.state_key)).toEqual(['refactor_status']);
+    expect(taskBody.task_state[0]?.content).toContain('重构 Cortex recall');
+    expect(taskBody.rules).toHaveLength(0);
+    expect(taskBody.facts).toHaveLength(0);
+    expect(taskBody.session_notes).toHaveLength(0);
+    expect(taskBody.meta.normalized_intents.states).toContain('current_task');
+
+    const noteOnly = await app.inject({
+      method: 'POST',
+      url: '/api/v2/recall',
+      payload: { query: '最近是否要换方案？', agent_id: agentId },
+    });
+    expect(noteOnly.statusCode).toBe(200);
+    const noteOnlyBody = JSON.parse(noteOnly.payload);
+    expect(noteOnlyBody.context).toBe('');
+    expect(noteOnlyBody.rules).toHaveLength(0);
+    expect(noteOnlyBody.facts).toHaveLength(0);
+    expect(noteOnlyBody.task_state).toHaveLength(0);
+    expect(noteOnlyBody.session_notes).toHaveLength(0);
+    expect(noteOnlyBody.meta.reason).toBe('low_relevance');
+    expect(noteOnlyBody.meta.relevance_basis).toEqual([]);
+  });
+
   it('exposes MCP endpoint metadata on GET /mcp', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -1294,6 +1406,25 @@ describe('API V2 Integration', () => {
     expect(payload.endpoints.compat_jsonrpc_post).toBe('/mcp/message');
     expect(payload.endpoints.sse).toBe('/mcp/sse');
     expect(payload.endpoints.tools).toBe('/mcp/tools');
+  });
+
+  it('reports the package version through MCP initialize serverInfo', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/mcp/message',
+      payload: {
+        jsonrpc: '2.0',
+        id: 20,
+        method: 'initialize',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.result?.serverInfo).toEqual({
+      name: 'cortex',
+      version: '2.0.0',
+    });
   });
 
   it('exposes MCP tools metadata on GET /mcp/tools with trace headers', async () => {
